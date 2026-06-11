@@ -22,7 +22,6 @@ use diag::Diag;
 
 /// Exit codes per PRD §9.
 const EXIT_OK: u8 = 0;
-#[allow(dead_code)]
 const EXIT_STEP_ERROR: u8 = 1;
 const EXIT_VALIDATION: u8 = 2;
 #[allow(dead_code)]
@@ -96,6 +95,26 @@ enum Command {
     Init { dir: PathBuf },
     /// Print version information.
     Version,
+    /// (internal) Run one gatherer and print its value as JSON.
+    /// Part of the in-container test protocol.
+    #[command(name = "__gather", hide = true)]
+    GatherOne {
+        playbook_dir: PathBuf,
+        /// Gatherer key as `package.gatherer`.
+        gatherer: String,
+        /// Gatherer params as a JSON object.
+        #[arg(long, value_name = "JSON")]
+        params_json: Option<String>,
+    },
+    /// (internal) Compile and run a verify script against the host API.
+    /// Part of the in-container test protocol.
+    #[command(name = "__verify", hide = true)]
+    RunVerify {
+        script: PathBuf,
+        /// JSON file with the facts map passed to verify().
+        #[arg(long, value_name = "PATH")]
+        facts: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -135,6 +154,12 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Command::GatherOne {
+            playbook_dir,
+            gatherer,
+            params_json,
+        } => cmd_gather_one(playbook_dir, gatherer, params_json.as_deref()),
+        Command::RunVerify { script, facts } => cmd_run_verify(script, facts.as_deref()),
         Command::Init { dir } => match scaffold::init(dir) {
             Ok(()) => {
                 println!(
@@ -248,6 +273,164 @@ fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode) -> u8 {
         Err(diags) => {
             print_diags(&diags);
             EXIT_VALIDATION
+        }
+    }
+}
+
+/// `__gather`: run one gatherer of a validated playbook and print
+/// `{"ok":true,"value":…}` / `{"ok":false,"error":…}` on stdout. The
+/// testlab runner execs this inside the container; host-runnable too.
+fn cmd_gather_one(dir: &std::path::Path, gatherer: &str, params_json: Option<&str>) -> u8 {
+    fn fail(error: String) -> u8 {
+        println!("{}", serde_json::json!({ "ok": false, "error": error }));
+        EXIT_OK // protocol succeeded; the JSON carries the outcome
+    }
+
+    let pb = match load_validated(dir) {
+        Ok(pb) => pb,
+        Err(diags) => {
+            print_diags(&diags);
+            return EXIT_VALIDATION;
+        }
+    };
+    let Some((pkg, gname)) = gatherer.split_once('.') else {
+        return fail(format!(
+            "gatherer must be 'package.gatherer', got '{gatherer}'"
+        ));
+    };
+    let Some(decl_params) = pb
+        .packages
+        .get(pkg)
+        .and_then(|p| p.gatherers.get(gname))
+        .map(|g| g.params.clone())
+    else {
+        return fail(format!("no gatherer '{gatherer}' in the playbook"));
+    };
+
+    let mut params = std::collections::HashMap::new();
+    if let Some(json) = params_json {
+        let parsed: serde_json::Value = match serde_json::from_str(json) {
+            Ok(v) => v,
+            Err(e) => return fail(format!("invalid --params-json: {e}")),
+        };
+        match convert::json_to_dyn(&parsed) {
+            Ok(wisp_std::DynValue::Map(m)) => params.extend(m),
+            Ok(_) => return fail("--params-json must be a JSON object".into()),
+            Err(e) => return fail(format!("invalid --params-json: {e}")),
+        }
+    }
+    if let Err(es) = engine::gather::apply_param_defaults(&mut params, &decl_params) {
+        return fail(format!("gatherer '{gatherer}': {}", es.join("; ")));
+    }
+
+    let ctx = hostapi::context();
+    let scripts = match engine::scripts::compile_all(&pb, &ctx) {
+        Ok(s) => s,
+        Err(diags) => {
+            print_diags(&diags);
+            return EXIT_VALIDATION;
+        }
+    };
+    match engine::gather::run_single(&scripts, &ctx, gatherer, wisp_std::DynValue::Map(params)) {
+        Ok(value) => {
+            println!(
+                "{}",
+                serde_json::json!({ "ok": true, "value": convert::dyn_to_json(&value) })
+            );
+            EXIT_OK
+        }
+        Err(e) => fail(e),
+    }
+}
+
+/// `__verify`: compile a wisp verify script against the host API and run
+/// `verify(facts)`. Exit 0 = passed, 1 = failed (message on stdout),
+/// 2 = the script is broken. The testlab runner execs this inside the
+/// container; host-runnable too.
+fn cmd_run_verify(script: &std::path::Path, facts: Option<&std::path::Path>) -> u8 {
+    use wisp::UnitExt;
+    use wisp_std::DynValue;
+
+    let source = match std::fs::read_to_string(script) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {e}", script.display());
+            return EXIT_VALIDATION;
+        }
+    };
+    let ctx = hostapi::context();
+    let unit = match ctx.compile(&source) {
+        Ok(u) => u,
+        Err(wisp::Error::Compile(ds)) => {
+            print_diags(&Diag::from_wisp(&ds, script, &source));
+            return EXIT_VALIDATION;
+        }
+        Err(e) => {
+            eprintln!("error: {}: {e}", script.display());
+            return EXIT_VALIDATION;
+        }
+    };
+
+    let facts_value = match facts {
+        Some(path) => {
+            let json = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: cannot read {}: {e}", path.display());
+                    return EXIT_VALIDATION;
+                }
+            };
+            let parsed: serde_json::Value = match serde_json::from_str(&json) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("error: invalid facts file {}: {e}", path.display());
+                    return EXIT_VALIDATION;
+                }
+            };
+            match convert::json_to_dyn(&parsed) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("error: invalid facts file {}: {e}", path.display());
+                    return EXIT_VALIDATION;
+                }
+            }
+        }
+        None => DynValue::Map(std::collections::HashMap::new()),
+    };
+
+    let _worker = hostapi::worker_init();
+    let mut vm = wisp::Vm::new(&ctx);
+    let outcome: Result<bool, String> = if unit.fn_handle::<(DynValue,), bool>("verify").is_ok() {
+        vm.call_unit(&unit, "verify", (facts_value,))
+            .map_err(|e| e.to_string())
+    } else if unit
+        .fn_handle::<(DynValue,), Result<bool, String>>("verify")
+        .is_ok()
+    {
+        vm.call_unit::<_, Result<bool, String>>(&unit, "verify", (facts_value,))
+            .map_err(|e| e.to_string())
+            .and_then(|r| r)
+    } else {
+        eprintln!(
+            "error: {} does not satisfy the 'verify' contract: \
+                 fn verify(facts: Value) -> bool (or Result[bool, string])",
+            script.display()
+        );
+        return EXIT_VALIDATION;
+    };
+
+    match outcome {
+        Ok(true) => {
+            println!("verify passed");
+            EXIT_OK
+        }
+        Ok(false) => {
+            println!("verify failed");
+            EXIT_STEP_ERROR
+        }
+        Err(e) => {
+            println!("verify failed: {e}");
+            EXIT_STEP_ERROR
         }
     }
 }

@@ -81,6 +81,53 @@ pub fn dyn_to_wcl(v: &DynValue) -> WclValue {
     }
 }
 
+/// wisp → JSON, for the in-container test protocol (`__gather` output,
+/// verify facts files).
+pub fn dyn_to_json(v: &DynValue) -> serde_json::Value {
+    match v {
+        DynValue::Null => serde_json::Value::Null,
+        DynValue::Bool(b) => serde_json::Value::Bool(*b),
+        DynValue::Int(n) => serde_json::Value::Number((*n).into()),
+        DynValue::Float(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        DynValue::String(s) => serde_json::Value::String(s.clone()),
+        DynValue::List(items) => serde_json::Value::Array(items.iter().map(dyn_to_json).collect()),
+        DynValue::Map(m) => {
+            serde_json::Value::Object(m.iter().map(|(k, v)| (k.clone(), dyn_to_json(v))).collect())
+        }
+    }
+}
+
+/// JSON → wisp. Fails on numbers outside the script range.
+pub fn json_to_dyn(v: &serde_json::Value) -> Result<DynValue, String> {
+    Ok(match v {
+        serde_json::Value::Null => DynValue::Null,
+        serde_json::Value::Bool(b) => DynValue::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                DynValue::Int(i)
+            } else if let Some(f) = n.as_f64() {
+                DynValue::Float(f)
+            } else {
+                return Err(format!("number {n} exceeds the script range"));
+            }
+        }
+        serde_json::Value::String(s) => DynValue::String(s.clone()),
+        serde_json::Value::Array(items) => DynValue::List(
+            items
+                .iter()
+                .map(json_to_dyn)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        serde_json::Value::Object(m) => DynValue::Map(
+            m.iter()
+                .map(|(k, v)| Ok((k.clone(), json_to_dyn(v)?)))
+                .collect::<Result<HashMap<_, _>, String>>()?,
+        ),
+    })
+}
+
 /// Canonical text form of a `DynValue`, used to deduplicate gatherer
 /// invocations by `(gatherer, canonicalised params)`. Map keys are sorted.
 pub fn canonicalise(v: &DynValue) -> String {

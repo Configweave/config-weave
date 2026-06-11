@@ -364,6 +364,141 @@ fn duplicate_test_name_fails() {
     assert!(stderr.contains("duplicate test 'converges'"), "{stderr}");
 }
 
+// ------------------------------------------------- in-container protocol
+// `__gather` and `__verify` are what the testlab runner execs inside the
+// container; both are host-runnable, so they test without docker.
+
+#[test]
+fn gather_one_prints_value_json() {
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+    let (code, stdout, stderr) = run(&["__gather", dir.path().to_str().unwrap(), "tlab.os_info"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&stdout);
+    assert_eq!(v["ok"], true, "{stdout}");
+    assert!(v["value"]["family"].is_string(), "{stdout}");
+    assert!(v["value"]["cpus"].is_i64(), "{stdout}");
+}
+
+#[test]
+fn gather_one_unknown_gatherer_reports_error_json() {
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+    let (code, stdout, _) = run(&["__gather", dir.path().to_str().unwrap(), "tlab.nope"]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&stdout);
+    assert_eq!(v["ok"], false, "{stdout}");
+    assert!(
+        v["error"].as_str().unwrap().contains("tlab.nope"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn gather_one_rejects_bad_params_json() {
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+    let (code, stdout, _) = run(&[
+        "__gather",
+        dir.path().to_str().unwrap(),
+        "tlab.os_info",
+        "--params-json",
+        "[1,2]",
+    ]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&stdout);
+    assert_eq!(v["ok"], false, "{stdout}");
+    assert!(
+        v["error"].as_str().unwrap().contains("JSON object"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn run_verify_passes_and_fails_on_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("checked.txt");
+    let script = dir.path().join("verify.wisp");
+    std::fs::write(
+        &script,
+        format!(
+            r#"use value
+use fs
+
+fn verify(facts: Value) -> Result[bool, string] {{
+    Ok(fs::read("{}")? == "expected")
+}}
+"#,
+            target.display()
+        ),
+    )
+    .unwrap();
+
+    // No file yet: fs::read errors → verify fails with the message.
+    let (code, stdout, _) = run(&["__verify", script.to_str().unwrap()]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(stdout.contains("verify failed"), "{stdout}");
+
+    std::fs::write(&target, "expected").unwrap();
+    let (code, stdout, _) = run(&["__verify", script.to_str().unwrap()]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(stdout.contains("verify passed"), "{stdout}");
+
+    std::fs::write(&target, "unexpected").unwrap();
+    let (code, stdout, _) = run(&["__verify", script.to_str().unwrap()]);
+    assert_eq!(code, 1, "{stdout}");
+}
+
+#[test]
+fn run_verify_reads_facts_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("verify.wisp");
+    std::fs::write(
+        &script,
+        r#"use value
+
+fn verify(facts: Value) -> bool {
+    if let Some(os) = facts.get("os") {
+        if let Some(family) = os.get("family") {
+            return family.as_string() == Some("linux")
+        }
+    }
+    false
+}
+"#,
+    )
+    .unwrap();
+    let facts = dir.path().join("facts.json");
+    std::fs::write(&facts, r#"{"os":{"family":"linux"}}"#).unwrap();
+
+    let (code, stdout, stderr) = run(&[
+        "__verify",
+        script.to_str().unwrap(),
+        "--facts",
+        facts.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "stdout: {stdout} stderr: {stderr}");
+
+    std::fs::write(&facts, r#"{"os":{"family":"windows"}}"#).unwrap();
+    let (code, _, _) = run(&[
+        "__verify",
+        script.to_str().unwrap(),
+        "--facts",
+        facts.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn run_verify_bad_contract_exits_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("verify.wisp");
+    std::fs::write(&script, "fn nothing() -> bool { true }\n").unwrap();
+    let (code, _, stderr) = run(&["__verify", script.to_str().unwrap()]);
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("verify"), "{stderr}");
+}
+
 #[test]
 fn duplicate_step_name_in_test_fails() {
     let dir = fixture_with(|s| {

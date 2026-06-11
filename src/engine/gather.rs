@@ -115,29 +115,7 @@ pub fn run(
         let handles: Vec<_> = unique
             .iter()
             .map(|(key, params, _)| {
-                let gatherer = scripts.gatherers.get(key);
-                scope.spawn(move || -> Result<DynValue, String> {
-                    let Some(g) = gatherer else {
-                        return Err(format!("no compiled gatherer '{key}'"));
-                    };
-                    let _worker = crate::hostapi::worker_init();
-                    crate::logging::install_gatherer_sink(key);
-                    let mut vm = Vm::new(ctx);
-                    let outcome: Result<DynValue, String> = match g.gather {
-                        EntryKind::Plain => vm
-                            .call_unit(&g.unit, "gather", (params.clone(),))
-                            .map_err(|e| e.to_string()),
-                        EntryKind::Fallible => vm
-                            .call_unit::<_, Result<DynValue, String>>(
-                                &g.unit,
-                                "gather",
-                                (params.clone(),),
-                            )
-                            .map_err(|e| e.to_string())
-                            .and_then(|r| r),
-                    };
-                    outcome
-                })
+                scope.spawn(move || run_single(scripts, ctx, key, params.clone()))
             })
             .collect();
         handles
@@ -171,6 +149,32 @@ pub fn run(
     }
 
     if diags.is_empty() { Ok(()) } else { Err(diags) }
+}
+
+/// Run one gatherer on a fresh VM: the per-execution body of the gather
+/// phase, also driven directly by the `__gather` test-protocol
+/// subcommand.
+pub fn run_single(
+    scripts: &ScriptSet,
+    ctx: &wisp::Context,
+    key: &str,
+    params: DynValue,
+) -> Result<DynValue, String> {
+    let Some(g) = scripts.gatherers.get(key) else {
+        return Err(format!("no compiled gatherer '{key}'"));
+    };
+    let _worker = crate::hostapi::worker_init();
+    crate::logging::install_gatherer_sink(key);
+    let mut vm = Vm::new(ctx);
+    match g.gather {
+        EntryKind::Plain => vm
+            .call_unit(&g.unit, "gather", (params,))
+            .map_err(|e| e.to_string()),
+        EntryKind::Fallible => vm
+            .call_unit::<_, Result<DynValue, String>>(&g.unit, "gather", (params,))
+            .map_err(|e| e.to_string())
+            .and_then(|r| r),
+    }
 }
 
 /// Fill in declared defaults and enforce required/type at run time.
