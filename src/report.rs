@@ -234,61 +234,75 @@ fn summary_line(report: &RunReport) -> String {
 
 // ----------------------------------------------------------------- json
 
+// The `--json` object is schema-stable (PRD §11) and consumed by test
+// harnesses — including config-weave itself: the testlab runner parses
+// reports produced inside containers with these same types, so the
+// schema stays single-sourced.
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct JsonRunStep {
+    pub name: String,
+    pub container_path: Vec<String>,
+    pub resource: String,
+    /// `StepStatus::id()` form, e.g. "already_configured".
+    pub status: String,
+    pub message: Option<String>,
+    pub duration_secs: f64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct JsonRunGather {
+    pub name: String,
+    pub gatherer: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct JsonRunReport {
+    pub playbook: String,
+    pub version: String,
+    pub play: String,
+    pub mode: String,
+    pub exit_code: u8,
+    pub duration_secs: f64,
+    pub gathered: Vec<JsonRunGather>,
+    pub steps: Vec<JsonRunStep>,
+}
+
+impl JsonRunReport {
+    pub fn from_report(report: &RunReport) -> JsonRunReport {
+        JsonRunReport {
+            playbook: report.playbook.clone(),
+            version: report.version.clone(),
+            play: report.play.clone(),
+            mode: report.mode.as_str().to_string(),
+            exit_code: report.exit_code(),
+            duration_secs: report.duration.as_secs_f64(),
+            gathered: report
+                .gathered
+                .iter()
+                .map(|g| JsonRunGather {
+                    name: g.name.clone(),
+                    gatherer: g.gatherer.clone(),
+                })
+                .collect(),
+            steps: report
+                .steps
+                .iter()
+                .map(|s| JsonRunStep {
+                    name: s.name.clone(),
+                    container_path: s.container_path.clone(),
+                    resource: s.resource.clone(),
+                    status: s.status.id().to_string(),
+                    message: s.message.clone(),
+                    duration_secs: s.duration.as_secs_f64(),
+                })
+                .collect(),
+        }
+    }
+}
+
 /// JSON mode: the single, schema-stable object (PRD §11).
 pub fn json(report: &RunReport) -> String {
-    #[derive(serde::Serialize)]
-    struct JsonStep<'a> {
-        name: &'a str,
-        container_path: &'a [String],
-        resource: &'a str,
-        status: &'static str,
-        message: Option<&'a str>,
-        duration_secs: f64,
-    }
-    #[derive(serde::Serialize)]
-    struct JsonGather<'a> {
-        name: &'a str,
-        gatherer: &'a str,
-    }
-    #[derive(serde::Serialize)]
-    struct JsonReport<'a> {
-        playbook: &'a str,
-        version: &'a str,
-        play: &'a str,
-        mode: &'static str,
-        exit_code: u8,
-        duration_secs: f64,
-        gathered: Vec<JsonGather<'a>>,
-        steps: Vec<JsonStep<'a>>,
-    }
-
-    let value = JsonReport {
-        playbook: &report.playbook,
-        version: &report.version,
-        play: &report.play,
-        mode: report.mode.as_str(),
-        exit_code: report.exit_code(),
-        duration_secs: report.duration.as_secs_f64(),
-        gathered: report
-            .gathered
-            .iter()
-            .map(|g| JsonGather {
-                name: &g.name,
-                gatherer: &g.gatherer,
-            })
-            .collect(),
-        steps: report
-            .steps
-            .iter()
-            .map(|s| JsonStep {
-                name: &s.name,
-                container_path: &s.container_path,
-                resource: &s.resource,
-                status: s.status.id(),
-                message: s.message.as_deref(),
-                duration_secs: s.duration.as_secs_f64(),
-            })
-            .collect(),
-    };
-    serde_json::to_string_pretty(&value).expect("report serialization cannot fail")
+    serde_json::to_string_pretty(&JsonRunReport::from_report(report))
+        .expect("report serialization cannot fail")
 }
