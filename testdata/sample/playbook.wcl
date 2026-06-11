@@ -1,0 +1,57 @@
+playbook "Sample Baseline" {
+  description = "Exercises the model loader, validation and execution"
+  version = "1.0.0"
+
+  gather "os" {
+    description = "Operating system facts"
+    from = "core.os_info"
+  }
+
+  vars {
+    work_root = "/tmp/config-weave-sample"
+    is_linux = os.family == "linux"
+    marker_a = work_root + "/a.txt"
+    marker_b = work_root + "/b.txt"
+  }
+
+  play "baseline" {
+    description = "Create marker files in order"
+
+    step "make-a" {
+      description = "Create the first marker file"
+      resource = "core.file_present"
+      condition = is_linux
+      properties {
+        path = marker_a
+        content = "alpha"
+      }
+    }
+
+    container "secondary" {
+      description = "Files that depend on the first"
+
+      step "make-b" {
+        description = "Create the second marker file"
+        resource = "core.file_present"
+        requires = ["make-a"]
+        properties {
+          path = marker_b
+          content = "beta"
+        }
+      }
+    }
+  }
+
+  play "noop" {
+    description = "A play with nothing to do"
+
+    step "skipped-on-purpose" {
+      description = "Never runs anywhere"
+      resource = "core.file_present"
+      condition = os.family == "plan9"
+      properties {
+        path = "/tmp/never"
+      }
+    }
+  }
+}

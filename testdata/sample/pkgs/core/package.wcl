@@ -1,0 +1,25 @@
+package "core" {
+  description = "Core sample package"
+
+  gatherer "os_info" {
+    description = "Report basic operating system facts"
+    script = "gatherers/os_info.wisp"
+  }
+
+  resource "file_present" {
+    description = "Ensure a file exists with the given content"
+    script = "resources/file_present.wisp"
+    concurrency = "parallel"
+
+    param "path" {
+      description = "Absolute path of the file"
+      type = "string"
+      required = true
+    }
+    param "content" {
+      description = "File content"
+      type = "string"
+      default = ""
+    }
+  }
+}

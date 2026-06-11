@@ -1,0 +1,240 @@
+//! The playbook data model: what `playbook.wcl` and the `package.wcl`
+//! files describe, in plain owned Rust. Loaded once; expression fields
+//! (conditions, properties, gather params, var values) stay *deferred* —
+//! they are evaluated at run time against a freshly opened document with
+//! the generated variables import bound.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use wisp_std::DynValue;
+
+#[derive(Debug)]
+pub struct Playbook {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    /// Playbook directory (contains `playbook.wcl`, `pkgs/`, `lib/`).
+    pub root: PathBuf,
+    /// Raw `playbook.wcl` source.
+    pub source: String,
+    pub gathers: Vec<GatherInvocation>,
+    /// Declared playbook variables, in declaration order. The expression
+    /// text is spliced into the generated vars import verbatim.
+    pub vars: Vec<VarDecl>,
+    pub plays: Vec<Play>,
+    pub packages: BTreeMap<String, Package>,
+}
+
+impl Playbook {
+    pub fn play(&self, name: &str) -> Option<&Play> {
+        self.plays.iter().find(|p| p.name == name)
+    }
+
+    pub fn resource(&self, package: &str, name: &str) -> Option<&ResourceDecl> {
+        self.packages.get(package)?.resources.get(name)
+    }
+
+    pub fn gatherer(&self, package: &str, name: &str) -> Option<&GathererDecl> {
+        self.packages.get(package)?.gatherers.get(name)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GatherInvocation {
+    /// Variable the result lands in (the block label).
+    pub name: String,
+    pub package: String,
+    pub gatherer: String,
+    pub span: (usize, usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct VarDecl {
+    pub name: String,
+    /// Raw expression source text, exactly as written in the `vars` block.
+    pub expr_src: String,
+}
+
+#[derive(Debug)]
+pub struct Play {
+    pub name: String,
+    pub description: String,
+    pub parallel: bool,
+    /// Steps and containers in declaration order.
+    pub items: Vec<PlayItem>,
+}
+
+impl Play {
+    /// All steps in declaration order, flattened through containers.
+    pub fn steps(&self) -> Vec<&Step> {
+        fn walk<'a>(items: &'a [PlayItem], out: &mut Vec<&'a Step>) {
+            for item in items {
+                match item {
+                    PlayItem::Step(s) => out.push(s),
+                    PlayItem::Container(c) => walk(&c.items, out),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.items, &mut out);
+        out
+    }
+}
+
+#[derive(Debug)]
+pub enum PlayItem {
+    Step(Step),
+    Container(Container),
+}
+
+#[derive(Debug)]
+pub struct Container {
+    pub name: String,
+    pub description: String,
+    pub has_condition: bool,
+    pub items: Vec<PlayItem>,
+}
+
+#[derive(Debug)]
+pub struct Step {
+    pub name: String,
+    pub description: String,
+    pub package: String,
+    pub resource: String,
+    pub requires: Vec<String>,
+    /// Step-level concurrency tightening, if declared.
+    pub concurrency: Option<Concurrency>,
+    /// Names of enclosing containers, outermost first. Used to locate the
+    /// step's block at run time and to inherit container conditions.
+    pub container_path: Vec<String>,
+    pub has_condition: bool,
+    pub span: (usize, usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Concurrency {
+    Parallel,
+    Exclusive,
+    Global,
+}
+
+impl Concurrency {
+    pub fn parse(s: &str) -> Option<Concurrency> {
+        match s {
+            "parallel" => Some(Concurrency::Parallel),
+            "exclusive" => Some(Concurrency::Exclusive),
+            "global" => Some(Concurrency::Global),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Concurrency::Parallel => "parallel",
+            Concurrency::Exclusive => "exclusive",
+            Concurrency::Global => "global",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Package {
+    pub name: String,
+    pub description: String,
+    /// Package directory; script paths are relative to it.
+    pub dir: PathBuf,
+    /// Raw `package.wcl` source.
+    pub source: String,
+    pub gatherers: BTreeMap<String, GathererDecl>,
+    pub resources: BTreeMap<String, ResourceDecl>,
+}
+
+#[derive(Debug)]
+pub struct ResourceDecl {
+    pub name: String,
+    pub description: String,
+    /// Absolute path to the resource script.
+    pub script: PathBuf,
+    pub concurrency: Concurrency,
+    pub params: Vec<ParamDecl>,
+}
+
+#[derive(Debug)]
+pub struct GathererDecl {
+    pub name: String,
+    pub description: String,
+    pub script: PathBuf,
+    pub params: Vec<ParamDecl>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParamDecl {
+    pub name: String,
+    pub description: String,
+    pub ty: CoarseType,
+    pub required: bool,
+    pub default: Option<DynValue>,
+}
+
+/// The coarse parameter types the schema system distinguishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoarseType {
+    String,
+    Int,
+    Float,
+    Bool,
+    List,
+    Map,
+}
+
+impl CoarseType {
+    pub fn parse(s: &str) -> Option<CoarseType> {
+        match s {
+            "string" => Some(CoarseType::String),
+            "int" => Some(CoarseType::Int),
+            "float" => Some(CoarseType::Float),
+            "bool" => Some(CoarseType::Bool),
+            "list" => Some(CoarseType::List),
+            "map" => Some(CoarseType::Map),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CoarseType::String => "string",
+            CoarseType::Int => "int",
+            CoarseType::Float => "float",
+            CoarseType::Bool => "bool",
+            CoarseType::List => "list",
+            CoarseType::Map => "map",
+        }
+    }
+
+    /// Coarse match: ints are acceptable where floats are declared.
+    pub fn matches(&self, v: &DynValue) -> bool {
+        matches!(
+            (self, v),
+            (CoarseType::String, DynValue::String(_))
+                | (CoarseType::Int, DynValue::Int(_))
+                | (CoarseType::Float, DynValue::Float(_))
+                | (CoarseType::Float, DynValue::Int(_))
+                | (CoarseType::Bool, DynValue::Bool(_))
+                | (CoarseType::List, DynValue::List(_))
+                | (CoarseType::Map, DynValue::Map(_))
+        )
+    }
+
+    pub fn describe(v: &DynValue) -> &'static str {
+        match v {
+            DynValue::Null => "null",
+            DynValue::Bool(_) => "bool",
+            DynValue::Int(_) => "int",
+            DynValue::Float(_) => "float",
+            DynValue::String(_) => "string",
+            DynValue::List(_) => "list",
+            DynValue::Map(_) => "map",
+        }
+    }
+}

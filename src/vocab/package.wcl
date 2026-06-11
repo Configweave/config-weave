@@ -1,0 +1,43 @@
+// Config Weave package vocabulary (`package.wcl` schema).
+// Served as the system import <weave/package.wcl>; the engine appends the
+// import automatically when opening a package.
+
+@document
+type WeavePackageDoc {
+  @child("package") package: WeavePackage
+}
+
+@block("package")
+type WeavePackage {
+  @inline(0) name: utf8
+  description: utf8
+  @children("gatherer") gatherers: list<WeaveGathererDecl>
+  @children("resource") resources: list<WeaveResourceDecl>
+}
+
+@block("gatherer")
+type WeaveGathererDecl {
+  @inline(0) name: utf8
+  description: utf8
+  script: utf8
+  @children("param") params: list<WeaveParamDecl>
+}
+
+@block("resource")
+type WeaveResourceDecl {
+  @inline(0) name: utf8
+  description: utf8
+  script: utf8
+  @default("parallel") concurrency: utf8
+  @children("param") params: list<WeaveParamDecl>
+}
+
+// One declared parameter: coarse type, requiredness, default, description.
+@block("param")
+type WeaveParamDecl {
+  @inline(0) name: utf8
+  description: utf8
+  type: utf8
+  @default(false) required: bool
+  @schemaless default: utf8?
+}

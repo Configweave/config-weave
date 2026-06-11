@@ -1,0 +1,74 @@
+// Config Weave playbook vocabulary (`playbook.wcl` schema).
+// Served as the system import <weave/playbook.wcl>; the engine appends the
+// import automatically when opening a playbook.
+
+@document
+type WeavePlaybookDoc {
+  @child("playbook") playbook: WeavePlaybook
+}
+
+@block("playbook")
+type WeavePlaybook {
+  @inline(0) name: utf8
+  description: utf8
+  @default("0.0.0") version: utf8
+  @children("gather") gathers: list<WeaveGather>
+  @child("vars") vars: WeaveVars?
+  @children("play") plays: list<WeavePlay>
+}
+
+// Gatherer invocation: the label is the variable the result lands in.
+@block("gather")
+type WeaveGather {
+  @inline(0) name: utf8
+  description: utf8?
+  from: utf8
+  @child("params") params: WeaveParams?
+}
+
+// Free-form parameter map for a gatherer invocation.
+@schemaless
+@block("params")
+type WeaveParams {}
+
+// Playbook variables: each field is a variable declaration. Values may
+// reference gatherer results and other variables.
+@schemaless
+@block("vars")
+type WeaveVars {}
+
+@block("play")
+type WeavePlay {
+  @inline(0) name: utf8
+  description: utf8
+  @default(true) parallel: bool
+  @children("step") steps: list<WeaveStep>
+  @children("container") containers: list<WeaveContainer>
+}
+
+// Containers group steps for organisation and docs. A condition on a
+// container applies to all children.
+@block("container")
+type WeaveContainer {
+  @inline(0) name: utf8
+  description: utf8
+  @schemaless condition: bool?
+  @children("step") steps: list<WeaveStep>
+  @children("container") containers: list<WeaveContainer>
+}
+
+@block("step")
+type WeaveStep {
+  @inline(0) name: utf8
+  description: utf8
+  resource: utf8
+  @schemaless condition: bool?
+  requires: list<utf8>?
+  concurrency: utf8?
+  @child("properties") properties: WeaveProperties?
+}
+
+// Free-form property map validated against the resource's declared params.
+@schemaless
+@block("properties")
+type WeaveProperties {}
