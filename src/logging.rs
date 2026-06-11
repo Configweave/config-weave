@@ -4,6 +4,7 @@
 //! log lines are silently lost on exit.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use tracing::Level;
 
@@ -12,6 +13,18 @@ use crate::hostapi::log as scriptlog;
 
 pub struct LogGuard {
     _appender: Option<tracing_appender::non_blocking::WorkerGuard>,
+}
+
+/// Terminal verbosity from `-v` (file logging is independent): debug
+/// script log lines reach the terminal only at verbosity >= 1.
+static VERBOSITY: AtomicU8 = AtomicU8::new(0);
+
+pub fn set_verbosity(v: u8) {
+    VERBOSITY.store(v, Ordering::Relaxed);
+}
+
+fn terminal_shows(level: scriptlog::Level) -> bool {
+    level > scriptlog::Level::Debug || VERBOSITY.load(Ordering::Relaxed) >= 1
 }
 
 /// Install the global NDJSON subscriber when a log file is requested.
@@ -58,8 +71,10 @@ pub fn install_step_sink(step: &str, resource: &str) {
     let step = step.to_string();
     let resource = resource.to_string();
     scriptlog::set_sink(Box::new(move |level, msg| {
-        clear_live_line();
-        eprintln!("    [{step}] {}: {msg}", level.as_str());
+        if terminal_shows(level) {
+            clear_live_line();
+            eprintln!("    [{step}] {}: {msg}", level.as_str());
+        }
         match level {
             scriptlog::Level::Debug => {
                 tracing::debug!(target: "script", step = %step, resource = %resource, "{msg}");
@@ -81,8 +96,10 @@ pub fn install_step_sink(step: &str, resource: &str) {
 pub fn install_gatherer_sink(gatherer: &str) {
     let gatherer = gatherer.to_string();
     scriptlog::set_sink(Box::new(move |level, msg| {
-        clear_live_line();
-        eprintln!("    [gather {gatherer}] {}: {msg}", level.as_str());
+        if terminal_shows(level) {
+            clear_live_line();
+            eprintln!("    [gather {gatherer}] {}: {msg}", level.as_str());
+        }
         tracing::info!(target: "script", gatherer = %gatherer, "{msg}");
     }));
 }

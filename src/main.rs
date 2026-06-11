@@ -100,6 +100,7 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    logging::set_verbosity(cli.verbose);
     // Held for the whole process so buffered NDJSON lines flush on exit.
     let _log_guard = match logging::init(cli.log_file.as_deref(), &cli.log_level) {
         Ok(g) => g,
