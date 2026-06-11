@@ -28,5 +28,17 @@ sysinfo = { version = "0.36", default-features = false, features = ["system"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Com",
+  "Win32_System_Ole",
+  "Win32_System_Variant",
+  "Win32_System_Services",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 tempfile = "3"

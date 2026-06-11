@@ -1,0 +1,14 @@
+# Cross-compilation config (PRD §2): both release targets build from a
+# Linux box via `cross`. The WCL and wisp path dependencies live outside
+# this repo, so mount them into the build container at the same paths:
+#
+#   CW_WCL=$HOME/dev/WCL CW_WISP=$HOME/dev/wisp \
+#     cross build --release --target x86_64-pc-windows-gnu
+#   CW_WCL=$HOME/dev/WCL CW_WISP=$HOME/dev/wisp \
+#     cross build --release --target x86_64-unknown-linux-musl
+
+# Keep container artifacts out of the host target dir (build scripts are
+# glibc-incompatible between the two).
+[build.env]
+volumes = ["CW_WCL", "CW_WISP"]
+passthrough = ["CARGO_TARGET_DIR"]

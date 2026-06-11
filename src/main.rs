@@ -1,3 +1,4 @@
+mod comdispatch;
 mod convert;
 mod diag;
 mod engine;
@@ -186,7 +187,7 @@ fn cmd_run(cli: &Cli, dir: &PathBuf, play: &str, mode: Mode) -> u8 {
             return EXIT_VALIDATION;
         }
     };
-    match engine::execute(&pb, play, mode, cli.continue_on_error, store) {
+    match engine::execute(&pb, play, mode, cli.continue_on_error, cli.jobs, store) {
         Ok(run_report) => {
             print!("{}", report::plain(&run_report));
             run_report.exit_code()
