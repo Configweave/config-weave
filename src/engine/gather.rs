@@ -12,6 +12,7 @@ use crate::convert::{canonicalise, dyn_to_wcl, wcl_to_dyn};
 use crate::diag::{Diag, wcl_span};
 use crate::model::{ParamDecl, Playbook};
 
+use super::events::{Event, EventSink};
 use super::scripts::{EntryKind, ScriptSet};
 use super::vars::{Origin, VarStore};
 
@@ -23,6 +24,7 @@ pub fn run(
     scripts: &ScriptSet,
     ctx: &wisp::Context,
     store: &mut VarStore,
+    events: &EventSink,
 ) -> Result<(), Vec<Diag>> {
     // Evaluate every invocation's params against the override-only scope.
     let doc = store.open_playbook(pb).map_err(|d| vec![d])?;
@@ -106,6 +108,9 @@ pub fn run(
     }
 
     // Run unique executions concurrently, one VM per thread.
+    events(Event::GatherStarted {
+        unique: unique.len(),
+    });
     let results: Vec<Result<DynValue, String>> = std::thread::scope(|scope| {
         let handles: Vec<_> = unique
             .iter()
@@ -116,6 +121,7 @@ pub fn run(
                         return Err(format!("no compiled gatherer '{key}'"));
                     };
                     let _worker = crate::hostapi::worker_init();
+                    crate::logging::install_gatherer_sink(key);
                     let mut vm = Vm::new(ctx);
                     let outcome: Result<DynValue, String> = match g.gather {
                         EntryKind::Plain => vm
@@ -142,6 +148,8 @@ pub fn run(
             })
             .collect()
     });
+
+    events(Event::GatherFinished);
 
     let mut by_dedup: HashMap<&str, &Result<DynValue, String>> = HashMap::new();
     for ((_, _, dedup), result) in unique.iter().zip(results.iter()) {

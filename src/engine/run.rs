@@ -28,6 +28,7 @@ use crate::hostapi::{ApplyResult, CheckResult, log};
 use crate::model::{Concurrency, Play, Playbook, Step};
 
 use super::dag;
+use super::events::{Event, EventSink, Phase};
 use super::gather::apply_param_defaults;
 use super::scripts::{CompiledResource, EntryKind, ScriptSet};
 use super::status::*;
@@ -37,6 +38,7 @@ pub struct RunOptions {
     pub mode: Mode,
     pub continue_on_error: bool,
     pub jobs: usize,
+    pub events: EventSink,
 }
 
 pub fn default_jobs() -> usize {
@@ -233,14 +235,27 @@ fn schedule(
                     .map(|(k, v)| (k.clone(), (v.unit.clone(), v.check, v.apply)))
                     .collect();
                 let ctx = ctx.clone();
+                let events = opts.events.clone();
                 move || {
                     let _guard = crate::hostapi::worker_init();
                     while let Ok(job) = rx.recv() {
                         let started = Instant::now();
+                        events(Event::StepStarted {
+                            idx: job.idx,
+                            name: job.step_label.clone(),
+                        });
                         let label = job.step_label.clone();
-                        log::set_sink(Box::new(move |level, msg| {
-                            eprintln!("    [{label}] {}: {msg}", level.as_str());
-                        }));
+                        crate::logging::install_step_sink(&label, &job.resource_key);
+                        let phase_events = events.clone();
+                        let phase_idx = job.idx;
+                        let phase_name = job.step_label.clone();
+                        let on_phase = move |phase: Phase| {
+                            phase_events(Event::StepPhase {
+                                idx: phase_idx,
+                                name: phase_name.clone(),
+                                phase,
+                            });
+                        };
                         let (status, message) = match scripts.get(&job.resource_key) {
                             Some((unit, check, apply)) => {
                                 let res = CompiledResource {
@@ -248,7 +263,7 @@ fn schedule(
                                     check: *check,
                                     apply: *apply,
                                 };
-                                run_lifecycle(&res, &ctx, job.params.clone(), job.mode)
+                                run_lifecycle(&res, &ctx, job.params.clone(), job.mode, &on_phase)
                             }
                             None => (
                                 StepStatus::Error,
@@ -288,6 +303,11 @@ fn schedule(
                     dispatched[i] = true;
                     completed[i] = true;
                     reports[i] = Some(quick_report(steps[i], StepStatus::NotRun, None));
+                    (opts.events)(Event::StepResolved {
+                        idx: i,
+                        name: steps[i].name.clone(),
+                        status: StepStatus::NotRun,
+                    });
                     progressed = true;
                     continue;
                 }
@@ -307,6 +327,11 @@ fn schedule(
                             StepStatus::NotRun,
                             Some("a required step did not complete".into()),
                         ));
+                        (opts.events)(Event::StepResolved {
+                            idx: i,
+                            name: steps[i].name.clone(),
+                            status: StepStatus::NotRun,
+                        });
                         progressed = true;
                         continue;
                     }
@@ -317,6 +342,11 @@ fn schedule(
                         completed[i] = true;
                         reports[i] =
                             Some(quick_report(steps[i], StepStatus::Skipped, msg.clone()));
+                        (opts.events)(Event::StepResolved {
+                            idx: i,
+                            name: steps[i].name.clone(),
+                            status: StepStatus::Skipped,
+                        });
                         progressed = true;
                     }
                     Plan::Fail(msg) => {
@@ -327,6 +357,11 @@ fn schedule(
                             StepStatus::Error,
                             Some(msg.clone()),
                         ));
+                        (opts.events)(Event::StepResolved {
+                            idx: i,
+                            name: steps[i].name.clone(),
+                            status: StepStatus::Error,
+                        });
                         if !opts.continue_on_error {
                             halted = true;
                         }
@@ -436,14 +471,19 @@ fn schedule(
             StepStatus::RebootRequired if opts.mode == Mode::Apply => halted = true,
             _ => {}
         }
-        reports[done.idx] = Some(StepReport {
+        let report = StepReport {
             name: steps[done.idx].name.clone(),
             container_path: steps[done.idx].container_path.clone(),
             resource: format!("{}.{}", steps[done.idx].package, steps[done.idx].resource),
             status: done.status,
             message: done.message,
             duration: done.duration,
+        };
+        (opts.events)(Event::StepFinished {
+            idx: done.idx,
+            report: report.clone(),
         });
+        reports[done.idx] = Some(report);
     }
 
     drop(job_txs);
@@ -473,7 +513,9 @@ fn run_lifecycle(
     ctx: &Context,
     params: DynValue,
     mode: Mode,
+    on_phase: &dyn Fn(Phase),
 ) -> (StepStatus, Option<String>) {
+    on_phase(Phase::Checking);
     let check1 = match call_check(res, ctx, params.clone()) {
         Ok(c) => c,
         Err(e) => return (StepStatus::Error, Some(e)),
@@ -482,20 +524,26 @@ fn run_lifecycle(
         (_, CheckResult::AlreadyConfigured) => (StepStatus::AlreadyConfigured, None),
         (_, CheckResult::RebootRequired) => (StepStatus::RebootRequired, None),
         (Mode::Check, CheckResult::NotConfigured) => (StepStatus::NotConfigured, None),
-        (Mode::Apply, CheckResult::NotConfigured) => match call_apply(res, ctx, params.clone()) {
-            Err(e) => (StepStatus::Error, Some(e)),
-            Ok(ApplyResult::RebootRequired) => (StepStatus::RebootRequired, None),
-            Ok(ApplyResult::Success) => match call_check(res, ctx, params) {
-                Ok(CheckResult::AlreadyConfigured) => (StepStatus::Configured, None),
-                Ok(other) => (
-                    StepStatus::Error,
-                    Some(format!(
-                        "apply claimed success but the re-check disagrees ({other:?})"
-                    )),
-                ),
-                Err(e) => (StepStatus::Error, Some(format!("re-check failed: {e}"))),
-            },
-        },
+        (Mode::Apply, CheckResult::NotConfigured) => {
+            on_phase(Phase::Applying);
+            match call_apply(res, ctx, params.clone()) {
+                Err(e) => (StepStatus::Error, Some(e)),
+                Ok(ApplyResult::RebootRequired) => (StepStatus::RebootRequired, None),
+                Ok(ApplyResult::Success) => {
+                    on_phase(Phase::Rechecking);
+                    match call_check(res, ctx, params) {
+                        Ok(CheckResult::AlreadyConfigured) => (StepStatus::Configured, None),
+                        Ok(other) => (
+                            StepStatus::Error,
+                            Some(format!(
+                                "apply claimed success but the re-check disagrees ({other:?})"
+                            )),
+                        ),
+                        Err(e) => (StepStatus::Error, Some(format!("re-check failed: {e}"))),
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -3,6 +3,7 @@ mod convert;
 mod diag;
 mod engine;
 mod hostapi;
+mod logging;
 mod model;
 mod report;
 mod vocab;
@@ -93,6 +94,14 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // Held for the whole process so buffered NDJSON lines flush on exit.
+    let _log_guard = match logging::init(cli.log_file.as_deref(), &cli.log_level) {
+        Ok(g) => g,
+        Err(d) => {
+            eprintln!("{}", d.rendered);
+            return ExitCode::from(EXIT_VALIDATION);
+        }
+    };
     let code = match &cli.command {
         Command::Validate { playbook_dir } => cmd_validate(playbook_dir),
         Command::List { playbook_dir } => cmd_list(playbook_dir),
@@ -187,9 +196,15 @@ fn cmd_run(cli: &Cli, dir: &PathBuf, play: &str, mode: Mode) -> u8 {
             return EXIT_VALIDATION;
         }
     };
-    match engine::execute(&pb, play, mode, cli.continue_on_error, cli.jobs, store) {
+    let mode_out = report::select_mode(cli.json, cli.no_color);
+    let sink = report::progress_sink(mode_out);
+    match engine::execute(&pb, play, mode, cli.continue_on_error, cli.jobs, store, sink) {
         Ok(run_report) => {
-            print!("{}", report::plain(&run_report));
+            match mode_out {
+                report::OutputMode::Json => println!("{}", report::json(&run_report)),
+                report::OutputMode::Plain => print!("{}", report::plain(&run_report)),
+                report::OutputMode::Rich => print!("{}", report::rich(&run_report)),
+            }
             run_report.exit_code()
         }
         Err(diags) => {

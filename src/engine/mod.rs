@@ -2,6 +2,7 @@
 //! scheduling and the step lifecycle.
 
 pub mod dag;
+pub mod events;
 pub mod gather;
 pub mod run;
 pub mod scripts;
@@ -22,6 +23,7 @@ pub fn execute(
     continue_on_error: bool,
     jobs: Option<usize>,
     mut store: VarStore,
+    events: events::EventSink,
 ) -> Result<RunReport, Vec<Diag>> {
     let Some(play) = pb.play(play_name) else {
         let names: Vec<&str> = pb.plays.iter().map(|p| p.name.as_str()).collect();
@@ -37,7 +39,7 @@ pub fn execute(
         dag::build(p)?;
     }
 
-    gather::run(pb, &scripts, &ctx, &mut store)?;
+    gather::run(pb, &scripts, &ctx, &mut store, &events)?;
 
     run::run_play(
         pb,
@@ -49,6 +51,7 @@ pub fn execute(
             mode,
             continue_on_error,
             jobs: jobs.unwrap_or_else(run::default_jobs),
+            events,
         },
     )
 }
