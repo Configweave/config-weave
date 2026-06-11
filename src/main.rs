@@ -8,7 +8,6 @@ mod logging;
 mod model;
 mod report;
 mod scaffold;
-#[allow(dead_code)] // wired up by `config-weave test` (in progress)
 mod testlab;
 mod vocab;
 
@@ -86,6 +85,24 @@ enum Command {
     List { playbook_dir: PathBuf },
     /// Full validation pipeline, no execution.
     Validate { playbook_dir: PathBuf },
+    /// Run package convergence tests in disposable containers.
+    Test {
+        playbook_dir: PathBuf,
+        /// Only run matching tests: a package name or `package:test`.
+        filter: Option<String>,
+        /// Override every test's backend (v1 supports only "docker").
+        #[arg(long, value_name = "NAME")]
+        backend: Option<String>,
+        /// Run every test against this image instead of its own.
+        #[arg(long, value_name = "IMAGE")]
+        image: Option<String>,
+        /// Leave instances running for post-mortem debugging.
+        #[arg(long)]
+        keep: bool,
+        /// Static linux config-weave binary to copy into instances.
+        #[arg(long, value_name = "PATH")]
+        binary: Option<PathBuf>,
+    },
     /// Generate wdoc documentation (default outdir: <dir>/docs/).
     Docs {
         playbook_dir: PathBuf,
@@ -139,6 +156,22 @@ fn main() -> ExitCode {
         }
         Command::Check { playbook_dir, play } => cmd_run(&cli, playbook_dir, play, Mode::Check),
         Command::Apply { playbook_dir, play } => cmd_run(&cli, playbook_dir, play, Mode::Apply),
+        Command::Test {
+            playbook_dir,
+            filter,
+            backend,
+            image,
+            keep,
+            binary,
+        } => cmd_test(
+            &cli,
+            playbook_dir,
+            filter.as_deref(),
+            backend.as_deref(),
+            image.as_deref(),
+            *keep,
+            binary.as_deref(),
+        ),
         Command::Docs {
             playbook_dir,
             outdir,
@@ -277,6 +310,115 @@ fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode) -> u8 {
             EXIT_VALIDATION
         }
     }
+}
+
+/// `config-weave test`: run package convergence tests in disposable
+/// backend instances (PRD-extension; see docs/notes.md, testlab section).
+fn cmd_test(
+    cli: &Cli,
+    dir: &std::path::Path,
+    filter: Option<&str>,
+    backend_override: Option<&str>,
+    image_override: Option<&str>,
+    keep: bool,
+    binary: Option<&std::path::Path>,
+) -> u8 {
+    let pb = match load_validated(dir) {
+        Ok(pb) => pb,
+        Err(diags) => {
+            print_diags(&diags);
+            return EXIT_VALIDATION;
+        }
+    };
+
+    // Select tests: no filter = everything, `pkg` = one package,
+    // `pkg:test` = one test.
+    let (fpkg, ftest) = match filter {
+        Some(f) => match f.split_once(':') {
+            Some((p, t)) => (Some(p), Some(t)),
+            None => (Some(f), None),
+        },
+        None => (None, None),
+    };
+    let selected: Vec<(&model::Package, &model::TestDecl)> = pb
+        .packages
+        .values()
+        .filter(|pkg| fpkg.is_none_or(|p| p == pkg.name))
+        .flat_map(|pkg| pkg.tests.iter().map(move |t| (pkg, t)))
+        .filter(|(_, t)| ftest.is_none_or(|n| n == t.name))
+        .collect();
+    if selected.is_empty() {
+        let available: Vec<String> = pb
+            .packages
+            .values()
+            .flat_map(|p| {
+                p.tests
+                    .iter()
+                    .map(move |t| format!("{}:{}", p.name, t.name))
+            })
+            .collect();
+        if available.is_empty() {
+            eprintln!("error: no package declares any tests");
+        } else {
+            eprintln!(
+                "error: no tests match '{}' (available: {})",
+                filter.unwrap_or("*"),
+                available.join(", ")
+            );
+        }
+        return EXIT_VALIDATION;
+    }
+
+    if let Some(b) = backend_override
+        && b != "docker"
+    {
+        eprintln!(
+            "error: unknown test backend '{b}' (only 'docker' is supported; 'vmlab' is planned)"
+        );
+        return EXIT_VALIDATION;
+    }
+
+    let mode_out = report::select_mode(cli.json, cli.no_color);
+    let quiet = mode_out == report::OutputMode::Json;
+
+    let binary = match testlab::synth::locate_binary(binary) {
+        Ok(b) => b,
+        Err(d) => {
+            eprintln!("{}", d.rendered);
+            return EXIT_VALIDATION;
+        }
+    };
+    let backend = match testlab::docker::DockerBackend::discover(quiet) {
+        Ok(b) => b,
+        Err(d) => {
+            eprintln!("{}", d.rendered);
+            return EXIT_VALIDATION;
+        }
+    };
+    let opts = testlab::runner::RunnerOptions {
+        binary,
+        keep,
+        jobs: cli.jobs,
+        quiet,
+        image_override: image_override.map(str::to_string),
+    };
+
+    let start = std::time::Instant::now();
+    let tests: Vec<_> = selected
+        .into_iter()
+        .map(|(pkg, t)| testlab::runner::run_test(&pb, pkg, t, &backend, &opts))
+        .collect();
+    let run_report = testlab::report::TestRunReport {
+        playbook: pb.name.clone(),
+        tests,
+        duration: start.elapsed(),
+    };
+    match mode_out {
+        report::OutputMode::Json => println!("{}", report::test_json(&run_report)),
+        report::OutputMode::Plain => print!("{}", report::test_plain(&run_report)),
+        report::OutputMode::Rich => print!("{}", report::test_rich(&run_report)),
+    }
+    run_report.exit_code()
 }
 
 /// `__gather`: run one gatherer of a validated playbook and print

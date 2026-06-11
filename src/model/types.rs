@@ -176,12 +176,12 @@ pub struct ParamDecl {
 
 /// An isolated convergence test declared in `package.wcl`, executed by
 /// `config-weave test` inside a disposable backend instance.
-#[allow(dead_code)] // consumed by the testlab runner (in progress)
 #[derive(Debug)]
 pub struct TestDecl {
     pub name: String,
     pub description: String,
     /// Backend selector; only "docker" exists in v1 ("vmlab" is planned).
+    #[allow(dead_code)] // rendered by docsgen (in progress)
     pub backend: String,
     /// Backend-specific image reference (docker image ref in v1).
     pub image: String,
@@ -197,7 +197,6 @@ pub struct TestDecl {
 /// A resource invocation under test; mirrors a playbook step. The
 /// properties/condition source survives verbatim so it can be spliced
 /// into the synthesized playbook.
-#[allow(dead_code)] // consumed by the testlab runner (in progress)
 #[derive(Debug)]
 pub struct TestStep {
     pub name: String,
@@ -250,17 +249,16 @@ impl Expect {
 
 /// A gatherer invocation under test. Params and expectations must
 /// evaluate statically (tests run against a variable-free playbook).
-#[allow(dead_code)] // consumed by the testlab runner (in progress)
 #[derive(Debug)]
 pub struct TestGather {
     pub name: String,
+    #[allow(dead_code)] // rendered by docsgen (in progress)
     pub description: String,
     pub package: String,
     pub gatherer: String,
     pub params: Vec<(String, DynValue)>,
     /// Top-level key equality assertions over the gathered value.
     pub expect: Vec<(String, DynValue)>,
-    pub span: (usize, usize),
 }
 
 /// The coarse parameter types the schema system distinguishes.

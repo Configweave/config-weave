@@ -33,6 +33,9 @@ pub struct RunnerOptions {
     pub jobs: Option<usize>,
     /// Suppress stderr progress lines (JSON output mode).
     pub quiet: bool,
+    /// `--image`: run every test against this image instead of its own
+    /// (matrix runs across distros).
+    pub image_override: Option<String>,
 }
 
 const BIN: &str = "/weave/config-weave";
@@ -75,8 +78,13 @@ pub fn run_test(
     let mut report = TestReport {
         package: pkg.name.clone(),
         name: test.name.clone(),
-        backend: test.backend.clone(),
-        image: test.image.clone(),
+        // The backend actually driving the test (--backend can override
+        // the declared one).
+        backend: backend.name().to_string(),
+        image: opts
+            .image_override
+            .clone()
+            .unwrap_or_else(|| test.image.clone()),
         outcome: TestOutcome::Passed,
         steps: Vec::new(),
         gathers: Vec::new(),
@@ -109,8 +117,8 @@ fn run_test_inner(
 ) -> Result<(), Diag> {
     let synthesized = synth::synthesize(pb, pkg, test)?;
 
-    progress(&format!("provisioning ({})", test.image));
-    let mut instance = backend.provision(&test.image, opts.keep)?;
+    progress(&format!("provisioning ({})", report.image));
+    let mut instance = backend.provision(&report.image.clone(), opts.keep)?;
     if opts.keep {
         report.kept = Some(instance.handle());
     }
@@ -154,7 +162,7 @@ fn drive(
         return Err(Diag::bare(format!(
             "the test binary failed to run inside '{}' (exit {}): {} — host/image \
              architecture mismatch?",
-            test.image,
+            report.image,
             smoke.exit_code,
             tail(&smoke.stderr)
         )));

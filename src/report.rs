@@ -13,6 +13,7 @@ use std::sync::Mutex;
 
 use crate::engine::events::{Event, EventSink, Phase};
 use crate::engine::status::{RunReport, StepStatus};
+use crate::testlab::report::{TestOutcome, TestRunReport};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
@@ -305,4 +306,177 @@ impl JsonRunReport {
 pub fn json(report: &RunReport) -> String {
     serde_json::to_string_pretty(&JsonRunReport::from_report(report))
         .expect("report serialization cannot fail")
+}
+
+// ----------------------------------------------------------------- test
+
+fn outcome_icon(outcome: TestOutcome) -> (&'static str, &'static str) {
+    match outcome {
+        TestOutcome::Passed => ("✓", "\x1b[32m"),
+        TestOutcome::Failed => ("✗", "\x1b[31m"),
+        TestOutcome::Error => ("!", "\x1b[35m"),
+    }
+}
+
+/// Plain mode: one line per test, failures indented underneath.
+pub fn test_plain(report: &TestRunReport) -> String {
+    let mut out = format!(
+        "test '{}' — {} test(s)\n",
+        report.playbook,
+        report.tests.len()
+    );
+    for t in &report.tests {
+        let mut line = format!(
+            "  [{:>6}] {}:{} ({} {}) {:.1}s",
+            t.outcome.as_str(),
+            t.package,
+            t.name,
+            t.backend,
+            t.image,
+            t.duration.as_secs_f64()
+        );
+        if let Some(kept) = &t.kept {
+            line.push_str(&format!(" — kept {kept}"));
+        }
+        out.push_str(&line);
+        out.push('\n');
+        for f in t.failures() {
+            out.push_str(&format!("      {f}\n"));
+        }
+    }
+    out.push_str(&test_summary(report));
+    out
+}
+
+/// Rich mode: same shape with icons and colour; per-test progress lines
+/// already streamed on stderr while running.
+pub fn test_rich(report: &TestRunReport) -> String {
+    let mut out = format!(
+        "\ntest '{}' — {} test(s)\n",
+        report.playbook,
+        report.tests.len()
+    );
+    for t in &report.tests {
+        let (ic, colour) = outcome_icon(t.outcome);
+        let mut line = format!(
+            "  {colour}{ic}{RESET} {:<40} {:<7} {DIM}{} {} {:.1}s{RESET}",
+            format!("{}:{}", t.package, t.name),
+            t.outcome.as_str(),
+            t.backend,
+            t.image,
+            t.duration.as_secs_f64()
+        );
+        if let Some(kept) = &t.kept {
+            line.push_str(&format!(" {DIM}— kept {kept}{RESET}"));
+        }
+        out.push_str(&line);
+        out.push('\n');
+        for f in t.failures() {
+            out.push_str(&format!("      {DIM}{f}{RESET}\n"));
+        }
+    }
+    out.push_str(&test_summary(report));
+    out
+}
+
+fn test_summary(report: &TestRunReport) -> String {
+    let count = |o: TestOutcome| report.tests.iter().filter(|t| t.outcome == o).count();
+    format!(
+        "summary: {} passed, {} failed, {} error ({:.1}s)\n",
+        count(TestOutcome::Passed),
+        count(TestOutcome::Failed),
+        count(TestOutcome::Error),
+        report.duration.as_secs_f64(),
+    )
+}
+
+/// JSON mode for `config-weave test`: one schema-stable object.
+pub fn test_json(report: &TestRunReport) -> String {
+    #[derive(serde::Serialize)]
+    struct JsonTestStep<'a> {
+        name: &'a str,
+        expect: &'static str,
+        check: Option<&'static str>,
+        apply: Option<&'static str>,
+        second_apply: Option<&'static str>,
+        failures: &'a [String],
+    }
+    #[derive(serde::Serialize)]
+    struct JsonTestGather<'a> {
+        name: &'a str,
+        failures: &'a [String],
+    }
+    #[derive(serde::Serialize)]
+    struct JsonVerify<'a> {
+        passed: bool,
+        message: Option<&'a str>,
+    }
+    #[derive(serde::Serialize)]
+    struct JsonTest<'a> {
+        package: &'a str,
+        name: &'a str,
+        backend: &'a str,
+        image: &'a str,
+        outcome: &'static str,
+        duration_secs: f64,
+        steps: Vec<JsonTestStep<'a>>,
+        gathers: Vec<JsonTestGather<'a>>,
+        verify: Option<JsonVerify<'a>>,
+        error: Option<&'a str>,
+        kept: Option<&'a str>,
+    }
+    #[derive(serde::Serialize)]
+    struct JsonTestReport<'a> {
+        playbook: &'a str,
+        mode: &'static str,
+        exit_code: u8,
+        duration_secs: f64,
+        tests: Vec<JsonTest<'a>>,
+    }
+
+    let value = JsonTestReport {
+        playbook: &report.playbook,
+        mode: "test",
+        exit_code: report.exit_code(),
+        duration_secs: report.duration.as_secs_f64(),
+        tests: report
+            .tests
+            .iter()
+            .map(|t| JsonTest {
+                package: &t.package,
+                name: &t.name,
+                backend: &t.backend,
+                image: &t.image,
+                outcome: t.outcome.as_str(),
+                duration_secs: t.duration.as_secs_f64(),
+                steps: t
+                    .steps
+                    .iter()
+                    .map(|s| JsonTestStep {
+                        name: &s.name,
+                        expect: s.expect.as_str(),
+                        check: s.check.map(|st| st.id()),
+                        apply: s.apply.map(|st| st.id()),
+                        second_apply: s.second_apply.map(|st| st.id()),
+                        failures: &s.failures,
+                    })
+                    .collect(),
+                gathers: t
+                    .gathers
+                    .iter()
+                    .map(|g| JsonTestGather {
+                        name: &g.name,
+                        failures: &g.failures,
+                    })
+                    .collect(),
+                verify: t.verify.as_ref().map(|v| JsonVerify {
+                    passed: v.passed,
+                    message: v.message.as_deref(),
+                }),
+                error: t.error.as_deref(),
+                kept: t.kept.as_deref(),
+            })
+            .collect(),
+    };
+    serde_json::to_string_pretty(&value).expect("test report serialization cannot fail")
 }

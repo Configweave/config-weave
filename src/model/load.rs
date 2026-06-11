@@ -970,7 +970,6 @@ fn load_test(
                         .map(|(k, v, _)| (k, v))
                         .collect(),
                     expect,
-                    span: gspan,
                 });
             }
             _ => {}
