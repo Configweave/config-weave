@@ -1,10 +1,12 @@
 use value
+use sys
 
 fn gather(params: Value) -> Value {
-    // M3 replaces this hand-rolled map with the `sys` module.
-    let family = "linux"
     Value::Map(#{
-        "family": Value::String(family),
-        "arch": Value::String("x86_64")
+        "family": Value::String(sys::family()),
+        "name": Value::String(sys::os_name()),
+        "version": Value::String(sys::os_version()),
+        "arch": Value::String(sys::arch()),
+        "cpus": Value::Int(sys::cpu_count())
     })
 }

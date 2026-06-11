@@ -63,6 +63,22 @@ windows 0.6x.
   reference `--var`/`--var-file` overrides but not gatherer results or
   declared vars that depend on them.
 
+## Host API decisions (PRD §7)
+
+- `shell::run` splits its command with shell-words and executes the
+  program **directly** (no shell interpretation); `bash`/`powershell` are
+  the escape hatches when shell features are wanted. `powershell` tries
+  `powershell` then `pwsh`, so it also works on Linux boxes with
+  PowerShell Core.
+- The `data` module covers INI only; JSON and TOML are wisp-std's `json`
+  and `toml` modules registered as-is (the PRD's "re-export, don't
+  duplicate" note).
+- `print`/`println` route into `log::info` via a per-thread print hook
+  added upstream in wisp-vm (`set_print_hook`).
+- Property/params block fields **shadow** outer variables in WCL scope:
+  `url = url` is a self-reference (cycle error). Use distinct variable
+  names (`tool_url`) for values fed to same-named parameters.
+
 ## wisp binding (PRD §6/§7)
 
 - Script entry points accept two signatures each: plain

@@ -16,6 +16,17 @@ petgraph = "0.8"
 miette = { version = "7", features = ["fancy"] }
 glob = "0.3"
 tempfile = "3"
+shell-words = "1"
+ureq = "3"
+sha2 = "0.10"
+md-5 = "0.10"
+zip = { version = "5", default-features = false, features = ["deflate", "deflate64", "bzip2", "lzma"] }
+tar = "0.4"
+flate2 = "1"
+sysinfo = { version = "0.36", default-features = false, features = ["system"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

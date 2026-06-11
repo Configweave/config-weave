@@ -115,6 +115,7 @@ pub fn run(
                     let Some(g) = gatherer else {
                         return Err(format!("no compiled gatherer '{key}'"));
                     };
+                    crate::hostapi::redirect_print_to_log();
                     let mut vm = Vm::new(ctx);
                     let outcome: Result<DynValue, String> = match g.gather {
                         EntryKind::Plain => vm

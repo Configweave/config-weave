@@ -36,6 +36,7 @@ pub fn run_play(
     opts: &RunOptions,
 ) -> Result<RunReport, Vec<Diag>> {
     let started = Instant::now();
+    crate::hostapi::redirect_print_to_log();
     let doc = store.open_playbook(pb).map_err(|d| vec![d])?;
     let play_block = find_play_block(&doc, &play.name)
         .ok_or_else(|| vec![Diag::bare(format!("play '{}' not found at run time", play.name))])?;
