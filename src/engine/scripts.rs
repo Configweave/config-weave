@@ -6,6 +6,7 @@
 //! resources:  fn check(params: Value) -> CheckResult   (or Result[CheckResult, string])
 //!             fn apply(params: Value) -> ApplyResult   (or Result[ApplyResult, string])
 //! gatherers:  fn gather(params: Value) -> Value        (or Result[Value, string])
+//! verifies:   fn verify(facts: Value) -> bool          (or Result[bool, string])
 //! ```
 
 use std::collections::HashMap;
@@ -39,10 +40,20 @@ pub struct CompiledGatherer {
     pub gather: EntryKind,
 }
 
-/// Every compiled script in the playbook, keyed by `package.name`.
+/// A compiled test verify script.
+#[allow(dead_code)] // consumed by the testlab runner (in progress)
+pub struct CompiledVerify {
+    pub unit: CompiledUnit,
+    pub verify: EntryKind,
+}
+
+/// Every compiled script in the playbook, keyed by `package.name`
+/// (verifies by `package.testname`).
 pub struct ScriptSet {
     pub resources: HashMap<String, CompiledResource>,
     pub gatherers: HashMap<String, CompiledGatherer>,
+    #[allow(dead_code)] // consumed by the testlab runner (in progress)
+    pub verifies: HashMap<String, CompiledVerify>,
 }
 
 /// Compile all scripts; either every script compiles and satisfies its
@@ -51,6 +62,7 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
     let mut diags = Vec::new();
     let mut resources = HashMap::new();
     let mut gatherers = HashMap::new();
+    let mut verifies = HashMap::new();
 
     for pkg in pb.packages.values() {
         for res in pkg.resources.values() {
@@ -79,6 +91,20 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
                 }
             }
         }
+        for t in &pkg.tests {
+            let Some(script) = &t.verify else {
+                continue;
+            };
+            if let Some((unit, source)) = compile_one(ctx, script, &mut diags) {
+                let verify = entry_kind::<bool>(&unit, "verify", script, &source, &mut diags);
+                if let Some(verify) = verify {
+                    verifies.insert(
+                        format!("{}.{}", pkg.name, t.name),
+                        CompiledVerify { unit, verify },
+                    );
+                }
+            }
+        }
         compile_lib(ctx, &pkg.dir.join("lib"), &mut diags);
     }
     compile_lib(ctx, &pb.root.join("lib"), &mut diags);
@@ -87,6 +113,7 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
         Ok(ScriptSet {
             resources,
             gatherers,
+            verifies,
         })
     } else {
         Err(diags)

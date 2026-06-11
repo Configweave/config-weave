@@ -13,6 +13,7 @@ type WeavePackage {
   description: utf8
   @children("gatherer") gatherers: list<WeaveGathererDecl>
   @children("resource") resources: list<WeaveResourceDecl>
+  @children("test") tests: list<WeaveTestDecl>
 }
 
 @block("gatherer")
@@ -41,3 +42,54 @@ type WeaveParamDecl {
   @default(false) required: bool
   @schemaless default: utf8?
 }
+
+// An isolated convergence test for this package, run by `config-weave
+// test` inside a disposable backend instance (docker container in v1).
+@block("test")
+type WeaveTestDecl {
+  @inline(0) name: utf8
+  description: utf8
+  @default("docker") backend: utf8
+  image: utf8
+  setup: utf8?
+  verify: utf8?
+  @children("step") steps: list<WeaveTestStep>
+  @children("gather") gathers: list<WeaveTestGather>
+}
+
+// A resource invocation under test; mirrors a playbook step.
+@block("step")
+type WeaveTestStep {
+  @inline(0) name: utf8
+  description: utf8
+  resource: utf8
+  @default("converge") expect: utf8
+  @schemaless condition: bool?
+  requires: list<utf8>?
+  @child("properties") properties: WeaveTestProperties?
+}
+
+// Free-form property map validated against the resource's declared params.
+@schemaless
+@block("properties")
+type WeaveTestProperties {}
+
+// A gatherer invocation under test with equality expectations.
+@block("gather")
+type WeaveTestGather {
+  @inline(0) name: utf8
+  description: utf8
+  from: utf8
+  @child("params") params: WeaveTestParams?
+  @child("expect") expect: WeaveTestExpect?
+}
+
+// Free-form parameter map validated against the gatherer's declared params.
+@schemaless
+@block("params")
+type WeaveTestParams {}
+
+// Top-level key equality assertions over the gathered value.
+@schemaless
+@block("expect")
+type WeaveTestExpect {}

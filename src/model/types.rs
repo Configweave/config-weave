@@ -143,6 +143,8 @@ pub struct Package {
     pub dir: PathBuf,
     pub gatherers: BTreeMap<String, GathererDecl>,
     pub resources: BTreeMap<String, ResourceDecl>,
+    /// Convergence tests, in declaration order.
+    pub tests: Vec<TestDecl>,
 }
 
 #[derive(Debug)]
@@ -170,6 +172,95 @@ pub struct ParamDecl {
     pub ty: CoarseType,
     pub required: bool,
     pub default: Option<DynValue>,
+}
+
+/// An isolated convergence test declared in `package.wcl`, executed by
+/// `config-weave test` inside a disposable backend instance.
+#[allow(dead_code)] // consumed by the testlab runner (in progress)
+#[derive(Debug)]
+pub struct TestDecl {
+    pub name: String,
+    pub description: String,
+    /// Backend selector; only "docker" exists in v1 ("vmlab" is planned).
+    pub backend: String,
+    /// Backend-specific image reference (docker image ref in v1).
+    pub image: String,
+    /// Optional shell provisioning, run via `sh -c` before anything else.
+    pub setup: Option<String>,
+    /// Absolute path to the optional wisp verify script.
+    pub verify: Option<PathBuf>,
+    pub steps: Vec<TestStep>,
+    pub gathers: Vec<TestGather>,
+    pub span: (usize, usize),
+}
+
+/// A resource invocation under test; mirrors a playbook step. The
+/// properties/condition source survives verbatim so it can be spliced
+/// into the synthesized playbook.
+#[allow(dead_code)] // consumed by the testlab runner (in progress)
+#[derive(Debug)]
+pub struct TestStep {
+    pub name: String,
+    pub description: String,
+    pub package: String,
+    pub resource: String,
+    pub expect: Expect,
+    pub requires: Vec<String>,
+    /// Raw condition expression text, spliced into synthesis.
+    pub condition_src: Option<String>,
+    /// Raw `properties { … }` block text, spliced into synthesis.
+    pub properties_src: Option<String>,
+    pub span: (usize, usize),
+}
+
+/// What a test step asserts across the three engine runs
+/// (check, apply, apply).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expect {
+    /// not_configured → configured → already_configured (the default).
+    Converge,
+    AlreadyConfigured,
+    Error,
+    Skip,
+    RebootRequired,
+}
+
+impl Expect {
+    pub fn parse(s: &str) -> Option<Expect> {
+        match s {
+            "converge" => Some(Expect::Converge),
+            "already_configured" => Some(Expect::AlreadyConfigured),
+            "error" => Some(Expect::Error),
+            "skip" => Some(Expect::Skip),
+            "reboot_required" => Some(Expect::RebootRequired),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Expect::Converge => "converge",
+            Expect::AlreadyConfigured => "already_configured",
+            Expect::Error => "error",
+            Expect::Skip => "skip",
+            Expect::RebootRequired => "reboot_required",
+        }
+    }
+}
+
+/// A gatherer invocation under test. Params and expectations must
+/// evaluate statically (tests run against a variable-free playbook).
+#[allow(dead_code)] // consumed by the testlab runner (in progress)
+#[derive(Debug)]
+pub struct TestGather {
+    pub name: String,
+    pub description: String,
+    pub package: String,
+    pub gatherer: String,
+    pub params: Vec<(String, DynValue)>,
+    /// Top-level key equality assertions over the gathered value.
+    pub expect: Vec<(String, DynValue)>,
+    pub span: (usize, usize),
 }
 
 /// The coarse parameter types the schema system distinguishes.

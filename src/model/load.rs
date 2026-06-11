@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use wcl_lang::{Block, Document, Environment, EvalError, Field, Value};
+use wisp_std::DynValue;
 
 use crate::convert::wcl_to_dyn;
 use crate::diag::{Diag, wcl_span};
@@ -475,6 +476,9 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
         .filter(|p| p.is_dir())
         .collect();
     paths.sort();
+    // Test references can point at packages that load later, so their
+    // resolution is a second pass once the full map exists.
+    let mut pending = Vec::new();
     for pkg_dir in paths {
         let folder = pkg_dir
             .file_name()
@@ -488,7 +492,7 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
             )));
             continue;
         }
-        if let Some(pkg) = load_package(&pkg_dir, &wcl_path, diags) {
+        if let Some((pkg, pend)) = load_package(&pkg_dir, &wcl_path, diags) {
             if pkg.name != folder {
                 diags.push(Diag::bare(format!(
                     "package '{}' lives in folder '{}'; the folder name and package \
@@ -497,12 +501,151 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
                 )));
             }
             packages.insert(pkg.name.clone(), pkg);
+            pending.push(pend);
         }
+    }
+    for p in &pending {
+        validate_tests(&packages, p, diags);
     }
     packages
 }
 
-fn load_package(pkg_dir: &Path, wcl_path: &Path, diags: &mut Vec<Diag>) -> Option<Package> {
+/// One statically evaluated params/properties/expect field:
+/// (name, value, source span).
+type StaticPair = (String, DynValue, (usize, usize));
+
+/// Test reference checks deferred to the second pass: resource/gatherer
+/// refs plus their statically evaluated params, with everything needed to
+/// render diagnostics into the right package.wcl.
+struct PendingTests {
+    file: PathBuf,
+    source: String,
+    steps: Vec<PendingStepCheck>,
+    gathers: Vec<PendingGatherCheck>,
+}
+
+struct PendingStepCheck {
+    /// "step 'x' of test 'y'" — diagnostic prefix.
+    what: String,
+    package: String,
+    resource: String,
+    /// Statically evaluated properties (None: no block declared).
+    props: Option<Vec<StaticPair>>,
+    span: (usize, usize),
+}
+
+struct PendingGatherCheck {
+    what: String,
+    package: String,
+    gatherer: String,
+    params: Option<Vec<StaticPair>>,
+    span: (usize, usize),
+}
+
+fn validate_tests(packages: &BTreeMap<String, Package>, p: &PendingTests, diags: &mut Vec<Diag>) {
+    let mut ctx = Ctx {
+        file: &p.file,
+        source: &p.source,
+        diags,
+    };
+    for s in &p.steps {
+        let Some(pkg) = packages.get(&s.package) else {
+            ctx.err(
+                format!("unknown package '{}' in {}", s.package, s.what),
+                s.span,
+            );
+            continue;
+        };
+        let Some(decl) = pkg.resources.get(&s.resource) else {
+            ctx.err(
+                format!(
+                    "package '{}' has no resource '{}' (in {})",
+                    s.package, s.resource, s.what
+                ),
+                s.span,
+            );
+            continue;
+        };
+        check_params_static(
+            &mut ctx,
+            s.props.as_deref(),
+            &decl.params,
+            &format!("resource '{}.{}' in {}", s.package, s.resource, s.what),
+            s.span,
+        );
+    }
+    for g in &p.gathers {
+        let Some(pkg) = packages.get(&g.package) else {
+            ctx.err(
+                format!("unknown package '{}' in {}", g.package, g.what),
+                g.span,
+            );
+            continue;
+        };
+        let Some(decl) = pkg.gatherers.get(&g.gatherer) else {
+            ctx.err(
+                format!(
+                    "package '{}' has no gatherer '{}' (in {})",
+                    g.package, g.gatherer, g.what
+                ),
+                g.span,
+            );
+            continue;
+        };
+        check_params_static(
+            &mut ctx,
+            g.params.as_deref(),
+            &decl.params,
+            &format!("gatherer '{}.{}' in {}", g.package, g.gatherer, g.what),
+            g.span,
+        );
+    }
+}
+
+/// `check_params` over already-evaluated values: unknown key, coarse type
+/// mismatch, missing required. Test params are fully static, so nothing
+/// defers to run time.
+fn check_params_static(
+    ctx: &mut Ctx<'_>,
+    pairs: Option<&[StaticPair]>,
+    decls: &[ParamDecl],
+    what: &str,
+    span: (usize, usize),
+) {
+    let declared: HashMap<&str, &ParamDecl> = decls.iter().map(|p| (p.name.as_str(), p)).collect();
+    let mut present = HashSet::new();
+    for (name, value, vspan) in pairs.unwrap_or_default() {
+        present.insert(name.as_str());
+        let Some(decl) = declared.get(name.as_str()) else {
+            ctx.err(format!("unknown parameter '{name}' for {what}"), *vspan);
+            continue;
+        };
+        if !decl.ty.matches(value) {
+            ctx.err(
+                format!(
+                    "parameter '{name}' of {what} expects {}, got {}",
+                    decl.ty.as_str(),
+                    CoarseType::describe(value)
+                ),
+                *vspan,
+            );
+        }
+    }
+    for p in decls {
+        if p.required && p.default.is_none() && !present.contains(p.name.as_str()) {
+            ctx.err(
+                format!("missing required parameter '{}' for {what}", p.name),
+                span,
+            );
+        }
+    }
+}
+
+fn load_package(
+    pkg_dir: &Path,
+    wcl_path: &Path,
+    diags: &mut Vec<Diag>,
+) -> Option<(Package, PendingTests)> {
     let source = match std::fs::read_to_string(wcl_path) {
         Ok(s) => s,
         Err(e) => {
@@ -544,9 +687,13 @@ fn load_package(pkg_dir: &Path, wcl_path: &Path, diags: &mut Vec<Diag>) -> Optio
     let description = string_field(&pkg_block, "description", &mut ctx).unwrap_or_default();
     let mut gatherers = BTreeMap::new();
     let mut resources = BTreeMap::new();
+    let mut test_blocks = Vec::new();
 
     for block in pkg_block.blocks() {
         match block.kind() {
+            // Tests parse after resources/gatherers so own-package
+            // references resolve regardless of declaration order.
+            "test" => test_blocks.push(block),
             "gatherer" => {
                 let Some(gname) = label_string(&block) else {
                     continue;
@@ -622,13 +769,307 @@ fn load_package(pkg_dir: &Path, wcl_path: &Path, diags: &mut Vec<Diag>) -> Optio
         }
     }
 
-    Some(Package {
+    let mut tests = Vec::new();
+    let mut pending = PendingTests {
+        file: wcl_path.to_path_buf(),
+        source: source.clone(),
+        steps: Vec::new(),
+        gathers: Vec::new(),
+    };
+    let mut seen_tests = HashSet::new();
+    for block in &test_blocks {
+        if let Some(t) = load_test(block, pkg_dir, &name, &source, &mut ctx, &mut pending) {
+            if !seen_tests.insert(t.name.clone()) {
+                ctx.err(format!("duplicate test '{}'", t.name), t.span);
+            }
+            tests.push(t);
+        }
+    }
+
+    Some((
+        Package {
+            name,
+            description,
+            dir: pkg_dir.to_path_buf(),
+            gatherers,
+            resources,
+            tests,
+        },
+        pending,
+    ))
+}
+
+/// Parse one `test` block. Reference and parameter-schema checks go into
+/// `pending` for the cross-package second pass; everything test-local
+/// (expect values, requires shape, uniqueness) is checked here.
+fn load_test(
+    block: &Block<'_>,
+    pkg_dir: &Path,
+    pkg_name: &str,
+    source: &str,
+    ctx: &mut Ctx<'_>,
+    pending: &mut PendingTests,
+) -> Option<TestDecl> {
+    let span = wcl_span(block.span());
+    let name = label_string(block)?;
+    let description = string_field(block, "description", ctx).unwrap_or_default();
+    let backend = string_field_optional(block, "backend", ctx).unwrap_or_else(|| "docker".into());
+    if backend != "docker" {
+        ctx.err(
+            format!(
+                "unknown test backend '{backend}' (only 'docker' is supported; \
+                 'vmlab' is planned)"
+            ),
+            span,
+        );
+    }
+    let image = string_field(block, "image", ctx)?;
+    let setup = string_field_optional(block, "setup", ctx);
+    let verify = string_field_optional(block, "verify", ctx).and_then(|rel| {
+        let path = pkg_dir.join(&rel);
+        if path.is_file() {
+            Some(path)
+        } else {
+            ctx.err(
+                format!(
+                    "verify script '{rel}' does not exist in {}",
+                    pkg_dir.display()
+                ),
+                span,
+            );
+            None
+        }
+    });
+
+    let mut steps = Vec::new();
+    let mut gathers = Vec::new();
+    let mut seen_gathers = HashSet::new();
+
+    for b in block.blocks() {
+        match b.kind() {
+            "step" => {
+                let sspan = wcl_span(b.span());
+                let Some(sname) = label_string(&b) else {
+                    continue;
+                };
+                let sdesc = string_field(&b, "description", ctx).unwrap_or_default();
+                let Some(rref) = string_field(&b, "resource", ctx) else {
+                    continue;
+                };
+                let (spkg, sres) = match rref.split_once('.') {
+                    Some((p, r)) => (p.to_string(), r.to_string()),
+                    None => (pkg_name.to_string(), rref.clone()),
+                };
+                let what = format!("step '{sname}' of test '{name}'");
+                let expect = match string_field_optional(&b, "expect", ctx) {
+                    Some(s) => match Expect::parse(&s) {
+                        Some(e) => e,
+                        None => {
+                            ctx.err(
+                                format!(
+                                    "invalid expect '{s}' (expected converge, \
+                                     already_configured, error, skip or reboot_required)"
+                                ),
+                                sspan,
+                            );
+                            Expect::Converge
+                        }
+                    },
+                    None => Expect::Converge,
+                };
+                let requires = string_list_field(&b, "requires", ctx).unwrap_or_default();
+                let condition_src = b
+                    .fields()
+                    .find(|f| f.name() == "condition")
+                    .and_then(|f| field_expr_source(&f, source));
+                let props_block = b.blocks().find(|x| x.kind() == "properties");
+                let properties_src = props_block.as_ref().and_then(|p| block_source(p, source));
+                let props = props_block
+                    .as_ref()
+                    .map(|p| static_pairs(p, "parameter", &what, ctx));
+                pending.steps.push(PendingStepCheck {
+                    what,
+                    package: spkg.clone(),
+                    resource: sres.clone(),
+                    props,
+                    span: sspan,
+                });
+                steps.push(TestStep {
+                    name: sname,
+                    description: sdesc,
+                    package: spkg,
+                    resource: sres,
+                    expect,
+                    requires,
+                    condition_src,
+                    properties_src,
+                    span: sspan,
+                });
+            }
+            "gather" => {
+                let gspan = wcl_span(b.span());
+                let Some(gname) = label_string(&b) else {
+                    continue;
+                };
+                let gdesc = string_field(&b, "description", ctx).unwrap_or_default();
+                let Some(from) = string_field(&b, "from", ctx) else {
+                    continue;
+                };
+                let (gpkg, ggath) = match from.split_once('.') {
+                    Some((p, g)) => (p.to_string(), g.to_string()),
+                    None => (pkg_name.to_string(), from.clone()),
+                };
+                let what = format!("gather '{gname}' of test '{name}'");
+                let params_block = b.blocks().find(|x| x.kind() == "params");
+                let params = params_block
+                    .as_ref()
+                    .map(|p| static_pairs(p, "parameter", &what, ctx));
+                let expect = b
+                    .blocks()
+                    .find(|x| x.kind() == "expect")
+                    .map(|p| static_pairs(&p, "expectation", &what, ctx))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(k, v, _)| (k, v))
+                    .collect();
+                if !seen_gathers.insert(gname.clone()) {
+                    ctx.err(
+                        format!("duplicate gather name '{gname}' in test '{name}'"),
+                        gspan,
+                    );
+                }
+                pending.gathers.push(PendingGatherCheck {
+                    what,
+                    package: gpkg.clone(),
+                    gatherer: ggath.clone(),
+                    params: params.clone(),
+                    span: gspan,
+                });
+                gathers.push(TestGather {
+                    name: gname,
+                    description: gdesc,
+                    package: gpkg,
+                    gatherer: ggath,
+                    params: params
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(k, v, _)| (k, v))
+                        .collect(),
+                    expect,
+                    span: gspan,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    // Step names unique; requires resolve within the test and never cross
+    // from an expected-success step onto an expected-failure one (the
+    // dependent would be blocked and the test could never pass).
+    let mut names = HashSet::new();
+    for s in &steps {
+        if !names.insert(s.name.clone()) {
+            ctx.err(
+                format!("duplicate step name '{}' in test '{}'", s.name, name),
+                s.span,
+            );
+        }
+    }
+    let expects: HashMap<&str, Expect> =
+        steps.iter().map(|s| (s.name.as_str(), s.expect)).collect();
+    for s in &steps {
+        for req in &s.requires {
+            if req == &s.name {
+                ctx.err(format!("step '{}' requires itself", s.name), s.span);
+                continue;
+            }
+            match expects.get(req.as_str()) {
+                None => ctx.err(
+                    format!(
+                        "step '{}' requires unknown step '{}' in test '{}'",
+                        s.name, req, name
+                    ),
+                    s.span,
+                ),
+                Some(dep) => {
+                    let wants_success =
+                        matches!(s.expect, Expect::Converge | Expect::AlreadyConfigured);
+                    let dep_fails = matches!(dep, Expect::Error | Expect::RebootRequired);
+                    if wants_success && dep_fails {
+                        ctx.err(
+                            format!(
+                                "step '{}' (expect = \"{}\") requires step '{}' which \
+                                 expects {}; the dependent would never run, so the test \
+                                 could never pass",
+                                s.name,
+                                s.expect.as_str(),
+                                req,
+                                dep.as_str()
+                            ),
+                            s.span,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if steps.is_empty() && gathers.is_empty() {
+        ctx.err(
+            format!("test '{name}' declares no steps and no gathers"),
+            span,
+        );
+    }
+
+    Some(TestDecl {
         name,
         description,
-        dir: pkg_dir.to_path_buf(),
-        gatherers,
-        resources,
+        backend,
+        image,
+        setup,
+        verify,
+        steps,
+        gathers,
+        span,
     })
+}
+
+/// Statically evaluate every field of a params/properties/expect block.
+/// Test values must be static — the synthesized playbook has no variables
+/// — so unresolved references are errors, not deferrals.
+fn static_pairs(block: &Block<'_>, noun: &str, what: &str, ctx: &mut Ctx<'_>) -> Vec<StaticPair> {
+    let mut out = Vec::new();
+    for f in block.fields() {
+        let fspan = wcl_span(f.span());
+        match f.value() {
+            Ok(v) => match wcl_to_dyn(v) {
+                Ok(dv) => out.push((f.name().to_string(), dv, fspan)),
+                Err(e) => ctx.err(format!("{noun} '{}' of {what}: {e}", f.name()), fspan),
+            },
+            Err(EvalError::UnresolvedReference { .. }) => {
+                ctx.err(
+                    format!(
+                        "{noun} '{}' of {what} references a variable; tests run against \
+                         a variable-free playbook, so values must be static",
+                        f.name()
+                    ),
+                    fspan,
+                );
+            }
+            Err(e) => {
+                ctx.diags
+                    .push(Diag::from_eval(e.clone(), ctx.file, ctx.source));
+            }
+        }
+    }
+    out
+}
+
+/// Raw source text of a whole block (e.g. `properties { … }`), for
+/// verbatim splicing into the synthesized test playbook.
+fn block_source(block: &Block<'_>, source: &str) -> Option<String> {
+    let span = block.span();
+    source.get(span.start..span.end).map(str::to_string)
 }
 
 fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
