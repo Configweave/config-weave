@@ -1,11 +1,13 @@
 mod comdispatch;
 mod convert;
 mod diag;
+mod docsgen;
 mod engine;
 mod hostapi;
 mod logging;
 mod model;
 mod report;
+mod scaffold;
 mod vocab;
 
 use engine::status::Mode;
@@ -27,7 +29,11 @@ const EXIT_VALIDATION: u8 = 2;
 const EXIT_REBOOT_REQUIRED: u8 = 3;
 
 #[derive(Parser)]
-#[command(name = "config-weave", version, about = "Single-binary configuration management")]
+#[command(
+    name = "config-weave",
+    version,
+    about = "Single-binary configuration management"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -111,27 +117,50 @@ fn main() -> ExitCode {
         }
         Command::Check { playbook_dir, play } => cmd_run(&cli, playbook_dir, play, Mode::Check),
         Command::Apply { playbook_dir, play } => cmd_run(&cli, playbook_dir, play, Mode::Apply),
-        Command::Docs { .. } | Command::Wispi { .. } | Command::Init { .. } => {
-            eprintln!("error: not implemented yet (lands in M7)");
-            EXIT_VALIDATION
+        Command::Docs {
+            playbook_dir,
+            outdir,
+        } => cmd_docs(playbook_dir, outdir.as_deref()),
+        Command::Wispi { outdir } => {
+            let dir = outdir.clone().unwrap_or_else(|| PathBuf::from("."));
+            match scaffold::wispi(&dir) {
+                Ok(()) => {
+                    println!("wrote {} and wisp.toml", dir.join("weave.wispi").display());
+                    EXIT_OK
+                }
+                Err(d) => {
+                    eprintln!("{}", d.rendered);
+                    EXIT_VALIDATION
+                }
+            }
         }
+        Command::Init { dir } => match scaffold::init(dir) {
+            Ok(()) => {
+                println!(
+                    "scaffolded a playbook in {} — next: edit, then `config-weave validate {}`",
+                    dir.display(),
+                    dir.display()
+                );
+                EXIT_OK
+            }
+            Err(d) => {
+                eprintln!("{}", d.rendered);
+                EXIT_VALIDATION
+            }
+        },
     };
     ExitCode::from(code)
 }
 
 /// Load + full validation; returns the playbook only when clean.
-fn load_validated(dir: &PathBuf) -> Result<model::Playbook, Vec<Diag>> {
+fn load_validated(dir: &std::path::Path) -> Result<model::Playbook, Vec<Diag>> {
     let loaded: model::Loaded = model::load(dir);
     let mut diags = loaded.diags;
     let Some(pb) = loaded.playbook else {
         return Err(diags);
     };
     diags.extend(engine::validate(&pb));
-    if diags.is_empty() {
-        Ok(pb)
-    } else {
-        Err(diags)
-    }
+    if diags.is_empty() { Ok(pb) } else { Err(diags) }
 }
 
 fn print_diags(diags: &[Diag]) {
@@ -145,7 +174,7 @@ fn print_diags(diags: &[Diag]) {
     );
 }
 
-fn cmd_validate(dir: &PathBuf) -> u8 {
+fn cmd_validate(dir: &std::path::Path) -> u8 {
     match load_validated(dir) {
         Ok(pb) => {
             let steps: usize = pb.plays.iter().map(|p| p.steps().len()).sum();
@@ -181,7 +210,7 @@ fn override_store(cli: &Cli) -> Result<VarStore, Vec<Diag>> {
     Ok(store)
 }
 
-fn cmd_run(cli: &Cli, dir: &PathBuf, play: &str, mode: Mode) -> u8 {
+fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode) -> u8 {
     let pb = match load_validated(dir) {
         Ok(pb) => pb,
         Err(diags) => {
@@ -198,7 +227,15 @@ fn cmd_run(cli: &Cli, dir: &PathBuf, play: &str, mode: Mode) -> u8 {
     };
     let mode_out = report::select_mode(cli.json, cli.no_color);
     let sink = report::progress_sink(mode_out);
-    match engine::execute(&pb, play, mode, cli.continue_on_error, cli.jobs, store, sink) {
+    match engine::execute(
+        &pb,
+        play,
+        mode,
+        cli.continue_on_error,
+        cli.jobs,
+        store,
+        sink,
+    ) {
         Ok(run_report) => {
             match mode_out {
                 report::OutputMode::Json => println!("{}", report::json(&run_report)),
@@ -214,7 +251,32 @@ fn cmd_run(cli: &Cli, dir: &PathBuf, play: &str, mode: Mode) -> u8 {
     }
 }
 
-fn cmd_list(dir: &PathBuf) -> u8 {
+fn cmd_docs(dir: &std::path::Path, outdir: Option<&std::path::Path>) -> u8 {
+    // Docs share the validation pipeline: a playbook that doesn't
+    // validate doesn't document (PRD §12).
+    let pb = match load_validated(dir) {
+        Ok(pb) => pb,
+        Err(diags) => {
+            print_diags(&diags);
+            return EXIT_VALIDATION;
+        }
+    };
+    let out = outdir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| dir.join("docs"));
+    match docsgen::generate(&pb, &out) {
+        Ok(pages) => {
+            println!("rendered {pages} page(s) to {}", out.display());
+            EXIT_OK
+        }
+        Err(d) => {
+            eprintln!("{}", d.rendered);
+            EXIT_VALIDATION
+        }
+    }
+}
+
+fn cmd_list(dir: &std::path::Path) -> u8 {
     let loaded = model::load(dir);
     let Some(pb) = loaded.playbook else {
         print_diags(&loaded.diags);

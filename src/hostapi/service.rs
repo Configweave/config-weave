@@ -18,27 +18,40 @@ pub fn module() -> Module {
          pause_pending | continue_pending",
     );
     #[cfg(windows)]
-    m.fn_("status", |name: &str| -> Result<String, String> { win::status(name) });
+    m.fn_("status", |name: &str| -> Result<String, String> {
+        win::status(name)
+    });
     #[cfg(not(windows))]
-    m.fn_("status", |_: &str| -> Result<String, String> { Err(NOT_WINDOWS.to_string()) });
+    m.fn_("status", |_: &str| -> Result<String, String> {
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m.doc_next("Start a service (no-op when already running)");
     #[cfg(windows)]
-    m.fn_("start", |name: &str| -> Result<(), String> { win::start(name) });
+    m.fn_("start", |name: &str| -> Result<(), String> {
+        win::start(name)
+    });
     #[cfg(not(windows))]
-    m.fn_("start", |_: &str| -> Result<(), String> { Err(NOT_WINDOWS.to_string()) });
+    m.fn_("start", |_: &str| -> Result<(), String> {
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m.doc_next("Stop a service (no-op when already stopped)");
     #[cfg(windows)]
-    m.fn_("stop", |name: &str| -> Result<(), String> { win::stop(name) });
+    m.fn_("stop", |name: &str| -> Result<(), String> {
+        win::stop(name)
+    });
     #[cfg(not(windows))]
-    m.fn_("stop", |_: &str| -> Result<(), String> { Err(NOT_WINDOWS.to_string()) });
+    m.fn_("stop", |_: &str| -> Result<(), String> {
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m.doc_next("Set startup type: automatic | manual | disabled");
     #[cfg(windows)]
-    m.fn_("set_startup", |name: &str, mode: &str| -> Result<(), String> {
-        win::set_startup(name, mode)
-    });
+    m.fn_(
+        "set_startup",
+        |name: &str, mode: &str| -> Result<(), String> { win::set_startup(name, mode) },
+    );
     #[cfg(not(windows))]
     m.fn_("set_startup", |_: &str, _: &str| -> Result<(), String> {
         Err(NOT_WINDOWS.to_string())
@@ -46,9 +59,13 @@ pub fn module() -> Module {
 
     m.doc_next("Startup type of a service: automatic | manual | disabled");
     #[cfg(windows)]
-    m.fn_("startup", |name: &str| -> Result<String, String> { win::startup(name) });
+    m.fn_("startup", |name: &str| -> Result<String, String> {
+        win::startup(name)
+    });
     #[cfg(not(windows))]
-    m.fn_("startup", |_: &str| -> Result<String, String> { Err(NOT_WINDOWS.to_string()) });
+    m.fn_("startup", |_: &str| -> Result<String, String> {
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m
 }
@@ -56,12 +73,12 @@ pub fn module() -> Module {
 #[cfg(windows)]
 mod win {
     use windows::Win32::System::Services::{
-        CloseServiceHandle, ControlService, ENUM_SERVICE_TYPE, OpenSCManagerW, OpenServiceW,
-        QUERY_SERVICE_CONFIGW, QueryServiceConfigW, QueryServiceStatus, SC_HANDLE,
-        SC_MANAGER_CONNECT, SERVICE_AUTO_START, SERVICE_CHANGE_CONFIG, SERVICE_CONTROL_STOP,
-        SERVICE_DEMAND_START, SERVICE_DISABLED, SERVICE_ERROR, SERVICE_NO_CHANGE,
-        SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_START_TYPE,
-        SERVICE_STATUS, SERVICE_STOP, ChangeServiceConfigW, StartServiceW,
+        ChangeServiceConfigW, CloseServiceHandle, ControlService, ENUM_SERVICE_TYPE,
+        OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW, QueryServiceConfigW,
+        QueryServiceStatus, SC_HANDLE, SC_MANAGER_CONNECT, SERVICE_AUTO_START,
+        SERVICE_CHANGE_CONFIG, SERVICE_CONTROL_STOP, SERVICE_DEMAND_START, SERVICE_DISABLED,
+        SERVICE_ERROR, SERVICE_NO_CHANGE, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
+        SERVICE_START, SERVICE_START_TYPE, SERVICE_STATUS, SERVICE_STOP, StartServiceW,
     };
     use windows::core::{HSTRING, PCWSTR};
 
@@ -90,8 +107,7 @@ mod win {
         let (_scm, svc) = open(name, SERVICE_QUERY_STATUS)?;
         let mut st = SERVICE_STATUS::default();
         unsafe {
-            QueryServiceStatus(svc.0, &mut st)
-                .map_err(|e| format!("querying '{name}': {e}"))?;
+            QueryServiceStatus(svc.0, &mut st).map_err(|e| format!("querying '{name}': {e}"))?;
         }
         Ok(match st.dwCurrentState.0 {
             1 => "stopped",
@@ -111,9 +127,7 @@ mod win {
             return Ok(());
         }
         let (_scm, svc) = open(name, SERVICE_START)?;
-        unsafe {
-            StartServiceW(svc.0, None).map_err(|e| format!("starting '{name}': {e}"))
-        }
+        unsafe { StartServiceW(svc.0, None).map_err(|e| format!("starting '{name}': {e}")) }
     }
 
     pub fn stop(name: &str) -> Result<(), String> {

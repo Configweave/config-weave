@@ -20,7 +20,9 @@ pub fn module() -> Module {
     m.doc("Process environment and host identity");
 
     m.doc_next("Read an environment variable (None when unset)");
-    m.fn_("get", |name: &str| -> Option<String> { std::env::var(name).ok() });
+    m.fn_("get", |name: &str| -> Option<String> {
+        std::env::var(name).ok()
+    });
     m.doc_next("Set an environment variable for this process and its children");
     m.fn_("set", |name: &str, value: &str| {
         // Safety: scripts run one per worker thread but env mutation is
@@ -38,11 +40,14 @@ pub fn module() -> Module {
             .collect()
     });
     m.doc_next("Join paths into a PATH-style list with the platform separator");
-    m.fn_("path_join", |parts: Vec<String>| -> Result<String, String> {
-        std::env::join_paths(parts.iter())
-            .map(|s| s.to_string_lossy().into_owned())
-            .map_err(|e| e.to_string())
-    });
+    m.fn_(
+        "path_join",
+        |parts: Vec<String>| -> Result<String, String> {
+            std::env::join_paths(parts.iter())
+                .map(|s| s.to_string_lossy().into_owned())
+                .map_err(|e| e.to_string())
+        },
+    );
     m.doc_next("Hostname of this machine");
     m.fn_("hostname", || -> String {
         sysinfo::System::host_name().unwrap_or_default()

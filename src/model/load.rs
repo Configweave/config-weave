@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use wcl_lang::{Block, Document, EvalError, Environment, Field, Value};
+use wcl_lang::{Block, Document, Environment, EvalError, Field, Value};
 
 use crate::convert::wcl_to_dyn;
 use crate::diag::{Diag, wcl_span};
@@ -109,13 +109,8 @@ struct Ctx<'a> {
 
 impl Ctx<'_> {
     fn err(&mut self, message: impl Into<String>, span: (usize, usize)) {
-        self.diags.push(Diag::spanned(
-            message,
-            "here",
-            self.file,
-            self.source,
-            span,
-        ));
+        self.diags
+            .push(Diag::spanned(message, "here", self.file, self.source, span));
     }
 }
 
@@ -125,6 +120,11 @@ struct PlaybookLoader<'a> {
 }
 
 impl PlaybookLoader<'_> {
+    fn condition_src(&self, block: &Block<'_>) -> Option<String> {
+        let f = block.fields().find(|f| f.name() == "condition")?;
+        field_expr_source(&f, self.ctx.source)
+    }
+
     fn load(&mut self, dir: &Path, pb: &Block<'_>, source: &str) -> Playbook {
         let name = label_string(pb).unwrap_or_default();
         let description = string_field(pb, "description", &mut self.ctx).unwrap_or_default();
@@ -201,8 +201,10 @@ impl PlaybookLoader<'_> {
             return None;
         };
         let Some(pkg) = self.packages.get(package) else {
-            self.ctx
-                .err(format!("unknown package '{package}' in gather '{name}'"), span);
+            self.ctx.err(
+                format!("unknown package '{package}' in gather '{name}'"),
+                span,
+            );
             return None;
         };
         let Some(decl) = pkg.gatherers.get(gatherer) else {
@@ -216,13 +218,16 @@ impl PlaybookLoader<'_> {
         if let Some(params) = block.blocks().find(|b| b.kind() == "params") {
             self.check_params(&params, &decl.params.clone(), &format!("gatherer '{from}'"));
         } else {
-            self.check_param_block_missing(&decl.params.clone(), span, &format!("gatherer '{from}'"));
+            self.check_param_block_missing(
+                &decl.params.clone(),
+                span,
+                &format!("gatherer '{from}'"),
+            );
         }
         Some(GatherInvocation {
             name,
             package: package.to_string(),
             gatherer: gatherer.to_string(),
-            span,
         })
     }
 
@@ -256,16 +261,11 @@ impl PlaybookLoader<'_> {
         for step in play.steps() {
             for req in &step.requires {
                 if req == &step.name {
-                    self.ctx.err(
-                        format!("step '{}' requires itself", step.name),
-                        step.span,
-                    );
+                    self.ctx
+                        .err(format!("step '{}' requires itself", step.name), step.span);
                 } else if !names.contains(req) {
                     self.ctx.err(
-                        format!(
-                            "step '{}' requires unknown step '{}'",
-                            step.name, req
-                        ),
+                        format!("step '{}' requires unknown step '{}'", step.name, req),
                         step.span,
                     );
                 }
@@ -286,7 +286,7 @@ impl PlaybookLoader<'_> {
                     let name = label_string(&block).unwrap_or_default();
                     let description =
                         string_field(&block, "description", &mut self.ctx).unwrap_or_default();
-                    let has_condition = block.fields().any(|f| f.name() == "condition");
+                    let condition_src = self.condition_src(&block);
                     let mut path = containers.to_vec();
                     path.push(name.clone());
                     let mut items = Vec::new();
@@ -294,7 +294,7 @@ impl PlaybookLoader<'_> {
                     out.push(PlayItem::Container(Container {
                         name,
                         description,
-                        has_condition,
+                        condition_src,
                         items,
                     }));
                 }
@@ -369,10 +369,14 @@ impl PlaybookLoader<'_> {
         if let Some(props) = block.blocks().find(|b| b.kind() == "properties") {
             self.check_params(&props, &params, &format!("resource '{package}.{resource}'"));
         } else {
-            self.check_param_block_missing(&params, span, &format!("resource '{package}.{resource}'"));
+            self.check_param_block_missing(
+                &params,
+                span,
+                &format!("resource '{package}.{resource}'"),
+            );
         }
 
-        let has_condition = block.fields().any(|f| f.name() == "condition");
+        let condition_src = self.condition_src(block);
 
         Some(Step {
             name,
@@ -382,7 +386,7 @@ impl PlaybookLoader<'_> {
             requires,
             concurrency,
             container_path: containers.to_vec(),
-            has_condition,
+            condition_src,
             span,
         })
     }
@@ -429,11 +433,9 @@ impl PlaybookLoader<'_> {
                 // Variable references resolve at run time; checked then.
                 Err(EvalError::UnresolvedReference { .. }) => {}
                 Err(e) => {
-                    self.ctx.diags.push(Diag::from_eval(
-                        e.clone(),
-                        self.ctx.file,
-                        self.ctx.source,
-                    ));
+                    self.ctx
+                        .diags
+                        .push(Diag::from_eval(e.clone(), self.ctx.file, self.ctx.source));
                 }
             }
         }
@@ -486,18 +488,15 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
             )));
             continue;
         }
-        match load_package(&pkg_dir, &wcl_path, diags) {
-            Some(pkg) => {
-                if pkg.name != folder {
-                    diags.push(Diag::bare(format!(
-                        "package '{}' lives in folder '{}'; the folder name and package \
-                         name must match",
-                        pkg.name, folder
-                    )));
-                }
-                packages.insert(pkg.name.clone(), pkg);
+        if let Some(pkg) = load_package(&pkg_dir, &wcl_path, diags) {
+            if pkg.name != folder {
+                diags.push(Diag::bare(format!(
+                    "package '{}' lives in folder '{}'; the folder name and package \
+                     name must match",
+                    pkg.name, folder
+                )));
             }
-            None => {}
+            packages.insert(pkg.name.clone(), pkg);
         }
     }
     packages
@@ -507,7 +506,10 @@ fn load_package(pkg_dir: &Path, wcl_path: &Path, diags: &mut Vec<Diag>) -> Optio
     let source = match std::fs::read_to_string(wcl_path) {
         Ok(s) => s,
         Err(e) => {
-            diags.push(Diag::bare(format!("cannot read {}: {e}", wcl_path.display())));
+            diags.push(Diag::bare(format!(
+                "cannot read {}: {e}",
+                wcl_path.display()
+            )));
             return None;
         }
     };
@@ -546,9 +548,13 @@ fn load_package(pkg_dir: &Path, wcl_path: &Path, diags: &mut Vec<Diag>) -> Optio
     for block in pkg_block.blocks() {
         match block.kind() {
             "gatherer" => {
-                let Some(gname) = label_string(&block) else { continue };
+                let Some(gname) = label_string(&block) else {
+                    continue;
+                };
                 let gdesc = string_field(&block, "description", &mut ctx).unwrap_or_default();
-                let Some(script) = script_field(&block, pkg_dir, &mut ctx) else { continue };
+                let Some(script) = script_field(&block, pkg_dir, &mut ctx) else {
+                    continue;
+                };
                 let params = load_params(&block, &mut ctx);
                 if gatherers
                     .insert(
@@ -569,9 +575,13 @@ fn load_package(pkg_dir: &Path, wcl_path: &Path, diags: &mut Vec<Diag>) -> Optio
                 }
             }
             "resource" => {
-                let Some(rname) = label_string(&block) else { continue };
+                let Some(rname) = label_string(&block) else {
+                    continue;
+                };
                 let rdesc = string_field(&block, "description", &mut ctx).unwrap_or_default();
-                let Some(script) = script_field(&block, pkg_dir, &mut ctx) else { continue };
+                let Some(script) = script_field(&block, pkg_dir, &mut ctx) else {
+                    continue;
+                };
                 let concurrency = match string_field_optional(&block, "concurrency", &mut ctx) {
                     Some(s) => match Concurrency::parse(&s) {
                         Some(c) => c,
@@ -616,7 +626,6 @@ fn load_package(pkg_dir: &Path, wcl_path: &Path, diags: &mut Vec<Diag>) -> Optio
         name,
         description,
         dir: pkg_dir.to_path_buf(),
-        source: source.clone(),
         gatherers,
         resources,
     })
@@ -626,7 +635,9 @@ fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
     let mut params = Vec::new();
     let mut seen = HashSet::new();
     for b in block.blocks().filter(|b| b.kind() == "param") {
-        let Some(name) = label_string(&b) else { continue };
+        let Some(name) = label_string(&b) else {
+            continue;
+        };
         if !seen.insert(name.clone()) {
             ctx.err(format!("duplicate parameter '{name}'"), wcl_span(b.span()));
             continue;
@@ -644,8 +655,10 @@ fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
             continue;
         };
         let required = bool_field(&b, "required", ctx).unwrap_or(false);
-        let default = b.fields().find(|f| f.name() == "default").and_then(|f| {
-            match f.value() {
+        let default = b
+            .fields()
+            .find(|f| f.name() == "default")
+            .and_then(|f| match f.value() {
                 Ok(v) => match wcl_to_dyn(v) {
                     Ok(dv) => {
                         if !ty.matches(&dv) {
@@ -663,7 +676,10 @@ fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
                         }
                     }
                     Err(e) => {
-                        ctx.err(format!("default for parameter '{name}': {e}"), wcl_span(f.span()));
+                        ctx.err(
+                            format!("default for parameter '{name}': {e}"),
+                            wcl_span(f.span()),
+                        );
                         None
                     }
                 },
@@ -672,8 +688,7 @@ fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
                         .push(Diag::from_eval(e.clone(), ctx.file, ctx.source));
                     None
                 }
-            }
-        });
+            });
         params.push(ParamDecl {
             name,
             description,
@@ -813,7 +828,10 @@ fn script_field(block: &Block<'_>, pkg_dir: &Path, ctx: &mut Ctx<'_>) -> Option<
     let path = pkg_dir.join(&rel);
     if !path.is_file() {
         ctx.err(
-            format!("script file '{rel}' does not exist in {}", pkg_dir.display()),
+            format!(
+                "script file '{rel}' does not exist in {}",
+                pkg_dir.display()
+            ),
             wcl_span(block.span()),
         );
         return None;

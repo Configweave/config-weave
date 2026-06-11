@@ -31,7 +31,13 @@ fn open_with_registry(source: &str, vars: Option<&str>) -> Result<Document, wcl_
         reg.register("weave/vars.wcl", v.to_string());
     }
     let env = Environment::new();
-    Document::open_at_with_loader(source, "playbook.wcl", None, &env, reg.loader(disk_loader()))
+    Document::open_at_with_loader(
+        source,
+        "playbook.wcl",
+        None,
+        &env,
+        reg.loader(disk_loader()),
+    )
 }
 
 const PLAYBOOK: &str = r#"import <weave.wcl>
@@ -62,7 +68,10 @@ fn structure_readable_without_vars() {
         .fields()
         .find(|f| f.name() == "description")
         .expect("description field");
-    assert_eq!(desc.value().unwrap(), &Value::Utf8("Install something".into()));
+    assert_eq!(
+        desc.value().unwrap(),
+        &Value::Utf8("Install something".into())
+    );
 
     // Schema validation must not be tripped up by the unresolved condition
     // or the schemaless properties block.
@@ -106,7 +115,9 @@ step broken {
     let doc = open_with_registry(bad, None).expect("open");
     let errors = doc.schema_errors();
     assert!(
-        errors.iter().any(|e| format!("{e:?}").contains("bogus_field")),
+        errors
+            .iter()
+            .any(|e| format!("{e:?}").contains("bogus_field")),
         "unknown field not flagged: {errors:#?}"
     );
 
@@ -173,7 +184,9 @@ fn check(params: Value) -> CheckResult {
     let mut params = std::collections::HashMap::new();
     params.insert("version".to_string(), DynValue::String("8.0".into()));
     let mut vm = Vm::new(&ctx);
-    let result = handle.call(&mut vm, (DynValue::Map(params),)).expect("call");
+    let result = handle
+        .call(&mut vm, (DynValue::Map(params),))
+        .expect("call");
     assert_eq!(result, CheckResult::AlreadyConfigured);
 }
 

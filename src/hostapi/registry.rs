@@ -20,13 +20,15 @@ pub fn module() -> Module {
 
     m.doc_next("Read a value (None when the key or value is absent)");
     #[cfg(windows)]
-    m.fn_("read", |key: &str, name: &str| -> Result<Option<DynValue>, String> {
-        win::read(key, name)
-    });
+    m.fn_(
+        "read",
+        |key: &str, name: &str| -> Result<Option<DynValue>, String> { win::read(key, name) },
+    );
     #[cfg(not(windows))]
-    m.fn_("read", |_: &str, _: &str| -> Result<Option<DynValue>, String> {
-        Err(NOT_WINDOWS.to_string())
-    });
+    m.fn_(
+        "read",
+        |_: &str, _: &str| -> Result<Option<DynValue>, String> { Err(NOT_WINDOWS.to_string()) },
+    );
 
     m.doc_next("Write a value. kind: sz | dword | qword | expand_sz | multi_sz");
     #[cfg(windows)]
@@ -46,9 +48,10 @@ pub fn module() -> Module {
 
     m.doc_next("Delete a value");
     #[cfg(windows)]
-    m.fn_("delete_value", |key: &str, name: &str| -> Result<(), String> {
-        win::delete_value(key, name)
-    });
+    m.fn_(
+        "delete_value",
+        |key: &str, name: &str| -> Result<(), String> { win::delete_value(key, name) },
+    );
     #[cfg(not(windows))]
     m.fn_("delete_value", |_: &str, _: &str| -> Result<(), String> {
         Err(NOT_WINDOWS.to_string())
@@ -56,21 +59,33 @@ pub fn module() -> Module {
 
     m.doc_next("Create a key (and parents)");
     #[cfg(windows)]
-    m.fn_("create_key", |key: &str| -> Result<(), String> { win::create_key(key) });
+    m.fn_("create_key", |key: &str| -> Result<(), String> {
+        win::create_key(key)
+    });
     #[cfg(not(windows))]
-    m.fn_("create_key", |_: &str| -> Result<(), String> { Err(NOT_WINDOWS.to_string()) });
+    m.fn_("create_key", |_: &str| -> Result<(), String> {
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m.doc_next("Delete a key and its subtree");
     #[cfg(windows)]
-    m.fn_("delete_key", |key: &str| -> Result<(), String> { win::delete_key(key) });
+    m.fn_("delete_key", |key: &str| -> Result<(), String> {
+        win::delete_key(key)
+    });
     #[cfg(not(windows))]
-    m.fn_("delete_key", |_: &str| -> Result<(), String> { Err(NOT_WINDOWS.to_string()) });
+    m.fn_("delete_key", |_: &str| -> Result<(), String> {
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m.doc_next("Whether a key exists");
     #[cfg(windows)]
-    m.fn_("key_exists", |key: &str| -> Result<bool, String> { win::key_exists(key) });
+    m.fn_("key_exists", |key: &str| -> Result<bool, String> {
+        win::key_exists(key)
+    });
     #[cfg(not(windows))]
-    m.fn_("key_exists", |_: &str| -> Result<bool, String> { Err(NOT_WINDOWS.to_string()) });
+    m.fn_("key_exists", |_: &str| -> Result<bool, String> {
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m
 }
@@ -80,9 +95,9 @@ mod win {
     use windows::Win32::System::Registry::{
         HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_CONFIG, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
         HKEY_USERS, KEY_READ, KEY_WRITE, REG_DWORD, REG_EXPAND_SZ, REG_MULTI_SZ,
-        REG_OPTION_NON_VOLATILE, REG_QWORD, REG_SZ, REG_VALUE_TYPE, RegCloseKey, RegCreateKeyExW,
-        RegDeleteTreeW, RegDeleteValueW, RegGetValueW, RegOpenKeyExW, RegQueryValueExW,
-        RegSetValueExW, RRF_RT_ANY,
+        REG_OPTION_NON_VOLATILE, REG_QWORD, REG_SZ, REG_VALUE_TYPE, RRF_RT_ANY, RegCloseKey,
+        RegCreateKeyExW, RegDeleteTreeW, RegDeleteValueW, RegGetValueW, RegOpenKeyExW,
+        RegQueryValueExW, RegSetValueExW,
     };
     use windows::core::{HSTRING, PCWSTR};
     use wisp_std::DynValue;
@@ -100,7 +115,10 @@ mod win {
         Ok((h, rest.to_string()))
     }
 
-    fn open(key: &str, access: windows::Win32::System::Registry::REG_SAM_FLAGS) -> Result<HKEY, String> {
+    fn open(
+        key: &str,
+        access: windows::Win32::System::Registry::REG_SAM_FLAGS,
+    ) -> Result<HKEY, String> {
         let (hive, path) = split_hive(key)?;
         let wide = HSTRING::from(path);
         let mut out = HKEY::default();
@@ -235,9 +253,15 @@ mod win {
             }
         };
         unsafe {
-            RegSetValueExW(handle.0, PCWSTR(wide.as_ptr()), None, reg_kind, Some(&bytes))
-                .ok()
-                .map_err(|e| format!("writing '{key}\\{name}': {e}"))
+            RegSetValueExW(
+                handle.0,
+                PCWSTR(wide.as_ptr()),
+                None,
+                reg_kind,
+                Some(&bytes),
+            )
+            .ok()
+            .map_err(|e| format!("writing '{key}\\{name}': {e}"))
         }
     }
 

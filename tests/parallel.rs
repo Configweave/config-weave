@@ -10,7 +10,11 @@ fn bin() -> PathBuf {
 }
 
 fn run_in(dir: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(bin()).args(args).current_dir(dir).output().unwrap();
+    let out = Command::new(bin())
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -227,7 +231,10 @@ fn concurrency_classes_enforced_under_jobs_8() {
     let i1 = stdout.find("e1").unwrap();
     let i2 = stdout.find("e2").unwrap();
     let i3 = stdout.find("e3").unwrap();
-    assert!(i1 < i2 && i2 < i3, "report not in declaration order: {stdout}");
+    assert!(
+        i1 < i2 && i2 < i3,
+        "report not in declaration order: {stdout}"
+    );
 }
 
 fn exclusive_step(name: &str, witness: &Path) -> String {
@@ -337,7 +344,11 @@ fn step_level_tightening() {
 
     let (code, stdout, _) = run_in(dir.path(), &["apply", ".", "tighten", "--jobs", "8"]);
     assert_eq!(code, 0, "{stdout}");
-    assert_eq!(sample(&witness, "tightened"), 1, "tightened step overlapped");
+    assert_eq!(
+        sample(&witness, "tightened"),
+        1,
+        "tightened step overlapped"
+    );
 }
 
 /// play parallel = false forces sequential execution even with --jobs 8.

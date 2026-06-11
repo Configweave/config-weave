@@ -112,8 +112,8 @@ fn json_output_is_schema_stable() {
     assert_eq!(out.status.code(), Some(0), "{stdout}{stderr}");
 
     // Stdout is exactly one JSON object — nothing else.
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("stdout is not JSON: {e}\n{stdout}"));
+    let v: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout is not JSON: {e}\n{stdout}"));
 
     assert_eq!(v["playbook"], "Output");
     assert_eq!(v["version"], "2.0.0");
@@ -145,9 +145,13 @@ fn ndjson_log_file_carries_step_context() {
 
     let out = Command::new(bin())
         .args([
-            "apply", ".", "p",
-            "--log-file", log_path.to_str().unwrap(),
-            "--log-level", "debug",
+            "apply",
+            ".",
+            "p",
+            "--log-file",
+            log_path.to_str().unwrap(),
+            "--log-level",
+            "debug",
         ])
         .current_dir(dir.path())
         .output()
@@ -157,8 +161,8 @@ fn ndjson_log_file_carries_step_context() {
     let log = std::fs::read_to_string(&log_path).expect("log file written");
     let mut saw_step_line = false;
     for line in log.lines() {
-        let v: serde_json::Value =
-            serde_json::from_str(line).unwrap_or_else(|e| panic!("log line is not JSON: {e}\n{line}"));
+        let v: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("log line is not JSON: {e}\n{line}"));
         if v["fields"]["message"] == "writing marker" {
             assert_eq!(v["fields"]["step"], "make");
             assert_eq!(v["fields"]["resource"], "probe.marker");
@@ -181,6 +185,9 @@ fn plain_mode_auto_selected_without_tty() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains('\x1b'), "ANSI codes in non-TTY output: {stdout:?}");
+    assert!(
+        !stdout.contains('\x1b'),
+        "ANSI codes in non-TTY output: {stdout:?}"
+    );
     assert!(stdout.contains("[     not configured]"), "{stdout}");
 }

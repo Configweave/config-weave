@@ -79,6 +79,21 @@ windows 0.6x.
   `url = url` is a self-reference (cycle error). Use distinct variable
   names (`tool_url`) for values fed to same-named parameters.
 
+## Authoring & docs (PRD §12/§13)
+
+- `com` binding details: wisp has fixed arity, so `obj.call(name, args)`
+  takes a `List[Value]`; VT_DISPATCH results surface through
+  `get_object`/`call_object`/`items()` because the dynamic `Value` cannot
+  hold an object handle. `wmi_query` flattens each SWbemObject row into a
+  property map host-side — scripts never touch enumerators.
+- The step DAG renders as a wdoc `diagram { layout = :layered }` of
+  flowchart `process` shapes with `:flow` connections.
+- `wisp check`/LSP against the emitted `weave.wispi` required a wisp-cli
+  fix (committed upstream): when a `wisp.toml` manifest exists, the CLI
+  now type-checks against exactly the declared interfaces instead of
+  overlaying them on its own stdlib, whose same-named `fs` shadowed the
+  config-weave surface.
+
 ## wisp binding (PRD §6/§7)
 
 - Script entry points accept two signatures each: plain

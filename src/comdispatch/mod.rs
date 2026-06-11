@@ -13,8 +13,8 @@ use std::mem::ManuallyDrop;
 
 use windows::Win32::Foundation::VARIANT_BOOL;
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER, CoCreateInstance, CoGetObject, CoInitializeEx,
-    CoUninitialize, COINIT_APARTMENTTHREADED, DISPATCH_FLAGS, DISPATCH_METHOD,
+    CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance,
+    CoGetObject, CoInitializeEx, CoUninitialize, DISPATCH_FLAGS, DISPATCH_METHOD,
     DISPATCH_PROPERTYGET, DISPATCH_PROPERTYPUT, DISPPARAMS, IDispatch, SAFEARRAY,
 };
 use windows::Win32::System::Ole::{
@@ -22,9 +22,9 @@ use windows::Win32::System::Ole::{
     SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound, SafeArrayPutElement,
 };
 use windows::Win32::System::Variant::{
-    VARENUM, VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VariantClear, VT_ARRAY, VT_BOOL,
-    VT_BSTR, VT_DISPATCH, VT_EMPTY, VT_I1, VT_I2, VT_I4, VT_I8, VT_INT, VT_NULL, VT_R4, VT_R8,
-    VT_UI1, VT_UI2, VT_UI4, VT_UI8, VT_UINT, VT_UNKNOWN, VT_VARIANT,
+    VARENUM, VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_ARRAY, VT_BOOL, VT_BSTR,
+    VT_DISPATCH, VT_EMPTY, VT_I1, VT_I2, VT_I4, VT_I8, VT_INT, VT_NULL, VT_R4, VT_R8, VT_UI1,
+    VT_UI2, VT_UI4, VT_UI8, VT_UINT, VT_UNKNOWN, VT_VARIANT, VariantClear,
 };
 use windows::core::{BSTR, GUID, HSTRING, IUnknown, Interface, PCWSTR};
 
@@ -173,7 +173,13 @@ pub fn get_property(disp: &IDispatch, name: &str) -> Result<ComValue, String> {
 }
 
 pub fn set_property(disp: &IDispatch, name: &str, value: &DynValue) -> Result<(), String> {
-    invoke(disp, name, DISPATCH_PROPERTYPUT, std::slice::from_ref(value)).map(|_| ())
+    invoke(
+        disp,
+        name,
+        DISPATCH_PROPERTYPUT,
+        std::slice::from_ref(value),
+    )
+    .map(|_| ())
 }
 
 pub fn call_method(disp: &IDispatch, name: &str, args: &[DynValue]) -> Result<ComValue, String> {
@@ -250,9 +256,7 @@ pub fn wmi_query(query: &str) -> Result<DynValue, String> {
 }
 
 /// Read an SWbemObject's Properties_ collection into a map.
-fn wbem_properties(
-    obj: &IDispatch,
-) -> Result<std::collections::HashMap<String, DynValue>, String> {
+fn wbem_properties(obj: &IDispatch) -> Result<std::collections::HashMap<String, DynValue>, String> {
     let props = match get_property(obj, "Properties_")? {
         ComValue::Object(p) => p,
         ComValue::Data(_) => return Err("Properties_ is not an object".to_string()),

@@ -40,7 +40,9 @@ fn serve(artifact: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
     let handle = std::thread::spawn(move || {
         // Serve a handful of requests then exit (idempotence reruns).
         for _ in 0..8 {
-            let Ok((mut stream, _)) = listener.accept() else { return };
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
             let _ = stream.write_all(
@@ -196,7 +198,11 @@ fn bootstrap_downloads_verifies_extracts_installs() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(0), "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(stdout.contains("[         configured]"), "{stdout}");
     assert!(install_dir.join("tool/hello.sh").exists());
     // Script logs (including redirected print) land on stderr, not stdout.

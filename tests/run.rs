@@ -9,7 +9,11 @@ fn bin() -> PathBuf {
 }
 
 fn run_in(dir: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(bin()).args(args).current_dir(dir).output().unwrap();
+    let out = Command::new(bin())
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -148,7 +152,11 @@ fn error_halts_and_continue_on_error_continues() {
     let m2 = dir.path().join("m2");
     let plays = format!(
         "  play \"p\" {{\n    description = \"probe\"\n{}{}  }}\n",
-        step("bad", "        path = \"/nonexistent\"\n        check = \"error\"", ""),
+        step(
+            "bad",
+            "        path = \"/nonexistent\"\n        check = \"error\"",
+            ""
+        ),
         step("good", &format!("        path = \"{}\"", m2.display()), "")
     );
     write_lifecycle_playbook(dir.path(), &plays);
@@ -172,7 +180,11 @@ fn reboot_required_halts_with_exit_3() {
     let dir = tempfile::tempdir().unwrap();
     let plays = format!(
         "  play \"p\" {{\n    description = \"probe\"\n{}{}  }}\n",
-        step("reboot", "        path = \"/nonexistent\"\n        apply = \"reboot\"", ""),
+        step(
+            "reboot",
+            "        path = \"/nonexistent\"\n        apply = \"reboot\"",
+            ""
+        ),
         step("after", "        path = \"/nonexistent2\"", "")
     );
     write_lifecycle_playbook(dir.path(), &plays);
@@ -185,7 +197,11 @@ fn reboot_required_halts_with_exit_3() {
     // In check mode a reboot-required step is just a report; exit 0.
     let plays = format!(
         "  play \"p\" {{\n    description = \"probe\"\n{}{}  }}\n",
-        step("reboot", "        path = \"/nonexistent\"\n        check = \"reboot\"", ""),
+        step(
+            "reboot",
+            "        path = \"/nonexistent\"\n        check = \"reboot\"",
+            ""
+        ),
         step("after", "        path = \"/nonexistent2\"", "")
     );
     let dir2 = tempfile::tempdir().unwrap();
@@ -235,7 +251,10 @@ fn requires_orders_execution_and_blocks_dependents_on_error() {
     write_lifecycle_playbook(dir2.path(), &plays);
     let (code, stdout, _) = run_in(dir2.path(), &["apply", ".", "p", "--continue-on-error"]);
     assert_eq!(code, 1);
-    assert!(stdout.contains("a required step did not complete"), "{stdout}");
+    assert!(
+        stdout.contains("a required step did not complete"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -248,7 +267,11 @@ fn apply_lies_is_detected() {
         // check that stays "not": check=not via missing file and an apply
         // that "succeeds" without writing: apply mode 'noop' is not
         // defined, so use apply = success with an unwritable path.
-        step("liar", "        path = \"/proc/definitely/not/writable\"", "")
+        step(
+            "liar",
+            "        path = \"/proc/definitely/not/writable\"",
+            ""
+        )
     );
     write_lifecycle_playbook(dir.path(), &plays);
     let (code, stdout, _) = run_in(dir.path(), &["apply", ".", "p"]);
@@ -283,7 +306,13 @@ fn var_precedence() {
     // --var wins over declaration.
     let (code, _, _) = run_in(
         dir.path(),
-        &["apply", ".", "p", "--var", &format!("target={}", d1.display())],
+        &[
+            "apply",
+            ".",
+            "p",
+            "--var",
+            &format!("target={}", d1.display()),
+        ],
     );
     assert_eq!(code, 0);
     assert!(d1.exists());
@@ -299,9 +328,13 @@ fn var_precedence() {
     let (code, _, _) = run_in(
         dir.path(),
         &[
-            "apply", ".", "p",
-            "--var-file", vf.to_str().unwrap(),
-            "--var", &format!("target={}", d2.display()),
+            "apply",
+            ".",
+            "p",
+            "--var-file",
+            vf.to_str().unwrap(),
+            "--var",
+            &format!("target={}", d2.display()),
         ],
     );
     assert_eq!(code, 0);

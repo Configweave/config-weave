@@ -65,8 +65,8 @@ fn parse_opts(opts: &DynValue) -> Result<Opts, String> {
 }
 
 fn agent(opts: &Opts) -> ureq::Agent {
-    let mut config = ureq::Agent::config_builder()
-        .max_redirects(if opts.follow_redirects { 10 } else { 0 });
+    let mut config =
+        ureq::Agent::config_builder().max_redirects(if opts.follow_redirects { 10 } else { 0 });
     if let Some(t) = opts.timeout {
         config = config.timeout_global(Some(t));
     }
@@ -93,10 +93,7 @@ fn to_response(res: ureq::http::Response<ureq::Body>) -> Result<HttpResponse, St
     })
 }
 
-fn apply_headers<B>(
-    mut req: ureq::RequestBuilder<B>,
-    opts: &Opts,
-) -> ureq::RequestBuilder<B> {
+fn apply_headers<B>(mut req: ureq::RequestBuilder<B>, opts: &Opts) -> ureq::RequestBuilder<B> {
     for (name, value) in &opts.headers {
         req = req.header(name.as_str(), value.as_str());
     }
@@ -108,12 +105,15 @@ pub fn module() -> Module {
     m.doc("HTTP client (capability: network access). rustls, no system TLS");
 
     m.doc_next("GET a URL. opts: headers (map), timeout (secs), redirects (bool)");
-    m.fn_("get", |url: &str, opts: DynValue| -> Result<HttpResponse, String> {
-        let opts = parse_opts(&opts)?;
-        let req = apply_headers(agent(&opts).get(url), &opts);
-        let res = req.call().map_err(|e| e.to_string())?;
-        to_response(res)
-    });
+    m.fn_(
+        "get",
+        |url: &str, opts: DynValue| -> Result<HttpResponse, String> {
+            let opts = parse_opts(&opts)?;
+            let req = apply_headers(agent(&opts).get(url), &opts);
+            let res = req.call().map_err(|e| e.to_string())?;
+            to_response(res)
+        },
+    );
     m.doc_next("POST a body to a URL. opts as for get");
     m.fn_(
         "post",
@@ -135,8 +135,8 @@ pub fn module() -> Module {
                 return Err(format!("GET {url} returned {}", res.status()));
             }
             let mut reader = res.into_body().into_reader();
-            let mut file = std::fs::File::create(dest)
-                .map_err(|e| format!("cannot create {dest}: {e}"))?;
+            let mut file =
+                std::fs::File::create(dest).map_err(|e| format!("cannot create {dest}: {e}"))?;
             let bytes = std::io::copy(&mut reader, &mut file).map_err(|e| e.to_string())?;
             Ok(bytes as i64)
         },

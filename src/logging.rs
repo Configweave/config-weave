@@ -27,10 +27,8 @@ pub fn init(log_file: Option<&Path>, log_level: &str) -> Result<LogGuard, Diag> 
     let file_name = path
         .file_name()
         .ok_or_else(|| Diag::bare(format!("--log-file '{}' has no file name", path.display())))?;
-    let appender = tracing_appender::rolling::never(
-        dir.unwrap_or_else(|| Path::new(".")),
-        file_name,
-    );
+    let appender =
+        tracing_appender::rolling::never(dir.unwrap_or_else(|| Path::new(".")), file_name);
     let (writer, guard) = tracing_appender::non_blocking(appender);
 
     tracing_subscriber::fmt()

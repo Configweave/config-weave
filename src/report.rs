@@ -110,7 +110,10 @@ fn rich_event(s: &mut RichState, event: Event) {
                 report.status.as_str()
             );
             if report.duration.as_millis() >= 50 {
-                line.push_str(&format!(" {DIM}{:.1}s{RESET}", report.duration.as_secs_f64()));
+                line.push_str(&format!(
+                    " {DIM}{:.1}s{RESET}",
+                    report.duration.as_secs_f64()
+                ));
             }
             if let Some(msg) = &report.message {
                 line.push_str(&format!(" {DIM}— {msg}{RESET}"));

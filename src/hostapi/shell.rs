@@ -68,7 +68,11 @@ fn parse_opts(opts: &DynValue) -> Result<Opts, String> {
                 }
             }
         }
-        other => return Err(format!("shell options must be a map or null, got {other:?}")),
+        other => {
+            return Err(format!(
+                "shell options must be a map or null, got {other:?}"
+            ));
+        }
     }
     Ok(out)
 }
@@ -251,10 +255,13 @@ pub fn module() -> Module {
         "Run a command (shell-words split, no shell interpretation). \
          opts: cwd, env (map), timeout (secs), stdin",
     );
-    m.fn_("run", |cmd: &str, opts: DynValue| -> Result<CmdOutput, String> {
-        let (program, args) = split_command(cmd)?;
-        run_captured(&program, &args, &parse_opts(&opts)?)
-    });
+    m.fn_(
+        "run",
+        |cmd: &str, opts: DynValue| -> Result<CmdOutput, String> {
+            let (program, args) = split_command(cmd)?;
+            run_captured(&program, &args, &parse_opts(&opts)?)
+        },
+    );
     m.doc_next("Like run, but stream output lines through log live (long installs)");
     m.fn_(
         "run_streaming",
@@ -264,10 +271,13 @@ pub fn module() -> Module {
         },
     );
     m.doc_next("Run a script with `bash -c` (falls back to sh)");
-    m.fn_("bash", |script: &str, opts: DynValue| -> Result<CmdOutput, String> {
-        let (program, args) = bash_argv(script);
-        run_captured(&program, &args, &parse_opts(&opts)?)
-    });
+    m.fn_(
+        "bash",
+        |script: &str, opts: DynValue| -> Result<CmdOutput, String> {
+            let (program, args) = bash_argv(script);
+            run_captured(&program, &args, &parse_opts(&opts)?)
+        },
+    );
     m.doc_next("Run a script with PowerShell (-NoProfile -NonInteractive)");
     m.fn_(
         "powershell",

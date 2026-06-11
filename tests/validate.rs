@@ -108,7 +108,10 @@ fn missing_required_param_fails_validation() {
 
     let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
     assert_eq!(code, 2);
-    assert!(stderr.contains("missing required parameter 'path'"), "{stderr}");
+    assert!(
+        stderr.contains("missing required parameter 'path'"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -125,7 +128,10 @@ fn missing_description_fails_validation() {
 
     let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
     assert_eq!(code, 2);
-    assert!(stderr.contains("missing required field 'description'"), "{stderr}");
+    assert!(
+        stderr.contains("missing required field 'description'"),
+        "{stderr}"
+    );
 }
 
 #[test]

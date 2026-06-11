@@ -36,7 +36,10 @@ fn ini_parse(text: &str) -> Result<DynValue, String> {
                 DynValue::String(value.trim().to_string()),
             );
         } else {
-            return Err(format!("line {}: expected key=value or [section]", lineno + 1));
+            return Err(format!(
+                "line {}: expected key=value or [section]",
+                lineno + 1
+            ));
         }
     }
     sections.insert(current, DynValue::Map(current_map));
@@ -73,7 +76,11 @@ fn ini_serialize(value: &DynValue) -> Result<String, String> {
                 DynValue::Int(n) => n.to_string(),
                 DynValue::Float(f) => f.to_string(),
                 DynValue::Bool(b) => b.to_string(),
-                other => return Err(format!("section '{name}' key '{key}': {other:?} is not an ini value")),
+                other => {
+                    return Err(format!(
+                        "section '{name}' key '{key}': {other:?} is not an ini value"
+                    ));
+                }
             };
             out.push_str(&format!("{key}={value}\n"));
         }
@@ -87,10 +94,13 @@ pub fn module() -> Module {
     m.doc("INI parsing/serialization (JSON and TOML live in the json/toml modules)");
 
     m.doc_next("Parse INI text into a map of sections (global keys under \"\")");
-    m.fn_("ini_parse", |text: &str| -> Result<DynValue, String> { ini_parse(text) });
-    m.doc_next("Serialize a map of sections to INI text");
-    m.fn_("ini_serialize", |value: DynValue| -> Result<String, String> {
-        ini_serialize(&value)
+    m.fn_("ini_parse", |text: &str| -> Result<DynValue, String> {
+        ini_parse(text)
     });
+    m.doc_next("Serialize a map of sections to INI text");
+    m.fn_(
+        "ini_serialize",
+        |value: DynValue| -> Result<String, String> { ini_serialize(&value) },
+    );
     m
 }

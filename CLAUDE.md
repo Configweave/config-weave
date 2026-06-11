@@ -16,11 +16,26 @@ only — the PRD overrides anything they did.
 
 ## Status
 
-Scaffold only. Language and structure will be shaped by the PRD once it
-lands.
+v1 complete: all seven PRD milestones (M1–M7) implemented and tested —
+validation pipeline, sequential + parallel execution with concurrency
+classes, full host API (Linux + Windows modules), three output modes with
+NDJSON file logging, and authoring/docs (`wispi`, `init`, `docs`).
+`docs/notes.md` records how the PRD's illustrative sketches were bound to
+the real WCL and wisp APIs — read it before changing the vocabulary, the
+variable scheme, or the host API surface.
+
+## Layout
+
+Binary crate per PRD §14: `model/` (WCL loading + schema validation),
+`engine/` (gatherers, DAG scheduler, worker pool, lifecycle), `hostapi/`
+(wisp host modules; Windows impls behind cfg), `comdispatch/` (IDispatch +
+VARIANT marshalling), `docsgen`, `scaffold` (wispi/init), `vocab/` (the
+embedded WCL schema served as system imports). Path deps on `../WCL` and
+`../wisp`; `Cross.toml` mounts them for `cross` release builds.
 
 ## Conventions
 
 - Trunk-based development: commit directly to `main`, no branches or PRs
   unless explicitly asked.
-- **just** as command runner once there's something to build.
+- **just** as command runner: `just build` / `just test` / `just check` /
+  `just release` (cross-builds both PRD targets + checksums).

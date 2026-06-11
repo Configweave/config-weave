@@ -7,7 +7,6 @@ use super::status::{StepReport, StepStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
-    Gathering,
     Checking,
     Applying,
     Rechecking,
@@ -16,7 +15,6 @@ pub enum Phase {
 impl Phase {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Phase::Gathering => "gathering",
             Phase::Checking => "checking",
             Phase::Applying => "applying",
             Phase::Rechecking => "re-checking",
@@ -27,13 +25,29 @@ impl Phase {
 #[derive(Debug, Clone)]
 pub enum Event {
     /// The gather phase begins with this many unique executions.
-    GatherStarted { unique: usize },
+    GatherStarted {
+        unique: usize,
+    },
     GatherFinished,
-    StepStarted { idx: usize, name: String },
-    StepPhase { idx: usize, name: String, phase: Phase },
-    StepFinished { idx: usize, report: StepReport },
+    StepStarted {
+        idx: usize,
+        name: String,
+    },
+    StepPhase {
+        idx: usize,
+        name: String,
+        phase: Phase,
+    },
+    StepFinished {
+        idx: usize,
+        report: StepReport,
+    },
     /// A step completed without running (skipped / blocked / halted).
-    StepResolved { idx: usize, name: String, status: StepStatus },
+    StepResolved {
+        idx: usize,
+        name: String,
+        status: StepStatus,
+    },
 }
 
 pub type EventSink = Arc<dyn Fn(Event) + Send + Sync>;

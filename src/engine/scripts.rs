@@ -54,32 +54,29 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
 
     for pkg in pb.packages.values() {
         for res in pkg.resources.values() {
-            match compile_one(ctx, &res.script, &mut diags) {
-                Some((unit, source)) => {
-                    let check = entry_kind::<CheckResult>(&unit, "check", &res.script, &source, &mut diags);
-                    let apply = entry_kind::<ApplyResult>(&unit, "apply", &res.script, &source, &mut diags);
-                    if let (Some(check), Some(apply)) = (check, apply) {
-                        resources.insert(
-                            format!("{}.{}", pkg.name, res.name),
-                            CompiledResource { unit, check, apply },
-                        );
-                    }
+            if let Some((unit, source)) = compile_one(ctx, &res.script, &mut diags) {
+                let check =
+                    entry_kind::<CheckResult>(&unit, "check", &res.script, &source, &mut diags);
+                let apply =
+                    entry_kind::<ApplyResult>(&unit, "apply", &res.script, &source, &mut diags);
+                if let (Some(check), Some(apply)) = (check, apply) {
+                    resources.insert(
+                        format!("{}.{}", pkg.name, res.name),
+                        CompiledResource { unit, check, apply },
+                    );
                 }
-                None => {}
             }
         }
         for g in pkg.gatherers.values() {
-            match compile_one(ctx, &g.script, &mut diags) {
-                Some((unit, source)) => {
-                    let gather = entry_kind::<DynValue>(&unit, "gather", &g.script, &source, &mut diags);
-                    if let Some(gather) = gather {
-                        gatherers.insert(
-                            format!("{}.{}", pkg.name, g.name),
-                            CompiledGatherer { unit, gather },
-                        );
-                    }
+            if let Some((unit, source)) = compile_one(ctx, &g.script, &mut diags) {
+                let gather =
+                    entry_kind::<DynValue>(&unit, "gather", &g.script, &source, &mut diags);
+                if let Some(gather) = gather {
+                    gatherers.insert(
+                        format!("{}.{}", pkg.name, g.name),
+                        CompiledGatherer { unit, gather },
+                    );
                 }
-                None => {}
             }
         }
         compile_lib(ctx, &pkg.dir.join("lib"), &mut diags);
@@ -150,10 +147,7 @@ fn entry_kind<R>(
 where
     R: wisp::FromValue + wisp::ScriptType + 'static,
 {
-    if unit
-        .fn_handle::<(DynValue,), R>(name)
-        .is_ok()
-    {
+    if unit.fn_handle::<(DynValue,), R>(name).is_ok() {
         return Some(EntryKind::Plain);
     }
     match unit.fn_handle::<(DynValue,), Result<R, String>>(name) {

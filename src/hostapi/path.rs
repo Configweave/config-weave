@@ -35,7 +35,9 @@ pub fn module() -> Module {
             .unwrap_or_default()
     });
     m.doc_next("Lexically normalize a path (resolve `.` and `..`, no IO)");
-    m.fn_("normalize", |p: &str| -> String { normalize(Path::new(p)).display().to_string() });
+    m.fn_("normalize", |p: &str| -> String {
+        normalize(Path::new(p)).display().to_string()
+    });
     m.doc_next("Make a path absolute against the current directory, then normalize");
     m.fn_("absolutize", |p: &str| -> Result<String, String> {
         let path = Path::new(p);

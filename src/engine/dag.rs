@@ -43,7 +43,8 @@ pub fn build(play: &Play) -> Result<StepDag, Vec<Diag>> {
         let mut diags = Vec::new();
         for scc in kosaraju_scc(&graph) {
             if scc.len() > 1 {
-                let mut names: Vec<&str> = scc.iter().map(|n| steps[graph[*n]].name.as_str()).collect();
+                let mut names: Vec<&str> =
+                    scc.iter().map(|n| steps[graph[*n]].name.as_str()).collect();
                 names.sort();
                 diags.push(Diag::bare(format!(
                     "dependency cycle in play '{}' between steps: {}",

@@ -71,12 +71,21 @@ pub fn run_play(
 ) -> Result<RunReport, Vec<Diag>> {
     let started = Instant::now();
     let doc = store.open_playbook(pb).map_err(|d| vec![d])?;
-    let play_block = find_play_block(&doc, &play.name)
-        .ok_or_else(|| vec![Diag::bare(format!("play '{}' not found at run time", play.name))])?;
+    let play_block = find_play_block(&doc, &play.name).ok_or_else(|| {
+        vec![Diag::bare(format!(
+            "play '{}' not found at run time",
+            play.name
+        ))]
+    })?;
 
     let mut step_blocks: HashMap<(Vec<String>, String), Block<'_>> = HashMap::new();
     let mut container_blocks: HashMap<Vec<String>, Block<'_>> = HashMap::new();
-    index_blocks(&play_block, &mut Vec::new(), &mut step_blocks, &mut container_blocks);
+    index_blocks(
+        &play_block,
+        &mut Vec::new(),
+        &mut step_blocks,
+        &mut container_blocks,
+    );
 
     let steps: Vec<&Step> = play.steps();
     let dag = dag::build(play)?;
@@ -340,8 +349,7 @@ fn schedule(
                     Plan::Skip(msg) => {
                         dispatched[i] = true;
                         completed[i] = true;
-                        reports[i] =
-                            Some(quick_report(steps[i], StepStatus::Skipped, msg.clone()));
+                        reports[i] = Some(quick_report(steps[i], StepStatus::Skipped, msg.clone()));
                         (opts.events)(Event::StepResolved {
                             idx: i,
                             name: steps[i].name.clone(),
@@ -352,11 +360,8 @@ fn schedule(
                     Plan::Fail(msg) => {
                         dispatched[i] = true;
                         completed[i] = true;
-                        reports[i] = Some(quick_report(
-                            steps[i],
-                            StepStatus::Error,
-                            Some(msg.clone()),
-                        ));
+                        reports[i] =
+                            Some(quick_report(steps[i], StepStatus::Error, Some(msg.clone())));
                         (opts.events)(Event::StepResolved {
                             idx: i,
                             name: steps[i].name.clone(),
@@ -547,7 +552,11 @@ fn run_lifecycle(
     }
 }
 
-fn call_check(res: &CompiledResource, ctx: &Context, params: DynValue) -> Result<CheckResult, String> {
+fn call_check(
+    res: &CompiledResource,
+    ctx: &Context,
+    params: DynValue,
+) -> Result<CheckResult, String> {
     let mut vm = Vm::new(ctx);
     match res.check {
         EntryKind::Plain => vm
@@ -560,7 +569,11 @@ fn call_check(res: &CompiledResource, ctx: &Context, params: DynValue) -> Result
     }
 }
 
-fn call_apply(res: &CompiledResource, ctx: &Context, params: DynValue) -> Result<ApplyResult, String> {
+fn call_apply(
+    res: &CompiledResource,
+    ctx: &Context,
+    params: DynValue,
+) -> Result<ApplyResult, String> {
     let mut vm = Vm::new(ctx);
     match res.apply {
         EntryKind::Plain => vm

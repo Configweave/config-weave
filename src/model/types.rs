@@ -34,10 +34,6 @@ impl Playbook {
     pub fn resource(&self, package: &str, name: &str) -> Option<&ResourceDecl> {
         self.packages.get(package)?.resources.get(name)
     }
-
-    pub fn gatherer(&self, package: &str, name: &str) -> Option<&GathererDecl> {
-        self.packages.get(package)?.gatherers.get(name)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +42,6 @@ pub struct GatherInvocation {
     pub name: String,
     pub package: String,
     pub gatherer: String,
-    pub span: (usize, usize),
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +87,8 @@ pub enum PlayItem {
 pub struct Container {
     pub name: String,
     pub description: String,
-    pub has_condition: bool,
+    /// Raw condition expression text, for documentation.
+    pub condition_src: Option<String>,
     pub items: Vec<PlayItem>,
 }
 
@@ -108,7 +104,8 @@ pub struct Step {
     /// Names of enclosing containers, outermost first. Used to locate the
     /// step's block at run time and to inherit container conditions.
     pub container_path: Vec<String>,
-    pub has_condition: bool,
+    /// Raw condition expression text, for documentation.
+    pub condition_src: Option<String>,
     pub span: (usize, usize),
 }
 
@@ -144,8 +141,6 @@ pub struct Package {
     pub description: String,
     /// Package directory; script paths are relative to it.
     pub dir: PathBuf,
-    /// Raw `package.wcl` source.
-    pub source: String,
     pub gatherers: BTreeMap<String, GathererDecl>,
     pub resources: BTreeMap<String, ResourceDecl>,
 }

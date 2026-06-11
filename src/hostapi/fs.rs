@@ -39,15 +39,18 @@ pub fn module() -> Module {
         },
     );
     m.doc_next("Append text to a file, creating it if absent");
-    m.fn_("append", |path: &str, content: &str| -> Result<(), String> {
-        use std::io::Write;
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .and_then(|mut f| f.write_all(content.as_bytes()))
-            .map_err(err)
-    });
+    m.fn_(
+        "append",
+        |path: &str, content: &str| -> Result<(), String> {
+            use std::io::Write;
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .and_then(|mut f| f.write_all(content.as_bytes()))
+                .map_err(err)
+        },
+    );
     m.doc_next("Copy a file");
     m.fn_("copy", |from: &str, to: &str| -> Result<(), String> {
         std::fs::copy(from, to).map(|_| ()).map_err(err)
@@ -141,20 +144,23 @@ pub fn module() -> Module {
         Ok(d.keep().display().to_string())
     });
     m.doc_next("Create a symlink at `link` pointing to `target`");
-    m.fn_("symlink", |target: &str, link: &str| -> Result<(), String> {
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(target, link).map_err(err)
-        }
-        #[cfg(windows)]
-        {
-            if Path::new(target).is_dir() {
-                std::os::windows::fs::symlink_dir(target, link).map_err(err)
-            } else {
-                std::os::windows::fs::symlink_file(target, link).map_err(err)
+    m.fn_(
+        "symlink",
+        |target: &str, link: &str| -> Result<(), String> {
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink(target, link).map_err(err)
             }
-        }
-    });
+            #[cfg(windows)]
+            {
+                if Path::new(target).is_dir() {
+                    std::os::windows::fs::symlink_dir(target, link).map_err(err)
+                } else {
+                    std::os::windows::fs::symlink_file(target, link).map_err(err)
+                }
+            }
+        },
+    );
     m.doc_next("Read the target of a symlink");
     m.fn_("read_link", |path: &str| -> Result<String, String> {
         std::fs::read_link(path)

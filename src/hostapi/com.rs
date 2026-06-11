@@ -82,9 +82,12 @@ pub fn module() -> Module {
 
 #[cfg(windows)]
 fn build_methods(mut ty: wisp::core::module::TypeBuilder<'_, ComObject>) {
-    ty.method("get", |o: &ComObject, name: &str| -> Result<DynValue, String> {
-        data_only(comdispatch::get_property(&o.disp, name)?, name)
-    })
+    ty.method(
+        "get",
+        |o: &ComObject, name: &str| -> Result<DynValue, String> {
+            data_only(comdispatch::get_property(&o.disp, name)?, name)
+        },
+    )
     .method(
         "get_object",
         |o: &ComObject, name: &str| -> Result<ComObject, String> {
@@ -120,14 +123,13 @@ fn build_methods(mut ty: wisp::core::module::TypeBuilder<'_, ComObject>) {
 
 #[cfg(not(windows))]
 fn build_methods(mut ty: wisp::core::module::TypeBuilder<'_, ComObject>) {
-    ty.method("get", |_o: &ComObject, _name: &str| -> Result<DynValue, String> {
-        Err(NOT_WINDOWS.to_string())
-    })
+    ty.method(
+        "get",
+        |_o: &ComObject, _name: &str| -> Result<DynValue, String> { Err(NOT_WINDOWS.to_string()) },
+    )
     .method(
         "get_object",
-        |_o: &ComObject, _name: &str| -> Result<ComObject, String> {
-            Err(NOT_WINDOWS.to_string())
-        },
+        |_o: &ComObject, _name: &str| -> Result<ComObject, String> { Err(NOT_WINDOWS.to_string()) },
     )
     .method(
         "set",
@@ -147,7 +149,8 @@ fn build_methods(mut ty: wisp::core::module::TypeBuilder<'_, ComObject>) {
             Err(NOT_WINDOWS.to_string())
         },
     )
-    .method("items", |_o: &ComObject| -> Result<Vec<ComObject>, String> {
-        Err(NOT_WINDOWS.to_string())
-    });
+    .method(
+        "items",
+        |_o: &ComObject| -> Result<Vec<ComObject>, String> { Err(NOT_WINDOWS.to_string()) },
+    );
 }

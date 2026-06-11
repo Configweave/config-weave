@@ -11,6 +11,8 @@ use miette::{LabeledSpan, NamedSource};
 /// output and tests can consume it without ANSI noise.
 #[derive(Debug, Clone)]
 pub struct Diag {
+    /// Bare message without ANSI/source rendering (machine consumers).
+    #[allow(dead_code)]
     pub message: String,
     pub rendered: String,
 }
@@ -53,8 +55,10 @@ impl Diag {
     /// into.
     pub fn from_eval(err: wcl_lang::EvalError, file: &Path, source: &str) -> Diag {
         let message = err.to_string();
-        let report = miette::Report::new(err)
-            .with_source_code(NamedSource::new(file.display().to_string(), source.to_string()));
+        let report = miette::Report::new(err).with_source_code(NamedSource::new(
+            file.display().to_string(),
+            source.to_string(),
+        ));
         let rendered = format!("{report:?}");
         Diag { message, rendered }
     }

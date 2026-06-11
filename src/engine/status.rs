@@ -89,11 +89,7 @@ pub struct RunReport {
 impl RunReport {
     /// Exit code per PRD §9.
     pub fn exit_code(&self) -> u8 {
-        if self
-            .steps
-            .iter()
-            .any(|s| s.status == StepStatus::Error)
-        {
+        if self.steps.iter().any(|s| s.status == StepStatus::Error) {
             1
         } else if self.mode == Mode::Apply
             && self

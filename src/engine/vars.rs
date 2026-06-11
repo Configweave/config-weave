@@ -113,9 +113,7 @@ impl VarStore {
 /// standalone is taken as a plain string.
 pub fn parse_var_flag(flag: &str) -> Result<(String, Value), Diag> {
     let Some((key, raw)) = flag.split_once('=') else {
-        return Err(Diag::bare(format!(
-            "--var expects KEY=VALUE, got '{flag}'"
-        )));
+        return Err(Diag::bare(format!("--var expects KEY=VALUE, got '{flag}'")));
     };
     let key = key.trim();
     if !is_identifier(key) {
@@ -145,8 +143,7 @@ pub fn load_var_file(path: &Path) -> Result<Vec<(String, Value)>, Vec<Diag>> {
         .map_err(|e| vec![Diag::bare(format!("cannot read {}: {e}", path.display()))])?;
     let parsed = wcl_lang::parse_for_edit(&source, path.display().to_string())
         .map_err(|e| vec![Diag::from_parse(e)])?;
-    let scratch = Document::open("", "<var-file>")
-        .map_err(|e| vec![Diag::from_parse(e)])?;
+    let scratch = Document::open("", "<var-file>").map_err(|e| vec![Diag::from_parse(e)])?;
 
     let mut out = Vec::new();
     let mut diags = Vec::new();
@@ -166,7 +163,11 @@ pub fn load_var_file(path: &Path) -> Result<Vec<(String, Value)>, Vec<Diag>> {
             }
         }
     }
-    if diags.is_empty() { Ok(out) } else { Err(diags) }
+    if diags.is_empty() {
+        Ok(out)
+    } else {
+        Err(diags)
+    }
 }
 
 pub fn is_identifier(s: &str) -> bool {

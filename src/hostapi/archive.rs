@@ -35,23 +35,27 @@ pub fn module() -> Module {
     m.doc("Extract archives (no external tar/unzip needed)");
 
     m.doc_next("Extract a .zip into a directory; returns the entry count");
-    m.fn_("extract_zip", |archive: &str, dest: &str| -> Result<i64, String> {
-        extract_zip(archive, dest)
-    });
+    m.fn_(
+        "extract_zip",
+        |archive: &str, dest: &str| -> Result<i64, String> { extract_zip(archive, dest) },
+    );
     m.doc_next("Extract a .tar.gz into a directory; returns the entry count");
     m.fn_(
         "extract_tar_gz",
         |archive: &str, dest: &str| -> Result<i64, String> { extract_tar_gz(archive, dest) },
     );
     m.doc_next("Extract by file extension (.zip, .tar.gz, .tgz)");
-    m.fn_("extract", |archive: &str, dest: &str| -> Result<i64, String> {
-        if archive.ends_with(".zip") {
-            extract_zip(archive, dest)
-        } else if archive.ends_with(".tar.gz") || archive.ends_with(".tgz") {
-            extract_tar_gz(archive, dest)
-        } else {
-            Err(format!("unsupported archive type: {archive}"))
-        }
-    });
+    m.fn_(
+        "extract",
+        |archive: &str, dest: &str| -> Result<i64, String> {
+            if archive.ends_with(".zip") {
+                extract_zip(archive, dest)
+            } else if archive.ends_with(".tar.gz") || archive.ends_with(".tgz") {
+                extract_tar_gz(archive, dest)
+            } else {
+                Err(format!("unsupported archive type: {archive}"))
+            }
+        },
+    );
     m
 }
