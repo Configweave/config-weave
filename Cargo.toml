@@ -1,0 +1,18 @@
+[package]
+name = "config-weave"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Single-binary configuration management driven by WCL playbooks and wisp scripts"
+
+[dependencies]
+wcl_lang = { path = "../WCL/crates/wcl_lang" }
+wcl_wdoc = { path = "../WCL/crates/wcl_wdoc" }
+wisp = { path = "../wisp/wisp" }
+wisp-std = { path = "../wisp/wisp-std" }
+
+clap = { version = "4", features = ["derive"] }
+petgraph = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
