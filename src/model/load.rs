@@ -727,7 +727,7 @@ fn check_required_fields(doc: &Document, file: &Path, source: &str, diags: &mut 
     }
 }
 
-pub(crate) fn label_string(block: &Block<'_>) -> Option<String> {
+pub fn label_string(block: &Block<'_>) -> Option<String> {
     match block.labels().ok()?.into_iter().next()? {
         Value::Utf8(s) | Value::Ascii(s) | Value::Identifier(s) => Some(s),
         _ => None,

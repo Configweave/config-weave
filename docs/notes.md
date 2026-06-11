@@ -43,6 +43,26 @@ windows 0.6x.
   loader enforces required fields (including the PRD's mandatory
   `description`s) from each block schema's `effective_fields()`.
 
+## Execution semantics (PRD §9 interpretations)
+
+- Steps left undispatched when a run halts get the report status
+  **not run** (the PRD's six statuses describe executed steps only; a
+  halted run still reports every step deterministically).
+- In **check** mode, RebootRequired is an ordinary report status and does
+  not halt (check is report-only; halting would gain nothing). Error
+  still halts unless `--continue-on-error`. Exit code 3 is apply-only.
+- In apply mode a dependency that errored or did not run blocks its
+  dependents (`not run` with a message); a *skipped* dependency does not —
+  `requires` is ordering, not a success demand.
+- `--var-file` files are flat `name = value` collections parsed without a
+  document schema; expressions evaluate standalone (they cannot reference
+  other variables).
+- `--var KEY=VALUE` parses VALUE as a WCL expression when possible
+  (`--var count=3` is an int), falling back to a plain string.
+- Gather params must evaluate before variables resolve, so they may
+  reference `--var`/`--var-file` overrides but not gatherer results or
+  declared vars that depend on them.
+
 ## wisp binding (PRD §6/§7)
 
 - Script entry points accept two signatures each: plain

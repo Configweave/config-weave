@@ -3,7 +3,11 @@ mod diag;
 mod engine;
 mod hostapi;
 mod model;
+mod report;
 mod vocab;
+
+use engine::status::Mode;
+use engine::vars::{Origin, VarStore};
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -95,10 +99,8 @@ fn main() -> ExitCode {
             println!("config-weave {}", env!("CARGO_PKG_VERSION"));
             EXIT_OK
         }
-        Command::Check { .. } | Command::Apply { .. } => {
-            eprintln!("error: not implemented yet (lands in M2)");
-            EXIT_VALIDATION
-        }
+        Command::Check { playbook_dir, play } => cmd_run(&cli, playbook_dir, play, Mode::Check),
+        Command::Apply { playbook_dir, play } => cmd_run(&cli, playbook_dir, play, Mode::Apply),
         Command::Docs { .. } | Command::Wispi { .. } | Command::Init { .. } => {
             eprintln!("error: not implemented yet (lands in M7)");
             EXIT_VALIDATION
@@ -146,6 +148,48 @@ fn cmd_validate(dir: &PathBuf) -> u8 {
                 steps
             );
             EXIT_OK
+        }
+        Err(diags) => {
+            print_diags(&diags);
+            EXIT_VALIDATION
+        }
+    }
+}
+
+/// Build the override store from `--var` / `--var-file` flags.
+fn override_store(cli: &Cli) -> Result<VarStore, Vec<Diag>> {
+    let mut store = VarStore::new();
+    if let Some(path) = &cli.var_file {
+        for (name, value) in engine::vars::load_var_file(path)? {
+            store.insert(&name, Origin::VarFile, value);
+        }
+    }
+    for flag in &cli.vars {
+        let (name, value) = engine::vars::parse_var_flag(flag).map_err(|d| vec![d])?;
+        store.insert(&name, Origin::Var, value);
+    }
+    Ok(store)
+}
+
+fn cmd_run(cli: &Cli, dir: &PathBuf, play: &str, mode: Mode) -> u8 {
+    let pb = match load_validated(dir) {
+        Ok(pb) => pb,
+        Err(diags) => {
+            print_diags(&diags);
+            return EXIT_VALIDATION;
+        }
+    };
+    let store = match override_store(cli) {
+        Ok(s) => s,
+        Err(diags) => {
+            print_diags(&diags);
+            return EXIT_VALIDATION;
+        }
+    };
+    match engine::execute(&pb, play, mode, cli.continue_on_error, store) {
+        Ok(run_report) => {
+            print!("{}", report::plain(&run_report));
+            run_report.exit_code()
         }
         Err(diags) => {
             print_diags(&diags);

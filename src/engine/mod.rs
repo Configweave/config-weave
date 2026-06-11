@@ -2,10 +2,54 @@
 //! scheduling and the step lifecycle.
 
 pub mod dag;
+pub mod gather;
+pub mod run;
 pub mod scripts;
+pub mod status;
+pub mod vars;
 
 use crate::diag::Diag;
 use crate::model::Playbook;
+
+use status::{Mode, RunReport};
+use vars::VarStore;
+
+/// Validate, gather, run: the full §9 sequence for one play.
+pub fn execute(
+    pb: &Playbook,
+    play_name: &str,
+    mode: Mode,
+    continue_on_error: bool,
+    mut store: VarStore,
+) -> Result<RunReport, Vec<Diag>> {
+    let Some(play) = pb.play(play_name) else {
+        let names: Vec<&str> = pb.plays.iter().map(|p| p.name.as_str()).collect();
+        return Err(vec![Diag::bare(format!(
+            "no play named '{play_name}' (available: {})",
+            names.join(", ")
+        ))]);
+    };
+
+    let ctx = crate::hostapi::context();
+    let scripts = scripts::compile_all(pb, &ctx)?;
+    for p in &pb.plays {
+        dag::build(p)?;
+    }
+
+    gather::run(pb, &scripts, &ctx, &mut store)?;
+
+    run::run_play(
+        pb,
+        play,
+        &scripts,
+        &ctx,
+        &store,
+        &run::RunOptions {
+            mode,
+            continue_on_error,
+        },
+    )
+}
 
 /// The full validation pipeline (PRD §8) beyond what `model::load`
 /// already performed: DAG construction per play and compilation of every

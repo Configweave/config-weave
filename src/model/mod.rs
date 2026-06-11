@@ -3,5 +3,5 @@
 mod load;
 mod types;
 
-pub use load::{Loaded, load};
+pub use load::{Loaded, label_string, load};
 pub use types::*;

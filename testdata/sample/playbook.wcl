@@ -10,8 +10,8 @@ playbook "Sample Baseline" {
   vars {
     work_root = "/tmp/config-weave-sample"
     is_linux = os.family == "linux"
-    marker_a = work_root + "/a.txt"
-    marker_b = work_root + "/b.txt"
+    marker_a = $"${work_root}/a.txt"
+    marker_b = $"${work_root}/b.txt"
   }
 
   play "baseline" {
