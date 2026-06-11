@@ -812,6 +812,14 @@ fn load_test(
 ) -> Option<TestDecl> {
     let span = wcl_span(block.span());
     let name = label_string(block)?;
+    // Test and step names are spliced into the synthesized playbook as
+    // string literals, so they must stay literal-safe.
+    if name.contains('"') || name.contains('\\') {
+        ctx.err(
+            format!("test name '{name}' must not contain quotes or backslashes"),
+            span,
+        );
+    }
     let description = string_field(block, "description", ctx).unwrap_or_default();
     let backend = string_field_optional(block, "backend", ctx).unwrap_or_else(|| "docker".into());
     if backend != "docker" {
@@ -852,6 +860,12 @@ fn load_test(
                 let Some(sname) = label_string(&b) else {
                     continue;
                 };
+                if sname.contains('"') || sname.contains('\\') {
+                    ctx.err(
+                        format!("step name '{sname}' must not contain quotes or backslashes"),
+                        sspan,
+                    );
+                }
                 let sdesc = string_field(&b, "description", ctx).unwrap_or_default();
                 let Some(rref) = string_field(&b, "resource", ctx) else {
                     continue;
