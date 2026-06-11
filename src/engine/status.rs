@@ -55,6 +55,21 @@ impl StepStatus {
             StepStatus::NotRun => "not_run",
         }
     }
+
+    /// Inverse of [`StepStatus::id`]; the testlab runner parses statuses
+    /// out of in-container `--json` reports.
+    pub fn from_id(s: &str) -> Option<StepStatus> {
+        match s {
+            "already_configured" => Some(StepStatus::AlreadyConfigured),
+            "configured" => Some(StepStatus::Configured),
+            "not_configured" => Some(StepStatus::NotConfigured),
+            "reboot_required" => Some(StepStatus::RebootRequired),
+            "skipped" => Some(StepStatus::Skipped),
+            "error" => Some(StepStatus::Error),
+            "not_run" => Some(StepStatus::NotRun),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

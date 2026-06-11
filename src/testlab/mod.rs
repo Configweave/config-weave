@@ -7,4 +7,6 @@
 
 pub mod backend;
 pub mod docker;
+pub mod report;
+pub mod runner;
 pub mod synth;
