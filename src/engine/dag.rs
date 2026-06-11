@@ -15,8 +15,6 @@ use crate::model::{Play, Step};
 pub struct StepDag {
     /// For each step, the indices of the steps it requires.
     pub deps: Vec<Vec<usize>>,
-    /// For each step, the indices of the steps that require it.
-    pub dependents: Vec<Vec<usize>>,
 }
 
 pub fn build(play: &Play) -> Result<StepDag, Vec<Diag>> {
@@ -63,12 +61,5 @@ pub fn build(play: &Play) -> Result<StepDag, Vec<Diag>> {
         return Err(diags);
     }
 
-    let mut dependents = vec![Vec::new(); steps.len()];
-    for (i, ds) in deps.iter().enumerate() {
-        for &j in ds {
-            dependents[j].push(i);
-        }
-    }
-
-    Ok(StepDag { deps, dependents })
+    Ok(StepDag { deps })
 }

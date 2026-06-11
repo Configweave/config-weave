@@ -154,7 +154,7 @@ fn error_halts_and_continue_on_error_continues() {
     write_lifecycle_playbook(dir.path(), &plays);
 
     // Without --continue-on-error: bad errors, good is not run, exit 1.
-    let (code, stdout, _) = run_in(dir.path(), &["apply", ".", "p"]);
+    let (code, stdout, _) = run_in(dir.path(), &["apply", ".", "p", "--jobs", "1"]);
     assert_eq!(code, 1);
     assert!(stdout.contains("check exploded"), "{stdout}");
     assert!(stdout.contains("not run"), "{stdout}");
@@ -177,7 +177,7 @@ fn reboot_required_halts_with_exit_3() {
     );
     write_lifecycle_playbook(dir.path(), &plays);
 
-    let (code, stdout, _) = run_in(dir.path(), &["apply", ".", "p"]);
+    let (code, stdout, _) = run_in(dir.path(), &["apply", ".", "p", "--jobs", "1"]);
     assert_eq!(code, 3, "{stdout}");
     assert!(stdout.contains("reboot required"), "{stdout}");
     assert!(stdout.contains("not run"), "{stdout}");

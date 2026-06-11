@@ -6,7 +6,6 @@
 //! program directly (no shell interpretation); use `bash`/`powershell`
 //! when shell features are wanted.
 
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};

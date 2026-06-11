@@ -20,6 +20,7 @@ pub fn execute(
     play_name: &str,
     mode: Mode,
     continue_on_error: bool,
+    jobs: Option<usize>,
     mut store: VarStore,
 ) -> Result<RunReport, Vec<Diag>> {
     let Some(play) = pb.play(play_name) else {
@@ -47,6 +48,7 @@ pub fn execute(
         &run::RunOptions {
             mode,
             continue_on_error,
+            jobs: jobs.unwrap_or_else(run::default_jobs),
         },
     )
 }
