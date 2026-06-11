@@ -8,6 +8,8 @@ mod logging;
 mod model;
 mod report;
 mod scaffold;
+#[allow(dead_code)] // wired up by `config-weave test` (in progress)
+mod testlab;
 mod vocab;
 
 use engine::status::Mode;
