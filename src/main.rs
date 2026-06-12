@@ -85,12 +85,12 @@ enum Command {
     List { playbook_dir: PathBuf },
     /// Full validation pipeline, no execution.
     Validate { playbook_dir: PathBuf },
-    /// Run package convergence tests in disposable containers.
+    /// Run package convergence tests in disposable instances.
     Test {
         playbook_dir: PathBuf,
         /// Only run matching tests: a package name or `package:test`.
         filter: Option<String>,
-        /// Override every test's backend (v1 supports only "docker").
+        /// Override every test's backend ("docker" or "vmlab").
         #[arg(long, value_name = "NAME")]
         backend: Option<String>,
         /// Run every test against this image instead of its own.
@@ -102,6 +102,9 @@ enum Command {
         /// Static linux config-weave binary to copy into instances.
         #[arg(long, value_name = "PATH")]
         binary: Option<PathBuf>,
+        /// Windows config-weave binary for windows guests (vmlab).
+        #[arg(long, value_name = "PATH")]
+        binary_windows: Option<PathBuf>,
     },
     /// Generate wdoc documentation (default outdir: <dir>/docs/).
     Docs {
@@ -163,6 +166,7 @@ fn main() -> ExitCode {
             image,
             keep,
             binary,
+            binary_windows,
         } => cmd_test(
             &cli,
             playbook_dir,
@@ -171,6 +175,7 @@ fn main() -> ExitCode {
             image.as_deref(),
             *keep,
             binary.as_deref(),
+            binary_windows.as_deref(),
         ),
         Command::Docs {
             playbook_dir,
@@ -314,6 +319,7 @@ fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode) -> u8 {
 
 /// `config-weave test`: run package convergence tests in disposable
 /// backend instances (PRD-extension; see docs/notes.md, testlab section).
+#[allow(clippy::too_many_arguments)]
 fn cmd_test(
     cli: &Cli,
     dir: &std::path::Path,
@@ -322,6 +328,7 @@ fn cmd_test(
     image_override: Option<&str>,
     keep: bool,
     binary: Option<&std::path::Path>,
+    binary_windows: Option<&std::path::Path>,
 ) -> u8 {
     let pb = match load_validated(dir) {
         Ok(pb) => pb,
@@ -371,32 +378,53 @@ fn cmd_test(
 
     if let Some(b) = backend_override
         && b != "docker"
+        && b != "vmlab"
     {
-        eprintln!(
-            "error: unknown test backend '{b}' (only 'docker' is supported; 'vmlab' is planned)"
-        );
+        eprintln!("error: unknown test backend '{b}' (supported: 'docker', 'vmlab')");
         return EXIT_VALIDATION;
     }
 
     let mode_out = report::select_mode(cli.json, cli.no_color);
     let quiet = mode_out == report::OutputMode::Json;
 
-    let binary = match testlab::synth::locate_binary(binary) {
-        Ok(b) => b,
-        Err(d) => {
-            eprintln!("{}", d.rendered);
-            return EXIT_VALIDATION;
+    // Discover each backend the selected tests actually use, once, up
+    // front — a broken environment fails fast with exit 2 instead of
+    // erroring every test. Tests on other backends never probe.
+    let needed: std::collections::BTreeSet<&str> = selected
+        .iter()
+        .map(|(_, t)| backend_override.unwrap_or(t.backend.as_str()))
+        .collect();
+    let mut backends: Vec<(&str, Box<dyn testlab::backend::TestBackend>)> = Vec::new();
+    for name in needed {
+        let discovered: Result<Box<dyn testlab::backend::TestBackend>, diag::Diag> = match name {
+            "docker" => testlab::docker::DockerBackend::discover(quiet)
+                .map(|b| Box::new(b) as Box<dyn testlab::backend::TestBackend>),
+            "vmlab" => testlab::vmlab::VmlabBackend::discover(quiet)
+                .map(|b| Box::new(b) as Box<dyn testlab::backend::TestBackend>),
+            other => unreachable!("backend '{other}' survived validation"),
+        };
+        match discovered {
+            Ok(b) => backends.push((name, b)),
+            Err(d) => {
+                eprintln!("{}", d.rendered);
+                return EXIT_VALIDATION;
+            }
         }
+    }
+    let backend_for = |t: &model::TestDecl| -> &dyn testlab::backend::TestBackend {
+        let name = backend_override.unwrap_or(t.backend.as_str());
+        backends
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, b)| b.as_ref())
+            .expect("backend discovered above")
     };
-    let backend = match testlab::docker::DockerBackend::discover(quiet) {
-        Ok(b) => b,
-        Err(d) => {
-            eprintln!("{}", d.rendered);
-            return EXIT_VALIDATION;
-        }
-    };
+
     let opts = testlab::runner::RunnerOptions {
-        binary,
+        binaries: testlab::synth::BinaryResolver::new(
+            binary.map(std::path::Path::to_path_buf),
+            binary_windows.map(std::path::Path::to_path_buf),
+        ),
         keep,
         jobs: cli.jobs,
         quiet,
@@ -406,7 +434,7 @@ fn cmd_test(
     let start = std::time::Instant::now();
     let tests: Vec<_> = selected
         .into_iter()
-        .map(|(pkg, t)| testlab::runner::run_test(&pb, pkg, t, &backend, &opts))
+        .map(|(pkg, t)| testlab::runner::run_test(&pb, pkg, t, backend_for(t), &opts))
         .collect();
     let run_report = testlab::report::TestRunReport {
         playbook: pb.name.clone(),

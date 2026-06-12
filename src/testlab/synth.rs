@@ -8,24 +8,66 @@ use std::path::{Path, PathBuf};
 use crate::diag::Diag;
 use crate::model::{Package, Playbook, TestDecl};
 
+use super::backend::GuestOs;
+
 // ------------------------------------------------------------- binary
 
-/// Find the binary to copy into instances. Resolution order: explicit
-/// `--binary` / `$CONFIG_WEAVE_TEST_BINARY` (trusted — the in-instance
+/// Lazily resolves the test binary to copy into instances, per guest OS,
+/// caching the answer. Lazy because the guest OS is only known once an
+/// instance is provisioned, and a run that never touches Windows guests
+/// must not demand a Windows artifact.
+pub struct BinaryResolver {
+    explicit_linux: Option<PathBuf>,
+    explicit_windows: Option<PathBuf>,
+    /// [linux, windows] successes; failures re-resolve (cheap).
+    cache: std::cell::RefCell<[Option<PathBuf>; 2]>,
+}
+
+impl BinaryResolver {
+    pub fn new(explicit_linux: Option<PathBuf>, explicit_windows: Option<PathBuf>) -> Self {
+        BinaryResolver {
+            explicit_linux,
+            explicit_windows,
+            cache: std::cell::RefCell::new([None, None]),
+        }
+    }
+
+    pub fn resolve(&self, os: GuestOs) -> Result<PathBuf, Diag> {
+        let slot = match os {
+            GuestOs::Linux => 0,
+            GuestOs::Windows => 1,
+        };
+        if let Some(p) = &self.cache.borrow()[slot] {
+            return Ok(p.clone());
+        }
+        let explicit = match os {
+            GuestOs::Linux => self.explicit_linux.as_deref(),
+            GuestOs::Windows => self.explicit_windows.as_deref(),
+        };
+        let p = locate_binary(explicit, os)?;
+        self.cache.borrow_mut()[slot] = Some(p.clone());
+        Ok(p)
+    }
+}
+
+/// Find the binary to copy into instances of `os`. Resolution order:
+/// explicit `--binary`/`--binary-windows` / the matching
+/// `$CONFIG_WEAVE_TEST_BINARY[_WINDOWS]` (trusted — the in-instance
 /// smoke test catches mistakes), the running executable when it is a
-/// static ELF, then the workspace's cross-build artifacts.
-pub fn locate_binary(explicit: Option<&Path>) -> Result<PathBuf, Diag> {
+/// static ELF (linux only), then the workspace's cross-build artifacts.
+pub fn locate_binary(explicit: Option<&Path>, os: GuestOs) -> Result<PathBuf, Diag> {
+    let (flag, env_var) = match os {
+        GuestOs::Linux => ("--binary", "CONFIG_WEAVE_TEST_BINARY"),
+        GuestOs::Windows => ("--binary-windows", "CONFIG_WEAVE_TEST_BINARY_WINDOWS"),
+    };
     if let Some(p) = explicit {
         return if p.is_file() {
             Ok(p.to_path_buf())
         } else {
-            Err(Diag::bare(format!(
-                "--binary {} does not exist",
-                p.display()
-            )))
+            Err(Diag::bare(format!("{flag} {} does not exist", p.display())))
         };
     }
-    if let Ok(env) = std::env::var("CONFIG_WEAVE_TEST_BINARY")
+    if let Ok(env) = std::env::var(env_var)
         && !env.is_empty()
     {
         let p = PathBuf::from(env);
@@ -33,14 +75,15 @@ pub fn locate_binary(explicit: Option<&Path>) -> Result<PathBuf, Diag> {
             Ok(p)
         } else {
             Err(Diag::bare(format!(
-                "CONFIG_WEAVE_TEST_BINARY={} does not exist",
+                "{env_var}={} does not exist",
                 p.display()
             )))
         };
     }
 
     let exe = std::env::current_exe().ok();
-    if let Some(exe) = &exe
+    if os == GuestOs::Linux
+        && let Some(exe) = &exe
         && is_static_elf(exe)
     {
         return Ok(exe.clone());
@@ -51,13 +94,25 @@ pub fn locate_binary(explicit: Option<&Path>) -> Result<PathBuf, Diag> {
     if let Some(exe) = &exe
         && let Some(ws) = exe.ancestors().nth(3)
     {
-        let candidates = [
-            ws.join("target-cross/x86_64-unknown-linux-musl/release/config-weave"),
-            ws.join("dist/config-weave-linux-x86_64"),
-        ];
+        let (candidates, valid): (Vec<PathBuf>, fn(&Path) -> bool) = match os {
+            GuestOs::Linux => (
+                vec![
+                    ws.join("target-cross/x86_64-unknown-linux-musl/release/config-weave"),
+                    ws.join("dist/config-weave-linux-x86_64"),
+                ],
+                is_static_elf,
+            ),
+            GuestOs::Windows => (
+                vec![
+                    ws.join("target-cross/x86_64-pc-windows-gnu/release/config-weave.exe"),
+                    ws.join("dist/config-weave-windows-x86_64.exe"),
+                ],
+                is_pe,
+            ),
+        };
         let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
         for c in candidates {
-            if c.is_file() && is_static_elf(&c) {
+            if c.is_file() && valid(&c) {
                 let mtime = std::fs::metadata(&c)
                     .and_then(|m| m.modified())
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
@@ -71,11 +126,18 @@ pub fn locate_binary(explicit: Option<&Path>) -> Result<PathBuf, Diag> {
         }
     }
 
-    Err(Diag::bare(
-        "the running binary is dynamically linked and no static artifact was found; \
-         build one with `just release` and pass --binary dist/config-weave-linux-x86_64 \
-         (or set CONFIG_WEAVE_TEST_BINARY)",
-    ))
+    match os {
+        GuestOs::Linux => Err(Diag::bare(
+            "the running binary is dynamically linked and no static artifact was found; \
+             build one with `just release` and pass --binary dist/config-weave-linux-x86_64 \
+             (or set CONFIG_WEAVE_TEST_BINARY)",
+        )),
+        GuestOs::Windows => Err(Diag::bare(
+            "no windows test binary was found; build one with `just release` and pass \
+             --binary-windows dist/config-weave-windows-x86_64.exe \
+             (or set CONFIG_WEAVE_TEST_BINARY_WINDOWS)",
+        )),
+    }
 }
 
 /// A 64-bit ELF with no `PT_INTERP` program header runs in any container
@@ -86,6 +148,17 @@ fn is_static_elf(path: &Path) -> bool {
         return false;
     };
     is_static_elf_bytes(&data)
+}
+
+/// A PE (Windows) executable: just the `MZ` magic — the `just release`
+/// windows-gnu artifact is self-contained, and the in-instance smoke
+/// test catches anything subtler.
+fn is_pe(path: &Path) -> bool {
+    let mut magic = [0u8; 2];
+    std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut magic))
+        .is_ok()
+        && &magic == b"MZ"
 }
 
 fn is_static_elf_bytes(d: &[u8]) -> bool {
@@ -336,6 +409,46 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
         if cfg!(target_os = "linux") && Path::new("/bin/sh").exists() {
             assert!(!is_static_elf(Path::new("/bin/sh")));
         }
+    }
+
+    #[test]
+    fn pe_detection_on_magic_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("a.exe");
+        std::fs::write(&exe, b"MZ\x90\x00rest-of-a-pe").unwrap();
+        assert!(is_pe(&exe));
+        let not = dir.path().join("not.exe");
+        std::fs::write(&not, b"\x7fELF").unwrap();
+        assert!(!is_pe(&not));
+        assert!(!is_pe(&dir.path().join("missing.exe")));
+    }
+
+    #[test]
+    fn explicit_windows_binary_is_trusted_and_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("config-weave.exe");
+        std::fs::write(&exe, b"MZ").unwrap();
+        assert_eq!(
+            locate_binary(Some(&exe), GuestOs::Windows).unwrap(),
+            exe.clone()
+        );
+        let err = locate_binary(Some(&dir.path().join("nope.exe")), GuestOs::Windows).unwrap_err();
+        assert!(err.message.contains("--binary-windows"), "{}", err.message);
+    }
+
+    #[test]
+    fn binary_resolver_caches_per_os() {
+        let dir = tempfile::tempdir().unwrap();
+        let linux = dir.path().join("config-weave");
+        let windows = dir.path().join("config-weave.exe");
+        std::fs::write(&linux, b"\x7fELF").unwrap();
+        std::fs::write(&windows, b"MZ").unwrap();
+        let r = BinaryResolver::new(Some(linux.clone()), Some(windows.clone()));
+        assert_eq!(r.resolve(GuestOs::Linux).unwrap(), linux);
+        assert_eq!(r.resolve(GuestOs::Windows).unwrap(), windows);
+        // Cached: still resolves after the files vanish.
+        std::fs::remove_file(&linux).unwrap();
+        assert_eq!(r.resolve(GuestOs::Linux).unwrap(), linux);
     }
 
     #[test]

@@ -11,7 +11,16 @@ fn bin() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(bin()).args(args).output().unwrap();
+    run_with_env(args, &[])
+}
+
+fn run_with_env(args: &[&str], env: &[(&str, &str)]) -> (i32, String, String) {
+    let mut cmd = Command::new(bin());
+    cmd.args(args);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().unwrap();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -208,12 +217,25 @@ fn unknown_backend_fails() {
     let dir = fixture_with(|s| {
         s.replace(
             "image = \"debian:12\"",
-            "backend = \"vmlab\"\n    image = \"debian:12\"",
+            "backend = \"chroot\"\n    image = \"debian:12\"",
         )
     });
     let (code, _, stderr) = validate(dir.path());
     assert_eq!(code, 2);
-    assert!(stderr.contains("unknown test backend 'vmlab'"), "{stderr}");
+    assert!(stderr.contains("unknown test backend 'chroot'"), "{stderr}");
+    assert!(stderr.contains("'docker', 'vmlab'"), "{stderr}");
+}
+
+#[test]
+fn vmlab_backend_is_accepted_by_validation() {
+    let dir = fixture_with(|s| {
+        s.replace(
+            "image = \"debian:12\"",
+            "backend = \"vmlab\"\n    image = \"x86_64/linux-modern\"",
+        )
+    });
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 0, "{stderr}");
 }
 
 #[test]
@@ -527,9 +549,28 @@ fn test_with_bad_filter_lists_available() {
 fn test_with_unknown_backend_override_exits_2() {
     let dir = tempfile::tempdir().unwrap();
     write_fixture(dir.path());
-    let (code, _, stderr) = run(&["test", dir.path().to_str().unwrap(), "--backend", "vmlab"]);
+    let (code, _, stderr) = run(&["test", dir.path().to_str().unwrap(), "--backend", "chroot"]);
     assert_eq!(code, 2);
-    assert!(stderr.contains("unknown test backend 'vmlab'"), "{stderr}");
+    assert!(stderr.contains("unknown test backend 'chroot'"), "{stderr}");
+}
+
+#[test]
+fn vmlab_backend_without_a_cli_exits_2() {
+    // A vmlab test selects the vmlab backend; with discovery pointed at
+    // a nonexistent CLI, the run fails fast with one clear diagnostic.
+    let dir = fixture_with(|s| {
+        s.replace(
+            "image = \"debian:12\"",
+            "backend = \"vmlab\"\n    image = \"x86_64/linux-modern\"",
+        )
+    });
+    let (code, _, stderr) = run_with_env(
+        &["test", dir.path().to_str().unwrap()],
+        &[("CONFIG_WEAVE_VMLAB_CMD", "/nonexistent/vmlabctl")],
+    );
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("/nonexistent/vmlabctl"), "{stderr}");
+    assert!(stderr.contains("vmlab"), "{stderr}");
 }
 
 // ------------------------------------------------------------ docker-gated

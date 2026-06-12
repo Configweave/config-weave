@@ -10,7 +10,7 @@
 | `apply` | `<playbook-dir> <play>` | Apply all unconfigured steps in a play |
 | `list` | `<playbook-dir>` | List all plays defined in the playbook |
 | `validate` | `<playbook-dir>` | Full validation pipeline (WCL syntax, schema, refs, DAG, wisp compilation of every script), no execution |
-| `test` | `<playbook-dir> [filter]` | Run package convergence tests in disposable containers; filter is `pkg` or `pkg:test` (see `testing.md`) |
+| `test` | `<playbook-dir> [filter]` | Run package convergence tests in disposable instances (docker containers or vmlab VMs); filter is `pkg` or `pkg:test` (see `testing.md`) |
 | `docs` | `<playbook-dir> [outdir]` | Generate wdoc documentation (default outdir `<dir>/docs/`); shares the validation pipeline |
 | `wispi` | `[outdir]` | Emit `weave.wispi` (host API interface) plus a starter `wisp.toml` (default: cwd) |
 | `init` | `<dir>` | Scaffold a skeleton playbook with example package, resource and gatherer |
@@ -33,7 +33,8 @@ protocol (`testing.md`).
 | `--log-level LEVEL` | File log level (independent of terminal verbosity), default `info` |
 | `-v, --verbose` | Increase terminal verbosity (repeatable: `-v`, `-vv`, `-vvv`) |
 
-Test-only flags (`--backend`, `--image`, `--keep`, `--binary`) are in `testing.md`.
+Test-only flags (`--backend`, `--image`, `--keep`, `--binary`, `--binary-windows`)
+are in `testing.md`.
 
 ## Output modes
 
@@ -60,5 +61,6 @@ Test-only flags (`--backend`, `--image`, `--keep`, `--binary`) are in `testing.m
 ## Repo workflow (just)
 
 `just build` · `just test` · `just check` (clippy + fmt) · `just sample` (validate the
-sample playbook) · `just test-lab` (docker-gated suite) · `just release` (cross-builds
-linux musl + windows gnu targets, writes `dist/` + SHA256SUMS).
+sample playbook) · `just test-lab` (docker-gated suite) · `just test-lab-vm` (vmlab
+end-to-end smoke) · `just release` (cross-builds linux musl + windows gnu targets,
+writes `dist/` + SHA256SUMS).

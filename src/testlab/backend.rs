@@ -1,11 +1,20 @@
 //! The backend seam: anything that can run a disposable instance of an
 //! image, with just enough surface for the test runner — copy files in,
-//! exec argv, tear down. Docker implements it in v1; vmlab slots in
-//! later as a second implementation.
+//! exec argv, tear down. Docker (linux containers) and vmlab (linux or
+//! windows VMs) implement it.
 
 use std::path::Path;
 
 use crate::diag::Diag;
+
+/// The operating system running inside an instance. The runner derives
+/// the in-instance path scheme, setup shell, and which test binary to
+/// copy in from this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestOs {
+    Linux,
+    Windows,
+}
 
 /// Output of one exec inside an instance. A nonzero exit code is data
 /// for the caller, never an `Err` — errors mean the transport failed.
@@ -25,11 +34,15 @@ pub trait TestBackend {
 }
 
 pub trait TestInstance {
+    /// The instance's guest operating system.
+    fn os(&self) -> GuestOs;
+
     /// Copy a host file or directory tree to `dest` inside the instance,
     /// creating parent directories.
     fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag>;
 
-    /// Run argv inside the instance (working directory `/weave`).
+    /// Run argv inside the instance. The working directory is
+    /// unspecified — the runner always passes absolute paths.
     fn exec(&self, argv: &[&str]) -> Result<ExecOutput, Diag>;
 
     /// Human-readable handle for `--keep` messages.

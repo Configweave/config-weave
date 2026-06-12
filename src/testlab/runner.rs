@@ -20,13 +20,13 @@ use crate::engine::status::StepStatus;
 use crate::model::{Expect, Package, Playbook, TestDecl};
 use crate::report::JsonRunReport;
 
-use super::backend::{TestBackend, TestInstance};
+use super::backend::{GuestOs, TestBackend, TestInstance};
 use super::report::{TestGatherResult, TestOutcome, TestReport, TestStepResult, VerifyResult};
 use super::synth;
 
 pub struct RunnerOptions {
-    /// Static binary copied into every instance.
-    pub binary: std::path::PathBuf,
+    /// Resolves the static binary copied into instances, per guest OS.
+    pub binaries: synth::BinaryResolver,
     /// Leave instances running for post-mortem debugging.
     pub keep: bool,
     /// Forwarded to the in-instance check/apply runs.
@@ -38,9 +38,36 @@ pub struct RunnerOptions {
     pub image_override: Option<String>,
 }
 
-const BIN: &str = "/weave/config-weave";
-const PLAYBOOK: &str = "/weave/playbook";
-const FACTS: &str = "/weave/facts.json";
+/// The in-instance locations everything runs from, per guest OS. Forward
+/// slashes throughout — Windows APIs accept them everywhere these paths
+/// go (only shell command text needs backslashes, and that is the
+/// instance's concern).
+pub struct GuestPaths {
+    pub bin: &'static str,
+    pub playbook: &'static str,
+    pub facts: &'static str,
+    /// The directory holding all of the above.
+    pub dir: &'static str,
+}
+
+impl GuestPaths {
+    pub fn for_os(os: GuestOs) -> &'static GuestPaths {
+        match os {
+            GuestOs::Linux => &GuestPaths {
+                bin: "/weave/config-weave",
+                playbook: "/weave/playbook",
+                facts: "/weave/facts.json",
+                dir: "/weave",
+            },
+            GuestOs::Windows => &GuestPaths {
+                bin: "C:/weave/config-weave.exe",
+                playbook: "C:/weave/playbook",
+                facts: "C:/weave/facts.json",
+                dir: "C:/weave",
+            },
+        }
+    }
+}
 
 /// Expected status per run, by expect class. `None` = unasserted.
 fn expectations(e: Expect) -> [Option<StepStatus>; 3] {
@@ -152,12 +179,18 @@ fn drive(
     synthesized: &synth::SynthesizedTest,
     report: &mut TestReport,
 ) -> Result<(), Diag> {
-    instance.copy_in(&opts.binary, BIN)?;
+    let os = instance.os();
+    let paths = GuestPaths::for_os(os);
+    let binary = opts.binaries.resolve(os)?;
+
+    instance.copy_in(&binary, paths.bin)?;
     // docker cp preserves the executable bit; chmod defensively for
     // backends/umasks that do not. Best-effort: images without chmod
-    // surface at the smoke test below.
-    let _ = instance.exec(&["chmod", "+x", BIN]);
-    let smoke = instance.exec(&[BIN, "version"])?;
+    // surface at the smoke test below. Windows has no execute bit.
+    if os == GuestOs::Linux {
+        let _ = instance.exec(&["chmod", "+x", paths.bin]);
+    }
+    let smoke = instance.exec(&[paths.bin, "version"])?;
     if smoke.exit_code != 0 {
         return Err(Diag::bare(format!(
             "the test binary failed to run inside '{}' (exit {}): {} — host/image \
@@ -170,7 +203,19 @@ fn drive(
 
     if let Some(setup) = &test.setup {
         progress("setup");
-        let out = instance.exec(&["sh", "-c", setup])?;
+        let script;
+        let argv: [&str; 3] = match os {
+            // The exec working directory is backend-dependent; pin it.
+            GuestOs::Linux => {
+                script = format!("cd {} || exit 1\n{setup}", paths.dir);
+                ["sh", "-c", &script]
+            }
+            GuestOs::Windows => {
+                script = format!("cd /d {} && {setup}", paths.dir.replace('/', "\\"));
+                ["cmd.exe", "/C", &script]
+            }
+        };
+        let out = instance.exec(&argv)?;
         if out.exit_code != 0 {
             return Err(Diag::bare(format!(
                 "setup failed (exit {}): {}",
@@ -180,11 +225,11 @@ fn drive(
         }
     }
 
-    instance.copy_in(synthesized.dir.path(), PLAYBOOK)?;
+    instance.copy_in(synthesized.dir.path(), paths.playbook)?;
 
-    let facts = run_gathers(test, instance, progress, &mut report.gathers)?;
-    run_steps(test, instance, opts, progress, &mut report.steps)?;
-    report.verify = run_verify(test, instance, progress, &facts)?;
+    let facts = run_gathers(test, instance, progress, &mut report.gathers, paths)?;
+    run_steps(test, instance, opts, progress, &mut report.steps, paths)?;
+    report.verify = run_verify(test, instance, progress, &facts, paths)?;
     Ok(())
 }
 
@@ -195,12 +240,13 @@ fn run_gathers(
     instance: &mut dyn TestInstance,
     progress: &dyn Fn(&str),
     results: &mut Vec<TestGatherResult>,
+    paths: &GuestPaths,
 ) -> Result<serde_json::Map<String, serde_json::Value>, Diag> {
     let mut facts = serde_json::Map::new();
     for g in &test.gathers {
         progress(&format!("gather {}", g.name));
         let key = format!("{}.{}", g.package, g.gatherer);
-        let mut argv = vec![BIN, "__gather", PLAYBOOK, &key];
+        let mut argv = vec![paths.bin, "__gather", paths.playbook, &key];
         let params_json;
         if !g.params.is_empty() {
             let map: serde_json::Map<String, serde_json::Value> = g
@@ -265,6 +311,7 @@ fn run_steps(
     opts: &RunnerOptions,
     progress: &dyn Fn(&str),
     results: &mut Vec<TestStepResult>,
+    paths: &GuestPaths,
 ) -> Result<(), Diag> {
     if test.steps.is_empty() {
         return Ok(());
@@ -278,9 +325,9 @@ fn run_steps(
         // expectation table stays total; dependents of errored steps
         // still come back `not_run` per the engine's requires semantics.
         let mut argv = vec![
-            BIN,
+            paths.bin,
             mode,
-            PLAYBOOK,
+            paths.playbook,
             synth::PLAY,
             "--json",
             "--continue-on-error",
@@ -353,6 +400,7 @@ fn run_verify(
     instance: &mut dyn TestInstance,
     progress: &dyn Fn(&str),
     facts: &serde_json::Map<String, serde_json::Value>,
+    paths: &GuestPaths,
 ) -> Result<Option<VerifyResult>, Diag> {
     let Some(verify) = &test.verify else {
         return Ok(None);
@@ -368,10 +416,10 @@ fn run_verify(
                 .as_bytes(),
         )
         .map_err(|e| Diag::bare(format!("cannot write the facts temp file: {e}")))?;
-    instance.copy_in(facts_file.path(), FACTS)?;
+    instance.copy_in(facts_file.path(), paths.facts)?;
 
-    let script = in_container_script(verify)?;
-    let out = instance.exec(&[BIN, "__verify", &script, "--facts", FACTS])?;
+    let script = in_container_script(verify, paths)?;
+    let out = instance.exec(&[paths.bin, "__verify", &script, "--facts", paths.facts])?;
     match out.exit_code {
         0 => Ok(Some(VerifyResult {
             passed: true,
@@ -394,7 +442,7 @@ fn run_verify(
 
 /// Map a host verify path (absolute, under some pkgs/<name>/) to its
 /// location inside the synthesized playbook copy.
-fn in_container_script(verify: &Path) -> Result<String, Diag> {
+fn in_container_script(verify: &Path, paths: &GuestPaths) -> Result<String, Diag> {
     // …/pkgs/<pkg>/<rel> — find the pkgs component from the right.
     let comps: Vec<&str> = verify
         .iter()
@@ -406,7 +454,11 @@ fn in_container_script(verify: &Path) -> Result<String, Diag> {
             verify.display()
         ))
     })?;
-    Ok(format!("{PLAYBOOK}/pkgs/{}", comps[idx + 1..].join("/")))
+    Ok(format!(
+        "{}/pkgs/{}",
+        paths.playbook,
+        comps[idx + 1..].join("/")
+    ))
 }
 
 /// First interesting line(s) of command output for diagnostics.
@@ -442,10 +494,25 @@ mod tests {
     #[test]
     fn verify_path_maps_into_the_container() {
         let p = Path::new("/host/playbook/pkgs/core/tests/verify.wisp");
+        let linux = GuestPaths::for_os(GuestOs::Linux);
         assert_eq!(
-            in_container_script(p).unwrap(),
+            in_container_script(p, linux).unwrap(),
             "/weave/playbook/pkgs/core/tests/verify.wisp"
         );
-        assert!(in_container_script(Path::new("/elsewhere/verify.wisp")).is_err());
+        let windows = GuestPaths::for_os(GuestOs::Windows);
+        assert_eq!(
+            in_container_script(p, windows).unwrap(),
+            "C:/weave/playbook/pkgs/core/tests/verify.wisp"
+        );
+        assert!(in_container_script(Path::new("/elsewhere/verify.wisp"), linux).is_err());
+    }
+
+    #[test]
+    fn guest_paths_per_os() {
+        let l = GuestPaths::for_os(GuestOs::Linux);
+        assert_eq!(l.bin, "/weave/config-weave");
+        let w = GuestPaths::for_os(GuestOs::Windows);
+        assert_eq!(w.bin, "C:/weave/config-weave.exe");
+        assert_eq!(w.dir, "C:/weave");
     }
 }

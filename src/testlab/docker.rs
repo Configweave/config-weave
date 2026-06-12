@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use super::backend::{ExecOutput, TestBackend, TestInstance};
+use super::backend::{ExecOutput, GuestOs, TestBackend, TestInstance};
 use crate::diag::Diag;
 
 #[derive(Debug)]
@@ -146,6 +146,10 @@ impl DockerInstance {
 }
 
 impl TestInstance for DockerInstance {
+    fn os(&self) -> GuestOs {
+        GuestOs::Linux
+    }
+
     fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag> {
         if let Some((parent, _)) = dest.rsplit_once('/')
             && !parent.is_empty()

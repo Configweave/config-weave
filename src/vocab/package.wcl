@@ -44,7 +44,9 @@ type WeaveParamDecl {
 }
 
 // An isolated convergence test for this package, run by `config-weave
-// test` inside a disposable backend instance (docker container in v1).
+// test` inside a disposable backend instance: backend "docker" (linux
+// containers; image = a container image ref) or "vmlab" (linux or
+// windows VMs; image = a vmlab template ref like "x86_64/linux-modern").
 @block("test")
 type WeaveTestDecl {
   @inline(0) name: utf8

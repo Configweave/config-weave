@@ -26,6 +26,15 @@ test-lab:
     CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
         cargo test --test testlab -- --ignored
 
+# vmlab-backed testlab smoke: cross-builds the static binary, then runs
+# every package test in disposable VMs cloned from the given template.
+# Needs vmlab, KVM, and a built template (see ../vmlab).
+test-lab-vm dir='../config-weave-pkgs' template='x86_64/ubuntu-24.04': build
+    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+        cross build --release --target x86_64-unknown-linux-musl
+    CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
+        target/debug/config-weave test {{dir}} --backend vmlab --image {{template}}
+
 # Build config-weave and run the sibling standard package library checks.
 # Needs ../config-weave-pkgs plus docker (or podman) for package tests.
 test-pkgs: build

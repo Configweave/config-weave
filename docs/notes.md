@@ -123,13 +123,20 @@ runs each in a disposable backend instance. Bindings fixed here:
   | skip | skipped | skipped | skipped |
   | reboot_required | — | reboot_required | — |
 
-- **Execution model.** The host copies a *static* config-weave binary
-  into the instance (`--binary` / `$CONFIG_WEAVE_TEST_BINARY` → the
-  running exe if it has no `PT_INTERP` header → newest workspace
-  cross-build artifact) plus a synthesized playbook (one play `test`,
+- **Execution model.** The host copies a config-weave binary matched to
+  the instance's guest OS, resolved lazily once an instance reports it
+  (`TestInstance::os()`): linux = `--binary` /
+  `$CONFIG_WEAVE_TEST_BINARY` → the running exe if it has no
+  `PT_INTERP` header → newest static workspace cross-build artifact;
+  windows = `--binary-windows` / `$CONFIG_WEAVE_TEST_BINARY_WINDOWS` →
+  newest workspace `x86_64-pc-windows-gnu` artifact (`MZ`-magic
+  checked). It also copies a synthesized playbook (one play `test`,
   properties/conditions spliced verbatim, referenced packages copied
   in). A `version` smoke test turns arch mismatches into one clear
-  diagnostic.
+  diagnostic. In-instance paths come from the guest OS (`/weave/…` vs
+  `C:/weave/…`, forward slashes throughout); `setup` runs via `sh -c`
+  on linux and `cmd /C` on windows (cd'd into the weave dir — exec has
+  no working directory guarantee), and `chmod +x` is linux-only.
 - **In-container protocol.** Two hidden subcommands on the copied
   binary: `__gather <dir> <pkg.gatherer> [--params-json …]` prints
   `{"ok":…,"value"|"error":…}`; `__verify <script> [--facts <json>]`
@@ -137,19 +144,36 @@ runs each in a disposable backend instance. Bindings fixed here:
   `verify(facts) -> bool` (or `Result[bool, string]`), exit 0/1/2 =
   pass/fail/broken. Verify scripts compile during stage-5 validation
   but only ever execute inside instances.
+- **Backend selection.** Each test's `backend` field (or the global
+  `--backend` override) picks its backend; `cmd_test` discovers every
+  backend the selected tests use once, up front, so a broken
+  environment is exit 2 before any test runs. The
+  `TestBackend`/`TestInstance` traits live in `src/testlab/backend.rs`;
+  instances report a `GuestOs` the runner derives paths/shell/binary
+  from.
 - **Docker backend.** CLI discovery `$CONFIG_WEAVE_CONTAINER_CMD` →
   `docker` → `podman`; keep-alive via `run -d --entrypoint sleep`;
-  images must contain `sleep` and `sh` (distroless unsupported; a
-  vmlab backend lifts this later). One container per test, sequential
-  in v1; `--keep` disables teardown and reports the handle. The
-  `TestBackend`/`TestInstance` traits in `src/testlab/backend.rs` are
-  the vmlab seam.
+  images must contain `sleep` and `sh` (distroless unsupported — the
+  vmlab backend lifts this). One container per test, sequential;
+  `--keep` disables teardown and reports the handle. Guests are always
+  linux.
+- **vmlab backend.** CLI discovery `$CONFIG_WEAVE_VMLAB_CMD` → `vmlab`
+  (probed with `--version`). `image` is a vmlab template ref. Each
+  provision writes a one-VM lab (`vm "box"`, `nic { nat = true }`,
+  template defaults for sizing) into a tempdir whose unique name is the
+  lab name (`cw-test-…`), runs `vmlab up` there, then `vmlab osinfo
+  box` — `id == "mswindows"` selects the windows protocol, anything
+  else linux. exec = `vmlab exec --timeout 3600 box -- …` (the CLI
+  propagates the guest exit code); copy = `vmlab cp src box:dest`
+  (creates parent directories); teardown = `vmlab destroy` + tempdir
+  removal; `--keep` leaves the lab up and reports its directory so
+  `vmlab exec`/`console` work post-mortem. Windows guests need the
+  guest agent in the template (vmlab requires this anyway for
+  readiness) and `setup` written for `cmd /C`.
 - **Reporting.** Exit 0 = all passed, 1 = any failed/error, 2 =
   validation/environment. `--json` emits a schema-stable object with
   `mode: "test"`; the runner parses in-container reports with the same
   `JsonRunReport` types that produce them.
-- Windows containers/hosts are out of scope for this feature's v1; the
-  runner always copies a linux binary.
 
 ## wisp binding (PRD §6/§7)
 

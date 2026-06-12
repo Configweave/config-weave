@@ -21,9 +21,11 @@ validation pipeline, sequential + parallel execution with concurrency
 classes, full host API (Linux + Windows modules), three output modes with
 NDJSON file logging, and authoring/docs (`wispi`, `init`, `docs`).
 Post-v1: `config-weave test` (the testlab, `src/testlab/`) runs package
-convergence tests in disposable docker containers — `test` blocks in
-package.wcl, a three-run idempotence protocol, `just test-lab` for the
-docker-gated suite. `docs/notes.md` records how the PRD's illustrative
+convergence tests in disposable instances — docker containers (linux) or
+vmlab VMs (linux + windows guests, shelling out to the sibling `../vmlab`
+CLI) — with `test` blocks in package.wcl, a three-run idempotence
+protocol, `just test-lab` for the docker-gated suite, and `just
+test-lab-vm` for a vmlab smoke. `docs/notes.md` records how the PRD's illustrative
 sketches were bound to the real WCL and wisp APIs, plus the testlab's
 bindings — read it before changing the vocabulary, the variable scheme,
 the host API surface, or the test protocol.

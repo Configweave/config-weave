@@ -822,12 +822,9 @@ fn load_test(
     }
     let description = string_field(block, "description", ctx).unwrap_or_default();
     let backend = string_field_optional(block, "backend", ctx).unwrap_or_else(|| "docker".into());
-    if backend != "docker" {
+    if backend != "docker" && backend != "vmlab" {
         ctx.err(
-            format!(
-                "unknown test backend '{backend}' (only 'docker' is supported; \
-                 'vmlab' is planned)"
-            ),
+            format!("unknown test backend '{backend}' (supported: 'docker', 'vmlab')"),
             span,
         );
     }
