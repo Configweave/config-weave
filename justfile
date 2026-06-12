@@ -26,6 +26,22 @@ test-lab:
     CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
         cargo test --test testlab -- --ignored
 
+# Build config-weave and run the sibling standard package library checks.
+# Needs ../config-weave-pkgs plus docker (or podman) for package tests.
+test-pkgs: build
+    test -d ../config-weave-pkgs
+    target/debug/config-weave wispi ../config-weave-pkgs
+    target/debug/config-weave validate ../config-weave-pkgs
+    target/debug/config-weave test ../config-weave-pkgs
+    target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs
+
+# Build config-weave, render the sibling package docs, and serve them.
+serve-pkgs-docs: build
+    test -d ../config-weave-pkgs
+    target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs
+    @echo "serving package docs at http://127.0.0.1:8000"
+    cd ../config-weave-pkgs/docs && python3 -m http.server 8000 --bind 127.0.0.1
+
 # Release artifacts for both PRD targets plus a checksums file.
 # Requires `cross` and a container runtime; path deps are mounted into
 # the build container (see Cross.toml).
