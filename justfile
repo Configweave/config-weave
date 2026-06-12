@@ -17,6 +17,15 @@ check:
 sample: build
     cargo run -q -- validate testdata/sample
 
+# Docker-backed testlab suite: cross-builds the static binary the tests
+# copy into containers, then runs the #[ignore]-gated tests. Needs
+# docker (or podman) and `cross`.
+test-lab:
+    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+        cross build --release --target x86_64-unknown-linux-musl
+    CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
+        cargo test --test testlab -- --ignored
+
 # Release artifacts for both PRD targets plus a checksums file.
 # Requires `cross` and a container runtime; path deps are mounted into
 # the build container (see Cross.toml).

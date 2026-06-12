@@ -499,6 +499,272 @@ fn run_verify_bad_contract_exits_2() {
     assert!(stderr.contains("verify"), "{stderr}");
 }
 
+// ----------------------------------------------------------- CLI surface
+
+#[test]
+fn test_without_any_tests_exits_2() {
+    // Drop the test block entirely and re-close the package.
+    let dir = fixture_with(|s| {
+        let start = s.find("  test \"converges\"").unwrap();
+        format!("{}}}\n", &s[..start])
+    });
+    let (code, _, stderr) = run(&["test", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("no package declares any tests"), "{stderr}");
+}
+
+#[test]
+fn test_with_bad_filter_lists_available() {
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+    let (code, _, stderr) = run(&["test", dir.path().to_str().unwrap(), "tlab:nope"]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("no tests match 'tlab:nope'"), "{stderr}");
+    assert!(stderr.contains("tlab:converges"), "{stderr}");
+}
+
+#[test]
+fn test_with_unknown_backend_override_exits_2() {
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+    let (code, _, stderr) = run(&["test", dir.path().to_str().unwrap(), "--backend", "vmlab"]);
+    assert_eq!(code, 2);
+    assert!(stderr.contains("unknown test backend 'vmlab'"), "{stderr}");
+}
+
+// ------------------------------------------------------------ docker-gated
+// The real thing: containers, three engine runs, verify scripts. Run via
+// `just test-lab`, which cross-builds the musl artifact and points
+// CONFIG_WEAVE_TEST_BINARY at it. `#[ignore]` keeps `just test`
+// docker-free; each test also skips with a message when the binary or a
+// container CLI is missing.
+
+/// The static binary for in-container runs, or a skip message.
+fn lab_binary() -> Option<String> {
+    match std::env::var("CONFIG_WEAVE_TEST_BINARY") {
+        Ok(p) if Path::new(&p).is_file() => Some(p),
+        Ok(p) => {
+            eprintln!("skipping: CONFIG_WEAVE_TEST_BINARY={p} does not exist");
+            None
+        }
+        Err(_) => {
+            eprintln!("skipping: CONFIG_WEAVE_TEST_BINARY is not set (run via `just test-lab`)");
+            None
+        }
+    }
+}
+
+fn docker_available() -> bool {
+    for cmd in ["docker", "podman"] {
+        if Command::new(cmd)
+            .arg("version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    eprintln!("skipping: no working docker/podman");
+    false
+}
+
+fn run_lab(dir: &Path, binary: &str, extra: &[&str]) -> (i32, String, String) {
+    let mut args = vec!["test", dir.to_str().unwrap(), "--binary", binary, "--json"];
+    args.extend_from_slice(extra);
+    run(&args)
+}
+
+#[test]
+#[ignore = "needs docker and a static binary (just test-lab)"]
+fn lab_converge_test_passes() {
+    let Some(binary) = lab_binary() else { return };
+    if !docker_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+
+    let (code, stdout, stderr) = run_lab(dir.path(), &binary, &[]);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert_eq!(v["mode"], "test");
+    let t = &v["tests"][0];
+    assert_eq!(t["outcome"], "passed", "{stdout}");
+    let s = &t["steps"][0];
+    assert_eq!(s["check"], "not_configured", "{stdout}");
+    assert_eq!(s["apply"], "configured", "{stdout}");
+    assert_eq!(s["second_apply"], "already_configured", "{stdout}");
+    assert_eq!(t["gathers"][0]["failures"], serde_json::json!([]));
+    assert_eq!(t["verify"]["passed"], true, "{stdout}");
+}
+
+#[test]
+#[ignore = "needs docker and a static binary (just test-lab)"]
+fn lab_expected_error_test_passes() {
+    let Some(binary) = lab_binary() else { return };
+    if !docker_available() {
+        return;
+    }
+    // file_present errors on an empty path; expect = "error" makes that
+    // the passing outcome.
+    let dir = fixture_with(|s| {
+        s.replace(
+            "  test \"converges\" {",
+            r#"  test "rejects_bad_path" {
+    description = "file_present errors on an empty path"
+    image = "debian:12"
+
+    step "bad" {
+      description = "Apply with an invalid path"
+      resource = "file_present"
+      expect = "error"
+      properties {
+        path = ""
+      }
+    }
+  }
+
+  test "converges" {"#,
+        )
+    });
+
+    let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:rejects_bad_path"]);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert_eq!(v["tests"][0]["outcome"], "passed", "{stdout}");
+    assert_eq!(v["tests"][0]["steps"][0]["apply"], "error", "{stdout}");
+}
+
+#[test]
+#[ignore = "needs docker and a static binary (just test-lab)"]
+fn lab_non_idempotent_resource_fails_second_apply() {
+    let Some(binary) = lab_binary() else { return };
+    if !docker_available() {
+        return;
+    }
+    // The signature regression test: apply works but check never
+    // recognizes the applied state, so a fresh process re-applies and
+    // the second apply reports `configured` instead of
+    // `already_configured` — the runner must fail the test.
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+    let pkg = dir.path().join("pkgs/tlab");
+    std::fs::write(
+        pkg.join("resources/amnesiac.wisp"),
+        r#"use value
+use fs
+
+fn check(params: Value) -> CheckResult {
+    CheckResult::NotConfigured
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    fs::write("/var/tmp/amnesiac.txt", "x")?
+    Ok(ApplyResult::Success)
+}
+"#,
+    )
+    .unwrap();
+    let manifest = pkg.join("package.wcl");
+    let src = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        src.replace(
+            "  test \"converges\" {",
+            r#"  resource "amnesiac" {
+    description = "Applies but never remembers"
+    script = "resources/amnesiac.wisp"
+  }
+
+  test "amnesiac_is_caught" {
+    description = "A non-idempotent resource must fail the test"
+    image = "debian:12"
+
+    step "apply-it" {
+      description = "Apply the amnesiac resource"
+      resource = "amnesiac"
+    }
+  }
+
+  test "converges" {"#,
+        ),
+    )
+    .unwrap();
+
+    let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:amnesiac_is_caught"]);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    assert_eq!(code, 1, "{stdout}{stderr}");
+    let t = &v["tests"][0];
+    assert_eq!(t["outcome"], "failed", "{stdout}");
+    // Run 2's internal re-check already catches it (apply claims success,
+    // check still disagrees -> error); the second apply stays broken too.
+    let failures = t["steps"][0]["failures"].as_array().unwrap();
+    assert!(!failures.is_empty(), "{stdout}");
+}
+
+#[test]
+#[ignore = "needs docker and a static binary (just test-lab)"]
+fn lab_setup_preconfigures_state() {
+    let Some(binary) = lab_binary() else { return };
+    if !docker_available() {
+        return;
+    }
+    // setup writes the file beforehand; expect = "already_configured"
+    // asserts check sees it across all three runs.
+    let dir = fixture_with(|s| {
+        s.replace(
+            "  test \"converges\" {",
+            r#"  test "preconfigured" {
+    description = "Setup pre-creates the file, check must see it"
+    image = "debian:12"
+    setup = "mkdir -p /var/tmp && printf hello > /var/tmp/pre.txt"
+
+    step "already" {
+      description = "Nothing to do"
+      resource = "file_present"
+      expect = "already_configured"
+      properties {
+        path = "/var/tmp/pre.txt"
+        content = "hello"
+      }
+    }
+  }
+
+  test "converges" {"#,
+        )
+    });
+
+    let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:preconfigured"]);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert_eq!(v["tests"][0]["outcome"], "passed", "{stdout}");
+}
+
+#[test]
+#[ignore = "needs docker and a static binary (just test-lab)"]
+fn lab_keep_leaves_a_container() {
+    let Some(binary) = lab_binary() else { return };
+    if !docker_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+
+    let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:converges", "--keep"]);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let kept = v["tests"][0]["kept"].as_str().expect(&stdout);
+    // "container <id> (image debian:12)"
+    let id = kept.split_whitespace().nth(1).unwrap();
+    let inspect = Command::new("docker")
+        .args(["inspect", id])
+        .output()
+        .unwrap();
+    assert!(inspect.status.success(), "kept container should exist");
+    let _ = Command::new("docker").args(["rm", "-f", id]).output();
+}
+
 #[test]
 fn duplicate_step_name_in_test_fails() {
     let dir = fixture_with(|s| {
