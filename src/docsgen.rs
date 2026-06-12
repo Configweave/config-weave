@@ -62,6 +62,32 @@ fn ident(s: &str) -> String {
     out
 }
 
+fn package_page(pkg: &str) -> String {
+    format!("pkg_{}", ident(pkg))
+}
+
+fn play_page(play: &str) -> String {
+    format!("play_{}", ident(play))
+}
+
+fn resource_page(pkg: &str, res: &str) -> String {
+    format!("res_{}_{}", ident(pkg), ident(res))
+}
+
+fn test_page(pkg: &str, test: &str) -> String {
+    format!("test_{}_{}", ident(pkg), ident(test))
+}
+
+fn md_text(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+fn page_link(label: &str, page: &str) -> String {
+    format!("[{}]({})", md_text(label), page)
+}
+
 fn emit(pb: &Playbook) -> String {
     let mut w = String::new();
     let _ = writeln!(w, "import <wdoc.wcl>");
@@ -133,7 +159,7 @@ fn emit_index(w: &mut String, pb: &Playbook) {
         let _ = writeln!(
             w,
             "      | \"{}\" | \"{}\" | \"{}\" |",
-            esc(&play.name),
+            esc(&page_link(&play.name, &play_page(&play.name))),
             play.steps().len(),
             esc(&play.description)
         );
@@ -151,7 +177,7 @@ fn emit_index(w: &mut String, pb: &Playbook) {
             let _ = writeln!(
                 w,
                 "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",
-                esc(&pkg.name),
+                esc(&page_link(&pkg.name, &package_page(&pkg.name))),
                 pkg.resources.len(),
                 pkg.gatherers.len(),
                 esc(&pkg.description)
@@ -221,10 +247,12 @@ fn emit_play(w: &mut String, pb: &Playbook, play: &Play) {
         };
         let _ = writeln!(
             w,
-            "      | \"{}\" | \"{}.{}\" | \"{}\" | \"{}\" |  \"{}\" |",
+            "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" |  \"{}\" |",
             esc(&path),
-            esc(&s.package),
-            esc(&s.resource),
+            esc(&page_link(
+                &format!("{}.{}", s.package, s.resource),
+                &resource_page(&s.package, &s.resource)
+            )),
             esc(s.condition_src.as_deref().unwrap_or("—")),
             esc(&if s.requires.is_empty() {
                 "—".to_string()
@@ -300,7 +328,7 @@ fn emit_package(w: &mut String, pkg: &crate::model::Package) {
             let _ = writeln!(
                 w,
                 "      | \"{}\" | \"{}\" | \"{}\" |",
-                esc(&r.name),
+                esc(&page_link(&r.name, &resource_page(&pkg.name, &r.name))),
                 r.concurrency.as_str(),
                 esc(&r.description)
             );
@@ -318,7 +346,7 @@ fn emit_package(w: &mut String, pkg: &crate::model::Package) {
             let _ = writeln!(
                 w,
                 "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",
-                esc(&t.name),
+                esc(&page_link(&t.name, &test_page(&pkg.name, &t.name))),
                 esc(&t.backend),
                 esc(&t.image),
                 esc(&t.description)
@@ -360,10 +388,12 @@ fn emit_test(w: &mut String, pkg: &str, test: &crate::model::TestDecl) {
         for s in &test.steps {
             let _ = writeln!(
                 w,
-                "      | \"{}\" | \"{}.{}\" | \"{}\" | \"{}\" | \"{}\" |",
+                "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",
                 esc(&s.name),
-                esc(&s.package),
-                esc(&s.resource),
+                esc(&page_link(
+                    &format!("{}.{}", s.package, s.resource),
+                    &resource_page(&s.package, &s.resource)
+                )),
                 s.expect.as_str(),
                 esc(&if s.requires.is_empty() {
                     "—".to_string()

@@ -124,11 +124,33 @@ fn init_validate_apply_docs() {
 
     let index = std::fs::read_to_string(docs.join("index.html")).unwrap();
     assert!(index.contains("My Playbook"), "index missing title");
+    assert!(
+        index.contains("href=\"play_baseline.html\""),
+        "index missing play link"
+    );
+    assert!(
+        index.contains("href=\"pkg_example.html\""),
+        "index missing package link"
+    );
 
     // Per-play page carries the step table and the DAG diagram (SVG).
     let play = std::fs::read_to_string(docs.join("play_baseline.html")).unwrap();
     assert!(play.contains("greeting"), "play page missing step");
+    assert!(
+        play.contains("href=\"res_example_file_present.html\""),
+        "play page missing resource link"
+    );
     assert!(play.contains("svg"), "play page missing DAG diagram");
+
+    let pkg = std::fs::read_to_string(docs.join("pkg_example.html")).unwrap();
+    assert!(
+        pkg.contains("href=\"res_example_file_present.html\""),
+        "package page missing resource link"
+    );
+    assert!(
+        pkg.contains("href=\"test_example_greeting_converges.html\""),
+        "package page missing test link"
+    );
 
     // Per-resource page carries the parameter table from the schema.
     let res = std::fs::read_to_string(docs.join("res_example_file_present.html")).unwrap();
