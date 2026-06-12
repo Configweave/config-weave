@@ -181,7 +181,6 @@ pub struct TestDecl {
     pub name: String,
     pub description: String,
     /// Backend selector; only "docker" exists in v1 ("vmlab" is planned).
-    #[allow(dead_code)] // rendered by docsgen (in progress)
     pub backend: String,
     /// Backend-specific image reference (docker image ref in v1).
     pub image: String,
@@ -252,7 +251,6 @@ impl Expect {
 #[derive(Debug)]
 pub struct TestGather {
     pub name: String,
-    #[allow(dead_code)] // rendered by docsgen (in progress)
     pub description: String,
     pub package: String,
     pub gatherer: String,

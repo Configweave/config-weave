@@ -49,6 +49,7 @@ pub fn init(dir: &Path) -> Result<(), Diag> {
     write("pkgs/example/package.wcl", PACKAGE)?;
     write("pkgs/example/resources/file_present.wisp", RESOURCE)?;
     write("pkgs/example/gatherers/os_info.wisp", GATHERER)?;
+    write("pkgs/example/tests/greeting_verify.wisp", VERIFY)?;
     write("lib/README.md", LIB_README)?;
     write("pkgs/example/lib/README.md", LIB_README)?;
 
@@ -111,6 +112,27 @@ const PACKAGE: &str = r#"package "example" {
       default = ""
     }
   }
+
+  // Run with `config-weave test <playbook-dir>` (needs docker or
+  // podman). Steps default to expect = "converge": check reports
+  // not_configured, apply succeeds, and a second apply proves
+  // idempotence. Other expectations: already_configured, error, skip,
+  // reboot_required. The optional verify script runs inside the
+  // container for custom assertions.
+  test "greeting_converges" {
+    description = "file_present creates the greeting file and is idempotent"
+    image = "debian:12"
+    verify = "tests/greeting_verify.wisp"
+
+    step "greet" {
+      description = "Create the greeting file"
+      resource = "file_present"
+      properties {
+        path = "/tmp/my-playbook/hello.txt"
+        content = "hello from config-weave"
+      }
+    }
+  }
 }
 "#;
 
@@ -163,6 +185,17 @@ fn gather(params: Value) -> Value {
         "arch": Value::String(sys::arch()),
         "cpus": Value::Int(sys::cpu_count())
     })
+}
+"#;
+
+const VERIFY: &str = r#"use value
+use fs
+
+// Custom test assertions, run inside the test container after the apply
+// runs. `facts` holds the results of the test's gather checks (empty
+// here). Returning Ok(false) or Err fails the test with the message.
+fn verify(facts: Value) -> Result[bool, string] {
+    Ok(fs::read("/tmp/my-playbook/hello.txt")? == "hello from config-weave")
 }
 "#;
 

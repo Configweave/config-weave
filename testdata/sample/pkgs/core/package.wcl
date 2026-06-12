@@ -22,4 +22,41 @@ package "core" {
       default = ""
     }
   }
+
+  test "file_present_converges" {
+    description = "file_present creates the file and is idempotent"
+    image = "debian:12"
+    verify = "tests/file_present_verify.wisp"
+
+    step "create" {
+      description = "Create a marker file"
+      resource = "file_present"
+      properties {
+        path = "/var/tmp/weave-sample.txt"
+        content = "hello"
+      }
+    }
+
+    gather "os" {
+      description = "OS facts inside the container"
+      from = "os_info"
+      expect {
+        family = "linux"
+      }
+    }
+  }
+
+  test "file_present_rejects_bad_path" {
+    description = "file_present errors on an empty path"
+    image = "debian:12"
+
+    step "bad" {
+      description = "Apply with an invalid path"
+      resource = "file_present"
+      expect = "error"
+      properties {
+        path = ""
+      }
+    }
+  }
 }

@@ -78,6 +78,9 @@ fn emit(pb: &Playbook) -> String {
         for res in pkg.resources.values() {
             emit_resource(&mut w, &pkg.name, res);
         }
+        for test in &pkg.tests {
+            emit_test(&mut w, &pkg.name, test);
+        }
     }
     w
 }
@@ -303,6 +306,110 @@ fn emit_package(w: &mut String, pkg: &crate::model::Package) {
             );
         }
         let _ = writeln!(w, "  }}");
+    }
+    if !pkg.tests.is_empty() {
+        let _ = writeln!(w, "  h2 \"Tests\"");
+        let _ = writeln!(w, "  table {{\n    rows:");
+        let _ = writeln!(
+            w,
+            "      | \"Test\" | \"Backend\" | \"Image\" | \"Description\" |"
+        );
+        for t in &pkg.tests {
+            let _ = writeln!(
+                w,
+                "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",
+                esc(&t.name),
+                esc(&t.backend),
+                esc(&t.image),
+                esc(&t.description)
+            );
+        }
+        let _ = writeln!(w, "  }}");
+    }
+    let _ = writeln!(w, "}}");
+    let _ = writeln!(w);
+}
+
+fn emit_test(w: &mut String, pkg: &str, test: &crate::model::TestDecl) {
+    let _ = writeln!(
+        w,
+        "page test_{}_{} {{ sites = [:main]  title = \"Test: {}:{}\"",
+        ident(pkg),
+        ident(&test.name),
+        esc(pkg),
+        esc(&test.name)
+    );
+    let _ = writeln!(w, "  h1 \"Test: {}:{}\"", esc(pkg), esc(&test.name));
+    let _ = writeln!(w, "  p \"{}\"", esc(&test.description));
+    let _ = writeln!(
+        w,
+        "  p \"Runs on {} image {}\"",
+        esc(&test.backend),
+        esc(&test.image)
+    );
+    if let Some(setup) = &test.setup {
+        let _ = writeln!(w, "  p \"Setup: {}\"", esc(setup));
+    }
+    if !test.steps.is_empty() {
+        let _ = writeln!(w, "  h2 \"Steps\"");
+        let _ = writeln!(w, "  table {{\n    rows:");
+        let _ = writeln!(
+            w,
+            "      | \"Step\" | \"Resource\" | \"Expect\" | \"Requires\" | \"Description\" |"
+        );
+        for s in &test.steps {
+            let _ = writeln!(
+                w,
+                "      | \"{}\" | \"{}.{}\" | \"{}\" | \"{}\" | \"{}\" |",
+                esc(&s.name),
+                esc(&s.package),
+                esc(&s.resource),
+                s.expect.as_str(),
+                esc(&if s.requires.is_empty() {
+                    "—".to_string()
+                } else {
+                    s.requires.join(", ")
+                }),
+                esc(&s.description)
+            );
+        }
+        let _ = writeln!(w, "  }}");
+    }
+    if !test.gathers.is_empty() {
+        let _ = writeln!(w, "  h2 \"Gather checks\"");
+        let _ = writeln!(w, "  table {{\n    rows:");
+        let _ = writeln!(
+            w,
+            "      | \"Gather\" | \"Gatherer\" | \"Expectations\" | \"Description\" |"
+        );
+        for g in &test.gathers {
+            let expects = if g.expect.is_empty() {
+                "—".to_string()
+            } else {
+                g.expect
+                    .iter()
+                    .map(|(k, v)| format!("{k} = {}", crate::convert::canonicalise(v)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let _ = writeln!(
+                w,
+                "      | \"{}\" | \"{}.{}\" | \"{}\" | \"{}\" |",
+                esc(&g.name),
+                esc(&g.package),
+                esc(&g.gatherer),
+                esc(&expects),
+                esc(&g.description)
+            );
+        }
+        let _ = writeln!(w, "  }}");
+    }
+    if let Some(verify) = &test.verify {
+        let _ = writeln!(
+            w,
+            "  p \"Custom assertions: {}\"",
+            esc(&verify.file_name().unwrap_or_default().to_string_lossy())
+        );
     }
     let _ = writeln!(w, "}}");
     let _ = writeln!(w);

@@ -94,6 +94,63 @@ windows 0.6x.
   overlaying them on its own stdlib, whose same-named `fs` shadowed the
   config-weave surface.
 
+## Testlab (`config-weave test` — post-v1 extension)
+
+Packages declare `test` blocks in `package.wcl`; `config-weave test`
+runs each in a disposable backend instance. Bindings fixed here:
+
+- **Shape.** `test "name" { description, backend = "docker" (default),
+  image, setup?, verify?, step…, gather… }`. Steps mirror playbook steps
+  plus `expect = converge (default) | already_configured | error | skip
+  | reboot_required`; gathers carry static `params` and an `expect`
+  block of top-level key equality assertions. All test values must be
+  **static** — tests run against a synthesized variable-free playbook,
+  so a variable reference in test properties is a validation error.
+  Unqualified `resource`/`from` refs resolve to the declaring package.
+- **Three-run protocol.** Inside the instance the runner executes
+  `check`, `apply`, `apply` (all `--json --continue-on-error`, `--jobs`
+  forwarded). Run 2's internal re-check proves convergence within one
+  process; run 3 proves *cross-process idempotence* and that re-apply is
+  a true no-op (a check that only passes on in-process state re-applies
+  and surfaces as `configured`, failing the test). Expectation table
+  (— = unasserted):
+
+  | expect | check | apply | apply again |
+  |---|---|---|---|
+  | converge | not_configured | configured | already_configured |
+  | already_configured | already_configured | already_configured | already_configured |
+  | error | — | error | — |
+  | skip | skipped | skipped | skipped |
+  | reboot_required | — | reboot_required | — |
+
+- **Execution model.** The host copies a *static* config-weave binary
+  into the instance (`--binary` / `$CONFIG_WEAVE_TEST_BINARY` → the
+  running exe if it has no `PT_INTERP` header → newest workspace
+  cross-build artifact) plus a synthesized playbook (one play `test`,
+  properties/conditions spliced verbatim, referenced packages copied
+  in). A `version` smoke test turns arch mismatches into one clear
+  diagnostic.
+- **In-container protocol.** Two hidden subcommands on the copied
+  binary: `__gather <dir> <pkg.gatherer> [--params-json …]` prints
+  `{"ok":…,"value"|"error":…}`; `__verify <script> [--facts <json>]`
+  compiles the script against the host API and runs
+  `verify(facts) -> bool` (or `Result[bool, string]`), exit 0/1/2 =
+  pass/fail/broken. Verify scripts compile during stage-5 validation
+  but only ever execute inside instances.
+- **Docker backend.** CLI discovery `$CONFIG_WEAVE_CONTAINER_CMD` →
+  `docker` → `podman`; keep-alive via `run -d --entrypoint sleep`;
+  images must contain `sleep` and `sh` (distroless unsupported; a
+  vmlab backend lifts this later). One container per test, sequential
+  in v1; `--keep` disables teardown and reports the handle. The
+  `TestBackend`/`TestInstance` traits in `src/testlab/backend.rs` are
+  the vmlab seam.
+- **Reporting.** Exit 0 = all passed, 1 = any failed/error, 2 =
+  validation/environment. `--json` emits a schema-stable object with
+  `mode: "test"`; the runner parses in-container reports with the same
+  `JsonRunReport` types that produce them.
+- Windows containers/hosts are out of scope for this feature's v1; the
+  runner always copies a linux binary.
+
 ## wisp binding (PRD §6/§7)
 
 - Script entry points accept two signatures each: plain
