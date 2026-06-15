@@ -40,12 +40,20 @@ test-lab-vm dir='../config-weave-pkgs' template='x86_64/ubuntu-24.04': build
         target/debug/config-weave test {{dir}} --backend vmlab --image {{template}}
 
 # Build config-weave and run the sibling standard package library checks.
-# Needs ../config-weave-pkgs plus docker (or podman) for package tests.
+# Each test runs on its own declared backend, so this needs ../config-weave-pkgs,
+# `cross`, docker (or podman) for the linux/docker tests, and vmlab + KVM + a
+# built windows template for the vmlab/windows tests.
 test-pkgs: build
     test -d ../config-weave-pkgs
+    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+        cross build --release --target x86_64-unknown-linux-musl
+    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+        cross build --release --target x86_64-pc-windows-gnu
     target/debug/config-weave wispi ../config-weave-pkgs
     target/debug/config-weave validate ../config-weave-pkgs
-    target/debug/config-weave test ../config-weave-pkgs
+    target/debug/config-weave test ../config-weave-pkgs \
+        --binary target-cross/x86_64-unknown-linux-musl/release/config-weave \
+        --binary-windows target-cross/x86_64-pc-windows-gnu/release/config-weave.exe
     target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs
 
 # Build config-weave, render the sibling package docs, and serve them.
