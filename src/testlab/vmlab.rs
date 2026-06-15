@@ -6,6 +6,7 @@
 
 use std::path::Path;
 use std::process::{Command, Output};
+use std::time::{Duration, Instant};
 
 use super::backend::{ExecOutput, GuestOs, TestBackend, TestInstance};
 use crate::diag::Diag;
@@ -13,6 +14,16 @@ use crate::diag::Diag;
 /// Guest-exec timeout forwarded to `vmlab exec`. Package convergence can
 /// legitimately take a while inside a VM (package managers, downloads).
 const EXEC_TIMEOUT_SECS: &str = "3600";
+
+/// How long to wait for the guest agent to answer `osinfo` after `up`.
+/// `vmlab up` only blocks on readiness for VMs something depends on, and
+/// our throwaway lab is a single VM with no dependents — so the agent may
+/// still be coming up, especially on Windows, which boots well past
+/// `osinfo`'s own 30s agent wait. Generous enough for a cold Windows boot.
+const OSINFO_DEADLINE: Duration = Duration::from_secs(300);
+
+/// Pause between `osinfo` attempts while the agent is still coming up.
+const OSINFO_POLL: Duration = Duration::from_secs(3);
 
 #[derive(Debug)]
 pub struct VmlabBackend {
@@ -106,20 +117,19 @@ impl TestBackend for VmlabBackend {
             return Err(Diag::bare(msg));
         }
 
-        // The guest agent answered during `up` (readiness), so osinfo is
-        // cheap and decides the runner's whole path/shell scheme.
-        let osinfo = instance.run(&["osinfo", VM])?;
-        if !osinfo.status.success() {
-            let msg = format!(
-                "cannot identify the guest OS of '{image}': {}",
-                stderr_tail(&osinfo)
-            );
-            let _ = instance.teardown();
-            return Err(Diag::bare(msg));
-        }
-        let parsed: serde_json::Value =
-            serde_json::from_str(String::from_utf8_lossy(&osinfo.stdout).trim())
-                .unwrap_or_default();
+        // `up` does not guarantee the agent is ready for a dependency-free
+        // single-VM lab, so poll osinfo until it answers (it also decides
+        // the runner's whole path/shell scheme).
+        let parsed = match instance.wait_osinfo() {
+            Ok(v) => v,
+            Err(d) => {
+                let _ = instance.teardown();
+                return Err(Diag::bare(format!(
+                    "cannot identify the guest OS of '{image}': {}",
+                    d.message
+                )));
+            }
+        };
         instance.os = if parsed["id"].as_str() == Some("mswindows") {
             GuestOs::Windows
         } else {
@@ -155,6 +165,36 @@ impl VmlabInstance {
                 ))
             })
     }
+
+    /// Poll `vmlab osinfo` until the guest agent answers with parseable
+    /// JSON, or `OSINFO_DEADLINE` elapses. Each attempt already blocks up
+    /// to vmlab's own ~30s agent wait, so a short sleep between attempts is
+    /// enough to cover a slow (Windows) boot without busy-looping.
+    fn wait_osinfo(&self) -> Result<serde_json::Value, Diag> {
+        let start = Instant::now();
+        loop {
+            let out = self.run(&["osinfo", VM])?;
+            if out.status.success()
+                && let Ok(v) = serde_json::from_str::<serde_json::Value>(
+                    String::from_utf8_lossy(&out.stdout).trim(),
+                )
+            {
+                return Ok(v);
+            }
+            let last = if out.status.success() {
+                "osinfo returned unparseable output".to_string()
+            } else {
+                stderr_tail(&out)
+            };
+            if start.elapsed() >= OSINFO_DEADLINE {
+                return Err(Diag::bare(format!(
+                    "guest agent still unavailable after {}s: {last}",
+                    OSINFO_DEADLINE.as_secs()
+                )));
+            }
+            std::thread::sleep(OSINFO_POLL);
+        }
+    }
 }
 
 impl TestInstance for VmlabInstance {
@@ -163,7 +203,12 @@ impl TestInstance for VmlabInstance {
     }
 
     fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag> {
-        let src_str = src.display().to_string();
+        // vmlab verbs run with the lab tempdir as cwd (it resolves the lab
+        // from the working directory), so a relative host src would resolve
+        // against the lab dir, not ours — absolutize it first.
+        let src_abs = std::fs::canonicalize(src)
+            .map_err(|e| Diag::bare(format!("cannot resolve {}: {e}", src.display())))?;
+        let src_str = src_abs.display().to_string();
         let target = format!("{VM}:{dest}");
         let out = self.run(&["cp", &src_str, &target])?;
         if !out.status.success() {

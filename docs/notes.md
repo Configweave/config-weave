@@ -192,11 +192,17 @@ runs each in a disposable backend instance. Bindings fixed here:
   (probed with `--version`). `image` is a vmlab template ref. Each
   provision writes a one-VM lab (`vm "box"`, `nic { nat = true }`,
   template defaults for sizing) into a tempdir whose unique name is the
-  lab name (`cw-test-…`), runs `vmlab up` there, then `vmlab osinfo
-  box` — `id == "mswindows"` selects the windows protocol, anything
-  else linux. exec = `vmlab exec --timeout 3600 box -- …` (the CLI
-  propagates the guest exit code); copy = `vmlab cp src box:dest`
-  (creates parent directories); teardown = `vmlab destroy` + tempdir
+  lab name (`cw-test-…`), runs `vmlab up` there, then **polls** `vmlab
+  osinfo box` until the guest agent answers (up to 300s, 3s between
+  tries) — `id == "mswindows"` selects the windows protocol, anything
+  else linux. The poll is required because `vmlab up` only blocks on
+  agent readiness for VMs something *depends on*, and this lab's single
+  VM has no dependents, so a slow (Windows) boot would otherwise hit
+  osinfo's own 30s agent wait. exec = `vmlab exec --timeout 3600 box --
+  …` (the CLI propagates the guest exit code); copy = `vmlab cp src
+  box:dest` — `src` is canonicalized to an absolute path first, since
+  vmlab verbs run with the lab tempdir as cwd (creates parent
+  directories); teardown = `vmlab destroy` + tempdir
   removal; `--keep` leaves the lab up and reports its directory so
   `vmlab exec`/`console` work post-mortem. A group provisions **one** VM
   and runs all its tests inside it sequentially (the big win — VM boot is
