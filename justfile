@@ -1,5 +1,9 @@
 # config-weave command runner
 
+[default, private]
+main:
+    @just --list
+
 # Build the debug binary
 build:
     cargo build
