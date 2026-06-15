@@ -12,7 +12,7 @@
 
 use std::io::Write as _;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::convert::dyn_to_json;
 use crate::diag::Diag;
@@ -33,40 +33,69 @@ pub struct RunnerOptions {
     pub jobs: Option<usize>,
     /// Suppress stderr progress lines (JSON output mode).
     pub quiet: bool,
-    /// `--image`: run every test against this image instead of its own
-    /// (matrix runs across distros).
-    pub image_override: Option<String>,
+    /// Max docker groups (containers) running at once.
+    pub docker_cap: usize,
+    /// Max vmlab groups (VMs) running at once — kept small, VMs are heavy.
+    pub vmlab_cap: usize,
 }
 
 /// The in-instance locations everything runs from, per guest OS. Forward
 /// slashes throughout — Windows APIs accept them everywhere these paths
 /// go (only shell command text needs backslashes, and that is the
 /// instance's concern).
+///
+/// The binary is copied once per group to the shared `bin` path; each
+/// test gets its own working `dir` (and the playbook/facts under it) so
+/// grouped tests sharing one instance never clobber each other's files.
 pub struct GuestPaths {
     pub bin: &'static str,
-    pub playbook: &'static str,
-    pub facts: &'static str,
-    /// The directory holding all of the above.
-    pub dir: &'static str,
+    pub playbook: String,
+    pub facts: String,
+    /// The per-test working directory holding the playbook and facts.
+    pub dir: String,
 }
 
 impl GuestPaths {
-    pub fn for_os(os: GuestOs) -> &'static GuestPaths {
+    /// The shared binary path for `os` — copied once per group.
+    pub fn bin_for(os: GuestOs) -> &'static str {
         match os {
-            GuestOs::Linux => &GuestPaths {
-                bin: "/weave/config-weave",
-                playbook: "/weave/playbook",
-                facts: "/weave/facts.json",
-                dir: "/weave",
-            },
-            GuestOs::Windows => &GuestPaths {
-                bin: "C:/weave/config-weave.exe",
-                playbook: "C:/weave/playbook",
-                facts: "C:/weave/facts.json",
-                dir: "C:/weave",
-            },
+            GuestOs::Linux => "/weave/config-weave",
+            GuestOs::Windows => "C:/weave/config-weave.exe",
         }
     }
+
+    /// Per-test paths under a working dir named by `slug` (a path-safe
+    /// per-test identifier).
+    pub fn for_test(os: GuestOs, slug: &str) -> GuestPaths {
+        let root = match os {
+            GuestOs::Linux => "/weave/t",
+            GuestOs::Windows => "C:/weave/t",
+        };
+        let dir = format!("{root}/{slug}");
+        GuestPaths {
+            bin: GuestPaths::bin_for(os),
+            playbook: format!("{dir}/playbook"),
+            facts: format!("{dir}/facts.json"),
+            dir,
+        }
+    }
+}
+
+/// A path-safe per-test identifier: selection index plus the package and
+/// test names with anything outside `[A-Za-z0-9._-]` collapsed to `_`.
+fn test_slug(idx: usize, package: &str, test: &str) -> String {
+    let sanitize = |s: &str| -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    };
+    format!("{idx}-{}__{}", sanitize(package), sanitize(test))
 }
 
 /// Expected status per run, by expect class. `None` = unasserted.
@@ -87,117 +116,260 @@ fn expectations(e: Expect) -> [Option<StepStatus>; 3] {
 
 const RUN_LABELS: [&str; 3] = ["check", "first apply", "second apply"];
 
-/// Run one test to a report; environmental trouble becomes an `Error`
-/// outcome rather than aborting the whole `config-weave test` run.
-pub fn run_test(
-    pb: &Playbook,
-    pkg: &Package,
-    test: &TestDecl,
-    backend: &dyn TestBackend,
-    opts: &RunnerOptions,
-) -> TestReport {
-    let start = Instant::now();
-    let progress = |msg: &str| {
-        if !opts.quiet {
-            eprintln!("⟳ {}:{} — {msg}", pkg.name, test.name);
-        }
-    };
-    let mut report = TestReport {
-        package: pkg.name.clone(),
-        name: test.name.clone(),
-        // The backend actually driving the test (--backend can override
-        // the declared one).
-        backend: backend.name().to_string(),
-        image: opts
-            .image_override
-            .clone()
-            .unwrap_or_else(|| test.image.clone()),
-        outcome: TestOutcome::Passed,
-        steps: Vec::new(),
-        gathers: Vec::new(),
-        verify: None,
-        error: None,
-        kept: None,
-        duration: start.elapsed(),
-    };
-    if let Err(d) = run_test_inner(pb, pkg, test, backend, opts, &progress, &mut report) {
-        report.outcome = TestOutcome::Error;
-        report.error = Some(d.message);
-    } else if report.steps.iter().any(|s| !s.failures.is_empty())
-        || report.gathers.iter().any(|g| !g.failures.is_empty())
-        || report.verify.as_ref().is_some_and(|v| !v.passed)
-    {
-        report.outcome = TestOutcome::Failed;
-    }
-    report.duration = start.elapsed();
-    report
+/// One shared-instance unit of work: a backend, the image to provision,
+/// and the ordered tests that run sequentially inside that one instance.
+/// The `usize` in each tuple is the test's index in the original
+/// selection — used to restore output order after parallel execution.
+pub struct GroupSpec<'a> {
+    pub backend: &'a dyn TestBackend,
+    pub image: String,
+    pub tests: Vec<(usize, &'a Package, &'a TestDecl)>,
 }
 
-fn run_test_inner(
+/// Run every group, with independent groups executing in parallel under
+/// per-backend caps — containers and VMs throttled separately, since VMs
+/// cost far more host resources. Returns one report per test, restored to
+/// the original selection order.
+pub fn run_groups(
     pb: &Playbook,
-    pkg: &Package,
-    test: &TestDecl,
-    backend: &dyn TestBackend,
+    groups: Vec<GroupSpec<'_>>,
     opts: &RunnerOptions,
-    progress: &dyn Fn(&str),
-    report: &mut TestReport,
-) -> Result<(), Diag> {
-    let synthesized = synth::synthesize(pb, pkg, test)?;
+) -> Vec<TestReport> {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    progress(&format!("provisioning ({})", report.image));
-    let mut instance = backend.provision(&report.image.clone(), opts.keep)?;
-    if opts.keep {
-        report.kept = Some(instance.handle());
+    // Bucket groups by backend so each cap throttles only its own kind of
+    // instance; both buckets drain concurrently.
+    let mut docker: Vec<&GroupSpec> = Vec::new();
+    let mut vmlab: Vec<&GroupSpec> = Vec::new();
+    for g in &groups {
+        match g.backend.name() {
+            "vmlab" => vmlab.push(g),
+            _ => docker.push(g),
+        }
     }
 
-    let result = drive(
-        test,
-        instance.as_mut(),
-        opts,
-        progress,
-        &synthesized,
-        report,
-    );
+    // Cursors live for the whole scope; the per-bucket workers share them.
+    let docker_cursor = AtomicUsize::new(0);
+    let vmlab_cursor = AtomicUsize::new(0);
+    let results: Mutex<Vec<(usize, TestReport)>> = Mutex::new(Vec::new());
+
+    std::thread::scope(|s| {
+        for (bucket, cap, cursor) in [
+            (&docker, opts.docker_cap, &docker_cursor),
+            (&vmlab, opts.vmlab_cap, &vmlab_cursor),
+        ] {
+            let workers = cap.max(1).min(bucket.len());
+            for _ in 0..workers {
+                let results = &results;
+                s.spawn(move || {
+                    loop {
+                        let i = cursor.fetch_add(1, Ordering::Relaxed);
+                        let Some(group) = bucket.get(i) else { break };
+                        let reports = run_group(pb, group, opts);
+                        results.lock().unwrap().extend(reports);
+                    }
+                });
+            }
+        }
+    });
+
+    let mut out = results.into_inner().unwrap();
+    out.sort_by_key(|(idx, _)| *idx);
+    out.into_iter().map(|(_, r)| r).collect()
+}
+
+/// A short label for a group's progress/diagnostic lines.
+fn group_label(group: &GroupSpec) -> String {
+    match group.tests.first() {
+        Some((_, _, t)) if t.group.is_some() => {
+            format!("group {}", t.group.as_deref().unwrap_or_default())
+        }
+        Some((_, pkg, t)) => format!("{}:{}", pkg.name, t.name),
+        None => "group".into(),
+    }
+}
+
+/// Provision one instance, copy the binary in and smoke-test it once, then
+/// drive each test sequentially against the shared instance. Provision or
+/// smoke failure errors every test in the group; a single test's transport
+/// trouble errors only that test and the rest of the group proceeds.
+fn run_group(pb: &Playbook, group: &GroupSpec, opts: &RunnerOptions) -> Vec<(usize, TestReport)> {
+    let backend = group.backend;
+    let image = group.image.clone();
+
+    // One report per test, defaulting to Passed.
+    let mut reports: Vec<(usize, TestReport)> = group
+        .tests
+        .iter()
+        .map(|(idx, pkg, test)| {
+            (
+                *idx,
+                TestReport {
+                    package: pkg.name.clone(),
+                    name: test.name.clone(),
+                    backend: backend.name().to_string(),
+                    image: image.clone(),
+                    outcome: TestOutcome::Passed,
+                    steps: Vec::new(),
+                    gathers: Vec::new(),
+                    verify: None,
+                    error: None,
+                    kept: None,
+                    duration: Duration::default(),
+                },
+            )
+        })
+        .collect();
+
+    let group_progress = |msg: &str| {
+        if !opts.quiet {
+            eprintln!("⟳ [{}] {msg}", group_label(group));
+        }
+    };
+    let fail_all = |reports: &mut Vec<(usize, TestReport)>, d: &Diag| {
+        for (_, r) in reports.iter_mut() {
+            r.outcome = TestOutcome::Error;
+            r.error = Some(d.message.clone());
+        }
+    };
+
+    group_progress(&format!("provisioning ({image})"));
+    let mut instance = match backend.provision(&image, opts.keep) {
+        Ok(i) => i,
+        Err(d) => {
+            fail_all(&mut reports, &d);
+            return reports;
+        }
+    };
+    if let Err(d) = prepare_instance(instance.as_mut(), opts, &image) {
+        fail_all(&mut reports, &d);
+        if !opts.keep {
+            let _ = instance.teardown();
+        }
+        return reports;
+    }
+
+    let kept_handle = opts.keep.then(|| instance.handle());
+
+    for (slot, (idx, pkg, test)) in group.tests.iter().enumerate() {
+        let report = &mut reports[slot].1;
+        report.kept = kept_handle.clone();
+        let progress = |msg: &str| {
+            if !opts.quiet {
+                eprintln!("⟳ {}:{} — {msg}", pkg.name, test.name);
+            }
+        };
+        let t0 = Instant::now();
+        let slug = test_slug(*idx, &pkg.name, &test.name);
+        match synth::synthesize(pb, pkg, test) {
+            Ok(synth) => {
+                match drive_one(
+                    test,
+                    instance.as_mut(),
+                    opts,
+                    &progress,
+                    &synth,
+                    &slug,
+                    report,
+                ) {
+                    Ok(()) => {
+                        if report.steps.iter().any(|s| !s.failures.is_empty())
+                            || report.gathers.iter().any(|g| !g.failures.is_empty())
+                            || report.verify.as_ref().is_some_and(|v| !v.passed)
+                        {
+                            report.outcome = TestOutcome::Failed;
+                        }
+                    }
+                    Err(d) => {
+                        report.outcome = TestOutcome::Error;
+                        report.error = Some(d.message);
+                    }
+                }
+            }
+            Err(d) => {
+                report.outcome = TestOutcome::Error;
+                report.error = Some(d.message);
+            }
+        }
+        report.duration = t0.elapsed();
+    }
 
     if opts.keep {
-        progress(&format!(
+        group_progress(&format!(
             "kept {} — remove it manually when done",
             instance.handle()
         ));
-    } else {
-        instance.teardown()?;
+    } else if let Err(d) = instance.teardown() {
+        // Don't mask test results behind a teardown failure; surface it.
+        if !opts.quiet {
+            eprintln!("⚠ [{}] teardown: {}", group_label(group), d.message);
+        }
     }
-    result
+
+    reports
 }
 
-/// Everything that happens inside a provisioned instance.
-fn drive(
+/// Copy the binary into the shared bin path and smoke-test it. Done once
+/// per group, before any test runs.
+fn prepare_instance(
+    instance: &mut dyn TestInstance,
+    opts: &RunnerOptions,
+    image: &str,
+) -> Result<(), Diag> {
+    let os = instance.os();
+    let bin = GuestPaths::bin_for(os);
+    let binary = opts.binaries.resolve(os)?;
+
+    instance.copy_in(&binary, bin)?;
+    // docker cp preserves the executable bit; chmod defensively for
+    // backends/umasks that do not. Best-effort: images without chmod
+    // surface at the smoke test below. Windows has no execute bit.
+    if os == GuestOs::Linux {
+        let _ = instance.exec(&["chmod", "+x", bin]);
+    }
+    let smoke = instance.exec(&[bin, "version"])?;
+    if smoke.exit_code != 0 {
+        return Err(Diag::bare(format!(
+            "the test binary failed to run inside '{image}' (exit {}): {} — host/image \
+             architecture mismatch?",
+            smoke.exit_code,
+            tail(&smoke.stderr)
+        )));
+    }
+    Ok(())
+}
+
+/// Everything that happens for one test inside the (already prepared)
+/// shared instance: its own working dir, setup, the synthesized playbook,
+/// gathers, the three-run protocol, and verify.
+fn drive_one(
     test: &TestDecl,
     instance: &mut dyn TestInstance,
     opts: &RunnerOptions,
     progress: &dyn Fn(&str),
     synthesized: &synth::SynthesizedTest,
+    slug: &str,
     report: &mut TestReport,
 ) -> Result<(), Diag> {
     let os = instance.os();
-    let paths = GuestPaths::for_os(os);
-    let binary = opts.binaries.resolve(os)?;
+    let paths = GuestPaths::for_test(os, slug);
 
-    instance.copy_in(&binary, paths.bin)?;
-    // docker cp preserves the executable bit; chmod defensively for
-    // backends/umasks that do not. Best-effort: images without chmod
-    // surface at the smoke test below. Windows has no execute bit.
-    if os == GuestOs::Linux {
-        let _ = instance.exec(&["chmod", "+x", paths.bin]);
-    }
-    let smoke = instance.exec(&[paths.bin, "version"])?;
-    if smoke.exit_code != 0 {
+    // The per-test working dir must exist before setup cd's into it.
+    let mkdir = match os {
+        GuestOs::Linux => instance.exec(&["mkdir", "-p", &paths.dir])?,
+        GuestOs::Windows => {
+            let win = paths.dir.replace('/', "\\");
+            let script = format!("if not exist {win} md {win}");
+            instance.exec(&["cmd.exe", "/C", &script])?
+        }
+    };
+    if mkdir.exit_code != 0 {
         return Err(Diag::bare(format!(
-            "the test binary failed to run inside '{}' (exit {}): {} — host/image \
-             architecture mismatch?",
-            report.image,
-            smoke.exit_code,
-            tail(&smoke.stderr)
+            "cannot create the per-test working dir {} (exit {}): {}",
+            paths.dir,
+            mkdir.exit_code,
+            tail(&mkdir.stderr)
         )));
     }
 
@@ -225,11 +397,11 @@ fn drive(
         }
     }
 
-    instance.copy_in(synthesized.dir.path(), paths.playbook)?;
+    instance.copy_in(synthesized.dir.path(), &paths.playbook)?;
 
-    let facts = run_gathers(test, instance, progress, &mut report.gathers, paths)?;
-    run_steps(test, instance, opts, progress, &mut report.steps, paths)?;
-    report.verify = run_verify(test, instance, progress, &facts, paths)?;
+    let facts = run_gathers(test, instance, progress, &mut report.gathers, &paths)?;
+    run_steps(test, instance, opts, progress, &mut report.steps, &paths)?;
+    report.verify = run_verify(test, instance, progress, &facts, &paths)?;
     Ok(())
 }
 
@@ -246,7 +418,7 @@ fn run_gathers(
     for g in &test.gathers {
         progress(&format!("gather {}", g.name));
         let key = format!("{}.{}", g.package, g.gatherer);
-        let mut argv = vec![paths.bin, "__gather", paths.playbook, &key];
+        let mut argv = vec![paths.bin, "__gather", paths.playbook.as_str(), &key];
         let params_json;
         if !g.params.is_empty() {
             let map: serde_json::Map<String, serde_json::Value> = g
@@ -327,7 +499,7 @@ fn run_steps(
         let mut argv = vec![
             paths.bin,
             mode,
-            paths.playbook,
+            paths.playbook.as_str(),
             synth::PLAY,
             "--json",
             "--continue-on-error",
@@ -416,10 +588,16 @@ fn run_verify(
                 .as_bytes(),
         )
         .map_err(|e| Diag::bare(format!("cannot write the facts temp file: {e}")))?;
-    instance.copy_in(facts_file.path(), paths.facts)?;
+    instance.copy_in(facts_file.path(), &paths.facts)?;
 
     let script = in_container_script(verify, paths)?;
-    let out = instance.exec(&[paths.bin, "__verify", &script, "--facts", paths.facts])?;
+    let out = instance.exec(&[
+        paths.bin,
+        "__verify",
+        &script,
+        "--facts",
+        paths.facts.as_str(),
+    ])?;
     match out.exit_code {
         0 => Ok(Some(VerifyResult {
             passed: true,
@@ -494,25 +672,48 @@ mod tests {
     #[test]
     fn verify_path_maps_into_the_container() {
         let p = Path::new("/host/playbook/pkgs/core/tests/verify.wisp");
-        let linux = GuestPaths::for_os(GuestOs::Linux);
+        let linux = GuestPaths::for_test(GuestOs::Linux, "0-core__t");
         assert_eq!(
-            in_container_script(p, linux).unwrap(),
-            "/weave/playbook/pkgs/core/tests/verify.wisp"
+            in_container_script(p, &linux).unwrap(),
+            "/weave/t/0-core__t/playbook/pkgs/core/tests/verify.wisp"
         );
-        let windows = GuestPaths::for_os(GuestOs::Windows);
+        let windows = GuestPaths::for_test(GuestOs::Windows, "0-core__t");
         assert_eq!(
-            in_container_script(p, windows).unwrap(),
-            "C:/weave/playbook/pkgs/core/tests/verify.wisp"
+            in_container_script(p, &windows).unwrap(),
+            "C:/weave/t/0-core__t/playbook/pkgs/core/tests/verify.wisp"
         );
-        assert!(in_container_script(Path::new("/elsewhere/verify.wisp"), linux).is_err());
+        assert!(in_container_script(Path::new("/elsewhere/verify.wisp"), &linux).is_err());
     }
 
     #[test]
-    fn guest_paths_per_os() {
-        let l = GuestPaths::for_os(GuestOs::Linux);
-        assert_eq!(l.bin, "/weave/config-weave");
-        let w = GuestPaths::for_os(GuestOs::Windows);
-        assert_eq!(w.bin, "C:/weave/config-weave.exe");
-        assert_eq!(w.dir, "C:/weave");
+    fn guest_paths_are_per_test_under_a_shared_bin() {
+        // The binary path is shared (copied once per group); playbook and
+        // facts live under a distinct per-test working dir.
+        assert_eq!(GuestPaths::bin_for(GuestOs::Linux), "/weave/config-weave");
+        assert_eq!(
+            GuestPaths::bin_for(GuestOs::Windows),
+            "C:/weave/config-weave.exe"
+        );
+
+        let a = GuestPaths::for_test(GuestOs::Linux, "0-core__a");
+        let b = GuestPaths::for_test(GuestOs::Linux, "1-core__b");
+        assert_eq!(a.bin, b.bin, "the binary is shared across grouped tests");
+        assert_ne!(a.dir, b.dir, "each test gets its own working dir");
+        assert_eq!(a.dir, "/weave/t/0-core__a");
+        assert_eq!(a.playbook, "/weave/t/0-core__a/playbook");
+        assert_eq!(a.facts, "/weave/t/0-core__a/facts.json");
+
+        let w = GuestPaths::for_test(GuestOs::Windows, "0-core__a");
+        assert_eq!(w.dir, "C:/weave/t/0-core__a");
+    }
+
+    #[test]
+    fn test_slug_is_path_safe_and_unique_per_index() {
+        assert_eq!(
+            test_slug(2, "my pkg", "weird/name!"),
+            "2-my_pkg__weird_name_"
+        );
+        // The index disambiguates even when sanitized names collide.
+        assert_ne!(test_slug(0, "p", "a/b"), test_slug(1, "p", "a/b"));
     }
 }

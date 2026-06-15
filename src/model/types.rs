@@ -184,6 +184,9 @@ pub struct TestDecl {
     pub backend: String,
     /// Backend-specific image reference (docker image ref in v1).
     pub image: String,
+    /// Tests sharing a non-empty group (within a package) run in one
+    /// shared instance; `None`/empty means the test gets its own.
+    pub group: Option<String>,
     /// Optional shell provisioning, run via `sh -c` before anything else.
     pub setup: Option<String>,
     /// Absolute path to the optional wisp verify script.

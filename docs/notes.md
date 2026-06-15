@@ -100,13 +100,27 @@ Packages declare `test` blocks in `package.wcl`; `config-weave test`
 runs each in a disposable backend instance. Bindings fixed here:
 
 - **Shape.** `test "name" { description, backend = "docker" (default),
-  image, setup?, verify?, step…, gather… }`. Steps mirror playbook steps
-  plus `expect = converge (default) | already_configured | error | skip
-  | reboot_required`; gathers carry static `params` and an `expect`
-  block of top-level key equality assertions. All test values must be
-  **static** — tests run against a synthesized variable-free playbook,
-  so a variable reference in test properties is a validation error.
-  Unqualified `resource`/`from` refs resolve to the declaring package.
+  image, group?, setup?, verify?, step…, gather… }`. Steps mirror
+  playbook steps plus `expect = converge (default) | already_configured
+  | error | skip | reboot_required`; gathers carry static `params` and an
+  `expect` block of top-level key equality assertions. All test values
+  must be **static** — tests run against a synthesized variable-free
+  playbook, so a variable reference in test properties is a validation
+  error. Unqualified `resource`/`from` refs resolve to the declaring
+  package.
+- **Grouping.** A non-empty `group` field puts a test in a shared
+  instance: every test in the same package with the same group name runs
+  sequentially inside **one** provisioned instance, amortizing container
+  start / VM boot. Grouped tests must agree on `backend` and `image`
+  (validated at load — a group provisions one instance from one image),
+  and they share the instance's OS state with **no reset between them**
+  (vmlab has no snapshot verb), so only group tests that target distinct
+  state — the three-run protocol still needs each test's own resources to
+  start clean. An empty/absent `group` means the test gets its own
+  instance (unchanged from before). Groups are built in `cmd_test`
+  (`src/main.rs`) keyed by `(package, group)`; each test carries its
+  selection index so output stays in declaration order despite parallel
+  runs.
 - **Three-run protocol.** Inside the instance the runner executes
   `check`, `apply`, `apply` (all `--json --continue-on-error`, `--jobs`
   forwarded). Run 2's internal re-check proves convergence within one
@@ -133,10 +147,15 @@ runs each in a disposable backend instance. Bindings fixed here:
   checked). It also copies a synthesized playbook (one play `test`,
   properties/conditions spliced verbatim, referenced packages copied
   in). A `version` smoke test turns arch mismatches into one clear
-  diagnostic. In-instance paths come from the guest OS (`/weave/…` vs
-  `C:/weave/…`, forward slashes throughout); `setup` runs via `sh -c`
-  on linux and `cmd /C` on windows (cd'd into the weave dir — exec has
-  no working directory guarantee), and `chmod +x` is linux-only.
+  diagnostic. The binary is copied to a shared path
+  (`/weave/config-weave`, `C:/weave/config-weave.exe`) and smoke-tested
+  **once per group** (`prepare_instance`); each test then gets its own
+  working dir `/weave/t/<idx>-<pkg>__<test>/` (forward slashes
+  throughout; `C:/weave/t/…` on windows) holding its synthesized playbook
+  and facts, so grouped tests never clobber each other. `setup` runs via
+  `sh -c` on linux and `cmd /C` on windows, cd'd into that per-test dir
+  (created first — exec has no working directory guarantee), and
+  `chmod +x` is linux-only.
 - **In-container protocol.** Two hidden subcommands on the copied
   binary: `__gather <dir> <pkg.gatherer> [--params-json …]` prints
   `{"ok":…,"value"|"error":…}`; `__verify <script> [--facts <json>]`
@@ -148,15 +167,27 @@ runs each in a disposable backend instance. Bindings fixed here:
   `--backend` override) picks its backend; `cmd_test` discovers every
   backend the selected tests use once, up front, so a broken
   environment is exit 2 before any test runs. The
-  `TestBackend`/`TestInstance` traits live in `src/testlab/backend.rs`;
-  instances report a `GuestOs` the runner derives paths/shell/binary
-  from.
+  `TestBackend`/`TestInstance` traits live in `src/testlab/backend.rs`
+  (`TestBackend: Sync`, so one backend is shared across the parallel
+  group runners); instances report a `GuestOs` the runner derives
+  paths/shell/binary from.
+- **Concurrency.** `runner::run_groups` runs independent groups in
+  parallel via scoped `std::thread` workers pulling from per-backend
+  cursors — **separate caps per backend** because VMs cost far more than
+  containers: `--docker-jobs` (default `min(cpu, 8)`) and `--vmlab-jobs`
+  (default 2). Total live instances ≤ docker_cap + vmlab_cap. Within a
+  group tests stay sequential (shared state). `--jobs` is unchanged — the
+  in-instance engine pool, still forwarded as `--jobs` to each
+  check/apply run. Provision/smoke failure errors every test in the
+  group; a single test's transport trouble errors only that test and the
+  rest of the group proceeds.
 - **Docker backend.** CLI discovery `$CONFIG_WEAVE_CONTAINER_CMD` →
   `docker` → `podman`; keep-alive via `run -d --entrypoint sleep`;
   images must contain `sleep` and `sh` (distroless unsupported — the
-  vmlab backend lifts this). One container per test, sequential;
-  `--keep` disables teardown and reports the handle. Guests are always
-  linux.
+  vmlab backend lifts this). One container per group (an ungrouped test
+  is its own one-test group), its tests run sequentially sharing the
+  container's filesystem; `--keep` disables teardown and reports the
+  handle. Guests are always linux.
 - **vmlab backend.** CLI discovery `$CONFIG_WEAVE_VMLAB_CMD` → `vmlab`
   (probed with `--version`). `image` is a vmlab template ref. Each
   provision writes a one-VM lab (`vm "box"`, `nic { nat = true }`,
@@ -167,9 +198,12 @@ runs each in a disposable backend instance. Bindings fixed here:
   propagates the guest exit code); copy = `vmlab cp src box:dest`
   (creates parent directories); teardown = `vmlab destroy` + tempdir
   removal; `--keep` leaves the lab up and reports its directory so
-  `vmlab exec`/`console` work post-mortem. Windows guests need the
-  guest agent in the template (vmlab requires this anyway for
-  readiness) and `setup` written for `cmd /C`.
+  `vmlab exec`/`console` work post-mortem. A group provisions **one** VM
+  and runs all its tests inside it sequentially (the big win — VM boot is
+  paid once per group, not per test); `--vmlab-jobs` bounds how many VMs
+  boot at once. Windows guests need the guest agent in the template
+  (vmlab requires this anyway for readiness) and `setup` written for
+  `cmd /C`.
 - **Reporting.** Exit 0 = all passed, 1 = any failed/error, 2 =
   validation/environment. `--json` emits a schema-stable object with
   `mode: "test"`; the runner parses in-container reports with the same

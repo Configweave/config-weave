@@ -24,7 +24,10 @@ pub struct ExecOutput {
     pub stderr: String,
 }
 
-pub trait TestBackend {
+/// `Sync` so a single backend can be shared by reference across the
+/// parallel group-runner threads; both implementations are plain structs
+/// (`cmd`, `quiet`) that already qualify.
+pub trait TestBackend: Sync {
     /// Backend id as written in `backend = "…"` test fields.
     fn name(&self) -> &'static str;
 

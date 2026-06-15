@@ -786,6 +786,34 @@ fn load_package(
         }
     }
 
+    // Tests sharing a group provision one instance from one image on one
+    // backend, so every member must agree on both. (Runtime --backend /
+    // --image overrides make every test uniform and never trip this.)
+    let mut groups: HashMap<&str, (&str, &str)> = HashMap::new();
+    for t in &tests {
+        let Some(g) = t.group.as_deref() else {
+            continue;
+        };
+        match groups.get(g) {
+            None => {
+                groups.insert(g, (t.backend.as_str(), t.image.as_str()));
+            }
+            Some((backend, image)) => {
+                if *backend != t.backend || *image != t.image {
+                    ctx.err(
+                        format!(
+                            "test '{}' is in group '{g}' but its backend/image \
+                             ({}/{}) differ from another member's ({backend}/{image}); \
+                             grouped tests share one instance and must agree",
+                            t.name, t.backend, t.image
+                        ),
+                        t.span,
+                    );
+                }
+            }
+        }
+    }
+
     Some((
         Package {
             name,
@@ -829,6 +857,8 @@ fn load_test(
         );
     }
     let image = string_field(block, "image", ctx)?;
+    // Empty `group = ""` reads as ungrouped (its own instance).
+    let group = string_field_optional(block, "group", ctx).filter(|g| !g.is_empty());
     let setup = string_field_optional(block, "setup", ctx);
     let verify = string_field_optional(block, "verify", ctx).and_then(|rel| {
         let path = pkg_dir.join(&rel);
@@ -1036,6 +1066,7 @@ fn load_test(
         description,
         backend,
         image,
+        group,
         setup,
         verify,
         steps,

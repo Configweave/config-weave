@@ -105,6 +105,14 @@ enum Command {
         /// Windows config-weave binary for windows guests (vmlab).
         #[arg(long, value_name = "PATH")]
         binary_windows: Option<PathBuf>,
+        /// Max docker test groups (containers) to run at once
+        /// (default: min(cpu_count, 8)).
+        #[arg(long, value_name = "N")]
+        docker_jobs: Option<usize>,
+        /// Max vmlab test groups (VMs) to run at once — kept small since
+        /// VMs are heavy (default: 2).
+        #[arg(long, value_name = "N")]
+        vmlab_jobs: Option<usize>,
     },
     /// Generate wdoc documentation (default outdir: <dir>/docs/).
     Docs {
@@ -167,6 +175,8 @@ fn main() -> ExitCode {
             keep,
             binary,
             binary_windows,
+            docker_jobs,
+            vmlab_jobs,
         } => cmd_test(
             &cli,
             playbook_dir,
@@ -176,6 +186,8 @@ fn main() -> ExitCode {
             *keep,
             binary.as_deref(),
             binary_windows.as_deref(),
+            *docker_jobs,
+            *vmlab_jobs,
         ),
         Command::Docs {
             playbook_dir,
@@ -329,6 +341,8 @@ fn cmd_test(
     keep: bool,
     binary: Option<&std::path::Path>,
     binary_windows: Option<&std::path::Path>,
+    docker_jobs: Option<usize>,
+    vmlab_jobs: Option<usize>,
 ) -> u8 {
     let pb = match load_validated(dir) {
         Ok(pb) => pb,
@@ -428,14 +442,50 @@ fn cmd_test(
         keep,
         jobs: cli.jobs,
         quiet,
-        image_override: image_override.map(str::to_string),
+        docker_cap: docker_jobs.unwrap_or_else(engine::run::default_jobs).max(1),
+        vmlab_cap: vmlab_jobs.unwrap_or(2).max(1),
     };
 
+    // Bucket selected tests into shared-instance groups: tests with a
+    // non-empty `group` share one instance (keyed per package, since a
+    // group provisions one instance from one image on one backend);
+    // ungrouped tests each get their own. Selection order is preserved via
+    // the carried index so output is stable despite parallel execution.
+    let effective_image = |t: &model::TestDecl| -> String {
+        image_override
+            .map(str::to_string)
+            .unwrap_or_else(|| t.image.clone())
+    };
+    let mut groups: Vec<testlab::runner::GroupSpec> = Vec::new();
+    let mut group_index: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
+    for (idx, (pkg, t)) in selected.iter().enumerate() {
+        let member = (idx, *pkg, *t);
+        match &t.group {
+            Some(g) => {
+                let key = (pkg.name.clone(), g.clone());
+                match group_index.get(&key) {
+                    Some(&gi) => groups[gi].tests.push(member),
+                    None => {
+                        group_index.insert(key, groups.len());
+                        groups.push(testlab::runner::GroupSpec {
+                            backend: backend_for(t),
+                            image: effective_image(t),
+                            tests: vec![member],
+                        });
+                    }
+                }
+            }
+            None => groups.push(testlab::runner::GroupSpec {
+                backend: backend_for(t),
+                image: effective_image(t),
+                tests: vec![member],
+            }),
+        }
+    }
+
     let start = std::time::Instant::now();
-    let tests: Vec<_> = selected
-        .into_iter()
-        .map(|(pkg, t)| testlab::runner::run_test(&pb, pkg, t, backend_for(t), &opts))
-        .collect();
+    let tests = testlab::runner::run_groups(&pb, groups, &opts);
     let run_report = testlab::report::TestRunReport {
         playbook: pb.name.clone(),
         tests,

@@ -19,8 +19,10 @@ use super::backend::GuestOs;
 pub struct BinaryResolver {
     explicit_linux: Option<PathBuf>,
     explicit_windows: Option<PathBuf>,
-    /// [linux, windows] successes; failures re-resolve (cheap).
-    cache: std::cell::RefCell<[Option<PathBuf>; 2]>,
+    /// [linux, windows] successes; failures re-resolve (cheap). A Mutex
+    /// (not RefCell) so the resolver is `Sync` and shareable across the
+    /// parallel group-runner threads.
+    cache: std::sync::Mutex<[Option<PathBuf>; 2]>,
 }
 
 impl BinaryResolver {
@@ -28,7 +30,7 @@ impl BinaryResolver {
         BinaryResolver {
             explicit_linux,
             explicit_windows,
-            cache: std::cell::RefCell::new([None, None]),
+            cache: std::sync::Mutex::new([None, None]),
         }
     }
 
@@ -37,7 +39,7 @@ impl BinaryResolver {
             GuestOs::Linux => 0,
             GuestOs::Windows => 1,
         };
-        if let Some(p) = &self.cache.borrow()[slot] {
+        if let Some(p) = &self.cache.lock().unwrap()[slot] {
             return Ok(p.clone());
         }
         let explicit = match os {
@@ -45,7 +47,7 @@ impl BinaryResolver {
             GuestOs::Windows => self.explicit_windows.as_deref(),
         };
         let p = locate_binary(explicit, os)?;
-        self.cache.borrow_mut()[slot] = Some(p.clone());
+        self.cache.lock().unwrap()[slot] = Some(p.clone());
         Ok(p)
     }
 }

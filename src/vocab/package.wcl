@@ -53,6 +53,12 @@ type WeaveTestDecl {
   description: utf8
   @default("docker") backend: utf8
   image: utf8
+  // Tests sharing a non-empty `group` (within a package) run sequentially
+  // inside one shared instance instead of each provisioning its own —
+  // amortizing container start / VM boot. They must agree on `backend`
+  // and `image`, and they share the instance's OS state (no reset between
+  // them), so only group tests that target distinct state.
+  group: utf8?
   setup: utf8?
   verify: utf8?
   @children("step") steps: list<WeaveTestStep>

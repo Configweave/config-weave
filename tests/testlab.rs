@@ -238,6 +238,67 @@ fn vmlab_backend_is_accepted_by_validation() {
     assert_eq!(code, 0, "{stderr}");
 }
 
+/// Helper: rewrite the fixture so the `converges` test joins group `g`,
+/// then inject a sibling test in the same group built by `sibling`.
+fn fixture_with_group_sibling(sibling: &str) -> tempfile::TempDir {
+    let inject = format!("{sibling}\n\n  test \"converges\" {{");
+    fixture_with(|s| {
+        s.replace(
+            "  test \"converges\" {\n    description = \"file_present creates the file and is idempotent\"\n    image = \"debian:12\"",
+            "  test \"converges\" {\n    description = \"file_present creates the file and is idempotent\"\n    image = \"debian:12\"\n    group = \"g\"",
+        )
+        .replace("  test \"converges\" {", &inject)
+    })
+}
+
+#[test]
+fn group_with_mismatched_image_fails() {
+    // A sibling in group "g" on a different image: a group provisions one
+    // instance, so the members must agree.
+    let dir = fixture_with_group_sibling(
+        r#"  test "sibling" {
+    description = "Same group, different image"
+    image = "alpine:3"
+    group = "g"
+
+    step "create" {
+      description = "Create a marker file"
+      resource = "file_present"
+      properties {
+        path = "/var/tmp/sib.txt"
+        content = "hi"
+      }
+    }
+  }"#,
+    );
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 2);
+    assert!(stderr.contains("group 'g'"), "{stderr}");
+    assert!(stderr.contains("must agree"), "{stderr}");
+}
+
+#[test]
+fn group_with_matching_backend_and_image_validates() {
+    let dir = fixture_with_group_sibling(
+        r#"  test "sibling" {
+    description = "Same group, same image"
+    image = "debian:12"
+    group = "g"
+
+    step "create" {
+      description = "Create a marker file"
+      resource = "file_present"
+      properties {
+        path = "/var/tmp/sib.txt"
+        content = "hi"
+      }
+    }
+  }"#,
+    );
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 0, "{stderr}");
+}
+
 #[test]
 fn unknown_resource_in_test_fails() {
     let dir = fixture_with(|s| s.replace("resource = \"file_present\"", "resource = \"nope\""));
@@ -638,6 +699,110 @@ fn lab_converge_test_passes() {
     assert_eq!(s["second_apply"], "already_configured", "{stdout}");
     assert_eq!(t["gathers"][0]["failures"], serde_json::json!([]));
     assert_eq!(t["verify"]["passed"], true, "{stdout}");
+}
+
+#[test]
+#[ignore = "needs docker and a static binary (just test-lab)"]
+fn lab_grouped_tests_share_one_instance() {
+    let Some(binary) = lab_binary() else { return };
+    if !docker_available() {
+        return;
+    }
+    // Two tests in group "shared": the first creates /var/tmp/tlab.txt, the
+    // second's verify reads it back. The second only passes if both ran in
+    // the SAME container — proof the group shares one instance.
+    let dir = tempfile::tempdir().unwrap();
+    let pkg = dir.path().join("pkgs/tlab");
+    std::fs::create_dir_all(pkg.join("resources")).unwrap();
+    std::fs::create_dir_all(pkg.join("gatherers")).unwrap();
+    std::fs::create_dir_all(pkg.join("tests")).unwrap();
+    std::fs::write(dir.path().join("playbook.wcl"), PLAYBOOK).unwrap();
+    std::fs::write(pkg.join("resources/file_present.wisp"), RESOURCE).unwrap();
+    std::fs::write(pkg.join("gatherers/os_info.wisp"), GATHERER).unwrap();
+    std::fs::write(pkg.join("tests/verify.wisp"), VERIFY).unwrap();
+    std::fs::write(
+        pkg.join("tests/shared.wisp"),
+        r#"use value
+use fs
+
+fn verify(facts: Value) -> Result[bool, string] {
+    Ok(fs::read("/var/tmp/tlab.txt")? == "hello")
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("package.wcl"),
+        r#"package "tlab" {
+  description = "Testlab fixture package"
+
+  gatherer "os_info" {
+    description = "Report basic operating system facts"
+    script = "gatherers/os_info.wisp"
+  }
+
+  resource "file_present" {
+    description = "Ensure a file exists with the given content"
+    script = "resources/file_present.wisp"
+
+    param "path" {
+      description = "Absolute path of the file"
+      type = "string"
+      required = true
+    }
+    param "content" {
+      description = "File content"
+      type = "string"
+      default = ""
+    }
+  }
+
+  test "creates" {
+    description = "First grouped test creates the shared file"
+    image = "debian:12"
+    group = "shared"
+    verify = "tests/verify.wisp"
+
+    step "create" {
+      description = "Create a marker file"
+      resource = "file_present"
+      properties {
+        path = "/var/tmp/tlab.txt"
+        content = "hello"
+      }
+    }
+  }
+
+  test "reuses" {
+    description = "Second grouped test sees the first test's file"
+    image = "debian:12"
+    group = "shared"
+    verify = "tests/shared.wisp"
+
+    gather "os" {
+      description = "OS facts inside the container"
+      from = "os_info"
+      expect {
+        family = "linux"
+      }
+    }
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let (code, stdout, stderr) = run_lab(dir.path(), &binary, &[]);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let tests = v["tests"].as_array().unwrap();
+    assert_eq!(tests.len(), 2, "{stdout}");
+    // Selection order is preserved: creates first, reuses second.
+    assert_eq!(tests[0]["name"], "creates", "{stdout}");
+    assert_eq!(tests[0]["outcome"], "passed", "{stdout}");
+    assert_eq!(tests[1]["name"], "reuses", "{stdout}");
+    assert_eq!(tests[1]["outcome"], "passed", "{stdout}");
+    assert_eq!(tests[1]["verify"]["passed"], true, "{stdout}");
 }
 
 #[test]
