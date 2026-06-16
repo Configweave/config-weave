@@ -8,6 +8,17 @@ fn bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_config-weave"))
 }
 
+/// Resolve a runnable `wcl` binary (for the docs render step): `CONFIG_WEAVE_WCL`
+/// if set, otherwise `wcl` from PATH. Returns `None` when neither can be spawned.
+fn wcl_bin() -> Option<String> {
+    let candidate = std::env::var("CONFIG_WEAVE_WCL").unwrap_or_else(|_| "wcl".into());
+    Command::new(&candidate)
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|_| candidate)
+}
+
 #[test]
 fn wispi_emits_full_host_api() {
     let dir = tempfile::tempdir().unwrap();
@@ -109,10 +120,18 @@ fn init_validate_apply_docs() {
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(target.join("hello.txt").exists());
 
-    // docs
+    // docs — `config-weave docs` shells out to the `wcl` CLI to render the
+    // emitted wdoc source. Skip the rendered-HTML assertions when no `wcl`
+    // binary is available, so `cargo test` does not hard-fail on machines
+    // without it installed.
+    let Some(wcl) = wcl_bin() else {
+        eprintln!("skipping docs assertions: no `wcl` on PATH or CONFIG_WEAVE_WCL");
+        return;
+    };
     let docs = dir.path().join("site");
     let out = Command::new(bin())
         .args(["docs", root.to_str().unwrap(), docs.to_str().unwrap()])
+        .env("CONFIG_WEAVE_WCL", &wcl)
         .output()
         .unwrap();
     assert_eq!(

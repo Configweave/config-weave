@@ -1,44 +1,67 @@
 //! Self-documentation (PRD §12): walk the playbook model, emit wdoc
-//! source, and render it with the wcl_wdoc toolchain. A playbook that
-//! does not validate does not document — the caller runs the validation
-//! pipeline first.
+//! source, and render it by shelling out to the `wcl` CLI's `wdoc build`.
+//! config-weave does not embed WCL's renderer — it defers to the installed
+//! `wcl` binary. A playbook that does not validate does not document — the
+//! caller runs the validation pipeline first.
 
 use std::fmt::Write as _;
 use std::path::Path;
+use std::process::Command;
 
 use crate::diag::Diag;
 use crate::model::{ParamDecl, Play, PlayItem, Playbook};
+
+/// The `wcl` binary to drive the wdoc build. Defaults to a PATH lookup;
+/// `CONFIG_WEAVE_WCL` pins a specific binary (used by tests/CI).
+fn wcl_bin() -> String {
+    std::env::var("CONFIG_WEAVE_WCL").unwrap_or_else(|_| "wcl".into())
+}
 
 /// Generate the wdoc site for a playbook. Returns the page count.
 pub fn generate(pb: &Playbook, outdir: &Path) -> Result<usize, Diag> {
     let source = emit(pb);
     std::fs::create_dir_all(outdir)
         .map_err(|e| Diag::bare(format!("cannot create {}: {e}", outdir.display())))?;
-    // Keep the generated source next to the site for inspection.
+    // Keep the generated source next to the site for inspection — and as
+    // the input the `wcl` CLI renders.
     let src_path = outdir.join("_weave_docs.wcl");
     std::fs::write(&src_path, &source)
         .map_err(|e| Diag::bare(format!("cannot write {}: {e}", src_path.display())))?;
-    wcl_wdoc::build(&src_path, outdir, None).map_err(|e| Diag::bare(render_build_error(e)))
+
+    let bin = wcl_bin();
+    let output = Command::new(&bin)
+        .args(["wdoc", "build"])
+        .arg(&src_path)
+        .arg("--out")
+        .arg(outdir)
+        .output()
+        .map_err(|e| {
+            Diag::bare(format!(
+                "cannot run `{bin} wdoc build` (is `wcl` on PATH? set CONFIG_WEAVE_WCL to override): {e}"
+            ))
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Diag::bare(format!(
+            "wdoc build failed:\n{}",
+            stderr.trim_end()
+        )));
+    }
+
+    // The CLI rendered one HTML page per `page` block we emitted; recover
+    // the count from the model rather than parsing stdout.
+    Ok(page_count(pb))
 }
 
-fn render_build_error(e: wcl_wdoc::BuildError) -> String {
-    use wcl_wdoc::BuildError as E;
-    match e {
-        E::Io(err, what) => format!("wdoc build failed: {what}: {err}"),
-        E::Parse(report) | E::Eval(report) => format!("wdoc build failed:\n{report:?}"),
-        E::Schema(n) => format!("wdoc build failed: {n} schema violation(s) in generated source"),
-        E::BadPage(p) => format!("wdoc build failed: bad page '{p}'"),
-        other => format!("wdoc build failed: {}", describe_opaque(&other)),
-    }
-}
-
-fn describe_opaque(e: &wcl_wdoc::BuildError) -> String {
-    // Variants without payloads we need; name them via discriminant text.
-    use wcl_wdoc::BuildError as E;
-    match e {
-        E::DuplicateId { page, id } => format!("duplicate id '{id}' on page '{page}'"),
-        _ => "unrenderable build error".to_string(),
-    }
+/// Number of pages `emit` produces: one index, one per play, one per
+/// package, and one per resource and test.
+fn page_count(pb: &Playbook) -> usize {
+    let per_pkg: usize = pb
+        .packages
+        .values()
+        .map(|p| 1 + p.resources.len() + p.tests.len())
+        .sum();
+    1 + pb.plays.len() + per_pkg
 }
 
 /// Escape a string for a WCL double-quoted literal.

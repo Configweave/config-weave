@@ -88,6 +88,12 @@ windows 0.6x.
   property map host-side — scripts never touch enumerators.
 - The step DAG renders as a wdoc `diagram { layout = :layered }` of
   flowchart `process` shapes with `:flow` connections.
+- `config-weave docs` does **not** embed WCL's renderer. It emits the wdoc
+  source (`<out>/_weave_docs.wcl`) and shells out to the `wcl` CLI
+  (`wcl wdoc build <src> --out <dir>`) — so the binary defers to the
+  installed `wcl` rather than linking `wcl_wdoc`. `wcl` must be on PATH at
+  runtime (override the binary with `CONFIG_WEAVE_WCL`). The
+  `serve-pkgs-docs` recipe likewise serves via `wcl wdoc serve`.
 - `wisp check`/LSP against the emitted `weave.wispi` required a wisp-cli
   fix (committed upstream): when a `wisp.toml` manifest exists, the CLI
   now type-checks against exactly the declared interfaces instead of

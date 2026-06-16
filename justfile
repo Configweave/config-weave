@@ -56,12 +56,13 @@ test-pkgs: build
         --binary-windows target-cross/x86_64-pc-windows-gnu/release/config-weave.exe
     target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs
 
-# Build config-weave, render the sibling package docs, and serve them.
+# Build config-weave, render the sibling package docs, and serve them with
+# WCL's own watch-rebuild dev server (live reload). Needs `wcl` on PATH.
 serve-pkgs-docs: build
     test -d ../config-weave-pkgs
     target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs
-    @echo "serving package docs at http://127.0.0.1:8000"
-    cd ../config-weave-pkgs/docs && python3 -m http.server 8000 --bind 127.0.0.1
+    @echo "serving package docs at http://127.0.0.1:8080"
+    wcl wdoc serve ../config-weave-pkgs/docs/_weave_docs.wcl
 
 # Release artifacts for both PRD targets plus a checksums file.
 # Requires `cross` and a container runtime; path deps are mounted into

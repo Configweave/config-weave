@@ -7,7 +7,6 @@ description = "Single-binary configuration management driven by WCL playbooks an
 
 [dependencies]
 wcl_lang = { path = "../WCL/crates/wcl_lang" }
-wcl_wdoc = { path = "../WCL/crates/wcl_wdoc" }
 wisp = { path = "../wisp/wisp" }
 wisp-std = { path = "../wisp/wisp-std" }
 
