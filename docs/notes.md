@@ -73,6 +73,15 @@ windows 0.6x.
 - The `data` module covers INI only; JSON and TOML are wisp-std's `json`
   and `toml` modules registered as-is (the PRD's "re-export, don't
   duplicate" note).
+- The `template` module renders a Tera template string against a `vars`
+  map on the target host: `template::render(template, vars) -> string`.
+  Autoescape is **off** (config files, not HTML); a non-map `vars` (other
+  than `Null`, treated as empty) errors. This is a deliberate reversal of
+  the PRD §1 "no templating engine" non-goal — the host-side engine gives
+  resources `{% for %}`/`{% if %}`/filters that WCL's `map`/`join` handles
+  awkwardly. It backs `linux_files.template`; author template bodies as raw
+  heredocs (`<<'TMPL'`) so WCL's own `$"…${}"` interpolation leaves Tera's
+  `{{ }}`/`{% %}` untouched, and feed dynamic data through `vars`.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wisp-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:
@@ -220,6 +229,40 @@ runs each in a disposable backend instance. Bindings fixed here:
   validation/environment. `--json` emits a schema-stable object with
   `mode: "test"`; the runner parses in-container reports with the same
   `JsonRunReport` types that produce them.
+- **Scenarios (scripted, multi-stage, over a declared vmlab lab).** The
+  three-run protocol can't reboot or network multiple machines, which a
+  Windows DC promotion (apply → reboot → apply) and a member join both
+  need. A package declares a `scenario { lab, script }`: `lab` is a dir
+  holding a `vmlab.wcl` (the full vmlab feature set — segments, static
+  IPs, DC-as-DNS, depends_on), and `script` is a driver
+  (`fn run(lab: Lab) -> bool`/`Result[bool,string]`) that runs
+  **host-side** against the live lab via the `testlab` wisp host module
+  (`src/hostapi/testlab.rs`): `Lab`/`Machine` opaque handles over the
+  `TestLab`/`TestInstance` traits. The handles hold `Rc<RefCell<LabState>>`
+  — wisp opaque values are `Rc`-backed and single-threaded, so scenarios
+  run on one thread (no `Arc` needed, unlike vmlab's own scripting which
+  bridges to tokio). **Why a declared lab, not script-provisioned:** the
+  vmlab lab daemon loads its config once at first `up` and never reloads
+  (`labd::lab::Lab { config }`), so a VM appended to a running lab is
+  invisible (`no vm "b" in lab`) — proven by smoke. Declaring every VM up
+  front sidesteps this: `open_lab` copies the lab dir, rewrites the `lab
+  "…"` name to a unique one (registry isolation), and `lab.machine(name)`
+  does `vmlab up <name>` — the VM is already in the daemon's config, so it
+  starts on demand (resource-friendly, one at a time) with no reload.
+  `machine.apply_resource(key, props)` synthesizes a one-step playbook
+  (`synth::synthesize_resource`, rendering `props` as a WCL `properties`
+  block), copies the binary in once per machine, runs `config-weave
+  {check,apply} --json`, and returns the step's status; `machine.reboot()`
+  = `vmlab vm restart` + osinfo re-poll (900s, DC promotion finalizes on
+  boot). New trait methods `reboot`/`wait_ready` and
+  `TestBackend::open_lab`/`TestLab` carry this; the single-VM `box` path is
+  unchanged (its instance owns lab teardown, lab machines don't). Scenarios
+  compile in stage-5 against `hostapi::scenario_context()` (host API +
+  `testlab`), so `validate` catches a broken driver; at run time they
+  execute sequentially after the parallel test groups, each owning its lab.
+  `windows_domain:ad_matrix` is the first: forest root (DNS) → member join
+  → additional DC → second forest (own segment), all over real reboots.
+  The two-VM + reboot integration is smoke-verified on vmlab with Alpine.
 
 ## wisp binding (PRD §6/§7)
 

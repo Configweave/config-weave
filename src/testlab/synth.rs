@@ -259,6 +259,86 @@ pub fn synthesize(pb: &Playbook, pkg: &Package, test: &TestDecl) -> Result<Synth
     Ok(SynthesizedTest { dir })
 }
 
+/// Synthesize a one-step playbook that applies a single resource `key`
+/// (`package.resource`) with `props`, for a scenario's `apply_resource` /
+/// `check_resource`. Returns the dir plus the synthetic step name (the
+/// caller looks it up in the `--json` report).
+pub fn synthesize_resource(
+    pb: &Playbook,
+    key: &str,
+    props: &wisp_std::DynValue,
+) -> Result<(SynthesizedTest, String), Diag> {
+    let (package, _resource) = key
+        .split_once('.')
+        .ok_or_else(|| Diag::bare(format!("resource key '{key}' must be 'package.resource'")))?;
+
+    let dir = tempfile::tempdir()
+        .map_err(|e| Diag::bare(format!("cannot create a synthesis tempdir: {e}")))?;
+    let p = pb
+        .packages
+        .get(package)
+        .ok_or_else(|| Diag::bare(format!("scenario references unknown package '{package}'")))?;
+    copy_dir(&p.dir, &dir.path().join("pkgs").join(package))?;
+
+    let step = "step";
+    let mut out = String::new();
+    out.push_str(&format!(
+        "playbook \"weave-scenario\" {{\n  description = {}\n  version = \"0.0.0\"\n\n",
+        wcl_str(&format!("Synthesized for {key}"))
+    ));
+    out.push_str(&format!("  play \"{PLAY}\" {{\n    description = \"scenario step\"\n"));
+    out.push_str(&format!(
+        "\n    step \"{step}\" {{\n      description = \"apply {key}\"\n      resource = \"{key}\"\n"
+    ));
+    out.push_str("      ");
+    out.push_str(&render_props(props)?);
+    out.push('\n');
+    out.push_str("    }\n  }\n}\n");
+
+    std::fs::write(dir.path().join("playbook.wcl"), out)
+        .map_err(|e| Diag::bare(format!("cannot write the synthesized playbook: {e}")))?;
+    Ok((SynthesizedTest { dir }, step.to_string()))
+}
+
+/// Render a wisp map value as a WCL `properties { … }` block. Resource
+/// params are scalars (string/int/float/bool); anything else is rendered
+/// as a string for a best-effort pass.
+fn render_props(props: &wisp_std::DynValue) -> Result<String, Diag> {
+    use wisp_std::DynValue;
+    let map = match props {
+        DynValue::Map(m) => m,
+        DynValue::Null => {
+            return Ok("properties {}".to_string());
+        }
+        other => {
+            return Err(Diag::bare(format!(
+                "scenario resource properties must be a map, got {other:?}"
+            )));
+        }
+    };
+    let mut out = String::from("properties {\n");
+    for (k, v) in map {
+        out.push_str(&format!("        {k} = {}\n", render_value(v)));
+    }
+    out.push_str("      }");
+    Ok(out)
+}
+
+fn render_value(v: &wisp_std::DynValue) -> String {
+    use wisp_std::DynValue;
+    match v {
+        DynValue::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+        DynValue::Int(i) => i.to_string(),
+        DynValue::Float(f) => f.to_string(),
+        DynValue::Bool(b) => b.to_string(),
+        DynValue::List(items) => {
+            let parts: Vec<String> = items.iter().map(render_value).collect();
+            format!("[{}]", parts.join(", "))
+        }
+        other => format!("\"{other:?}\""),
+    }
+}
+
 /// WCL string literal from arbitrary text. Quotes/backslashes are
 /// replaced, not escaped — only descriptions pass through here, never
 /// identity-bearing names (load validation keeps those quote-free).
@@ -400,6 +480,27 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
         assert!(source.contains("$\"/tmp/${\"two\"}\""), "{source}");
         assert!(source.contains("requires = [\"one\"]"), "{source}");
         assert!(source.contains("condition = 1 == 1"), "{source}");
+    }
+
+    #[test]
+    fn renders_scenario_props_and_values() {
+        use std::collections::HashMap;
+        use wisp_std::DynValue;
+
+        // Scalars render to WCL literals; strings are quote-escaped.
+        assert_eq!(render_value(&DynValue::Int(42)), "42");
+        assert_eq!(render_value(&DynValue::Bool(true)), "true");
+        assert_eq!(render_value(&DynValue::String("a\"b".into())), "\"a\\\"b\"");
+
+        // A single-key map renders a deterministic properties block.
+        let mut m = HashMap::new();
+        m.insert("path".to_string(), DynValue::String("/tmp/x".into()));
+        let block = render_props(&DynValue::Map(m)).unwrap();
+        assert!(block.starts_with("properties {"), "{block}");
+        assert!(block.contains("path = \"/tmp/x\""), "{block}");
+
+        // Null props → an empty block.
+        assert_eq!(render_props(&DynValue::Null).unwrap(), "properties {}");
     }
 
     #[test]

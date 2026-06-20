@@ -145,6 +145,8 @@ pub struct Package {
     pub resources: BTreeMap<String, ResourceDecl>,
     /// Convergence tests, in declaration order.
     pub tests: Vec<TestDecl>,
+    /// Wisp-scripted scenarios, in declaration order.
+    pub scenarios: Vec<ScenarioDecl>,
 }
 
 #[derive(Debug)]
@@ -194,6 +196,20 @@ pub struct TestDecl {
     pub steps: Vec<TestStep>,
     pub gathers: Vec<TestGather>,
     pub span: (usize, usize),
+}
+
+/// A wisp-scripted, multi-stage test declared in `package.wcl`, executed
+/// by `config-weave test` over a declared vmlab lab. The driver script
+/// brings VMs up by name, applies config-weave, reboots, and asserts —
+/// see `hostapi::testlab`.
+#[derive(Debug)]
+pub struct ScenarioDecl {
+    pub name: String,
+    pub description: String,
+    /// Absolute path to the lab directory holding a `vmlab.wcl`.
+    pub lab: PathBuf,
+    /// Absolute path to the driver wisp script (`fn run(lab) -> bool`).
+    pub script: PathBuf,
 }
 
 /// A resource invocation under test; mirrors a playbook step. The

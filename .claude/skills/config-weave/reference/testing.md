@@ -153,6 +153,57 @@ problem.
 - The `TestBackend`/`TestInstance` traits in `src/testlab/backend.rs` are the backend
   seam; `src/testlab/docker.rs` and `src/testlab/vmlab.rs` implement it.
 
+## Scenarios (scripted, multi-stage, over a declared vmlab lab)
+
+Some convergence can't be expressed by the three-run protocol: a Windows DC
+promotion needs **apply → reboot → apply again** to finish, and a member server
+needs a **reachable DC** (a second networked VM). For these, a package declares a
+`scenario` — a **declared vmlab lab** plus a wisp **driver script** that brings the
+lab's VMs up by name, applies config-weave, reboots, and asserts.
+
+```wcl
+scenario "ad_matrix" {
+  description = "Forest, additional DC and a member join over real reboots"
+  lab    = "tests/ad-lab"          // dir holding a vmlab.wcl (vmlab only)
+  script = "tests/ad_matrix.wisp"
+}
+```
+
+`lab` is a directory containing a `vmlab.wcl` that declares the whole topology using
+the full vmlab feature set — segments, static IPs, a DC-as-DNS segment, `depends_on`,
+shares, etc. config-weave copies that dir to a throwaway location, gives the lab a
+unique name, and brings VMs up **by name on demand** (`vmlab up <name>` — the VM is
+already in the lab's config, so no daemon reload is needed). `--keep` leaves the lab
+up and reports its handle; teardown is `vmlab destroy`.
+
+The script exports `fn run(lab: Lab) -> bool` (or `Result[bool, string]`) and runs
+**host-side** against the live lab. `Ok(true)` passes; `Ok(false)` / `Err(msg)`
+fail; a wisp/transport error is an environment error. It compiles in stage-5
+validation against the `testlab` host module, so `config-weave validate` catches a
+broken driver.
+
+The `testlab` driver API (host module `testlab`, types `Lab` / `Machine`):
+
+```
+lab.log(msg)
+lab.machine(name) -> Machine                  // bring a declared VM up + handle it
+m.exec(cmd, [args]) -> {exit_code, stdout, stderr}
+m.powershell(script) -> {exit_code, stdout, stderr}
+m.copy_in(host_path, dest)
+m.reboot()                                     // restart + wait for the guest agent
+m.wait_ready(secs)
+m.apply_resource(key, props) -> {status, message, ok}   // synthesize+run one resource
+m.check_resource(key, props) -> {status, message, ok}
+m.apply(playbook_dir) -> RunReport            // run an authored playbook dir
+m.check(playbook_dir) -> RunReport            //   RunReport.ok(), .step(name)
+```
+
+The config-weave binary is copied into each machine lazily on first `apply_resource`
+(per guest OS, like tests). Scenarios run **sequentially** after the (parallel) test
+groups; select them with the same `package:name` syntax as tests. **Windows guests
+must be Server 2019 / Windows 10 or newer** — the windows-gnu config-weave binary
+won't run on older releases.
+
 ## Repo test suites
 
 - `just test` — fast cargo suite (no docker).
@@ -164,3 +215,6 @@ problem.
 - `just test-lab-vm playbook template` — end-to-end vmlab smoke: runs `config-weave
   test --backend vmlab --image <template>` against a playbook dir. Needs `vmlab`, KVM,
   and a built template.
+- `just test-ad` — cross-builds both binaries and runs the `windows_domain:ad_matrix`
+  scenario on vmlab (the full DC lifecycle over real reboots). Needs `vmlab`, KVM, and
+  the `x86_64/windows-server-2025` template. Heavy (several Windows VMs).

@@ -54,6 +54,9 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
     let mut diags = Vec::new();
     let mut resources = HashMap::new();
     let mut gatherers = HashMap::new();
+    // Scenario scripts compile against an augmented context (the `testlab`
+    // module on top of the host API); built lazily, only when present.
+    let mut scenario_ctx: Option<Context> = None;
 
     for pkg in pb.packages.values() {
         for res in pkg.resources.values() {
@@ -88,6 +91,12 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
             };
             if let Some((unit, source)) = compile_one(ctx, script, &mut diags) {
                 entry_kind::<bool>(&unit, "verify", script, &source, &mut diags);
+            }
+        }
+        for s in &pkg.scenarios {
+            let sctx = scenario_ctx.get_or_insert_with(crate::hostapi::scenario_context);
+            if let Some((unit, source)) = compile_one(sctx, &s.script, &mut diags) {
+                check_run_contract(&unit, &s.script, &source, &mut diags);
             }
         }
         compile_lib(ctx, &pkg.dir.join("lib"), &mut diags);
@@ -144,6 +153,24 @@ fn compile_lib(ctx: &Context, dir: &Path, diags: &mut Vec<Diag>) {
     paths.sort();
     for path in paths {
         compile_one(ctx, &path, diags);
+    }
+}
+
+/// Verify a scenario script exports `run(lab: Lab) -> bool` (or the
+/// `Result[bool, string]` variant).
+fn check_run_contract(unit: &CompiledUnit, path: &Path, source: &str, diags: &mut Vec<Diag>) {
+    use crate::hostapi::testlab::Lab;
+    if unit.fn_handle::<(Lab,), bool>("run").is_ok() {
+        return;
+    }
+    if let Err(e) = unit.fn_handle::<(Lab,), Result<bool, String>>("run") {
+        diags.push(Diag::spanned(
+            format!("scenario script does not satisfy the 'run(lab: Lab) -> bool' contract: {e}"),
+            "this script",
+            path,
+            source,
+            (0, 0),
+        ));
     }
 }
 

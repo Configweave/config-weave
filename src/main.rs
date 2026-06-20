@@ -252,6 +252,20 @@ fn print_diags(diags: &[Diag]) {
     );
 }
 
+/// Unwrap a `Result<T, Vec<Diag>>`, or print the diagnostics and return
+/// `EXIT_VALIDATION` from the enclosing command function.
+macro_rules! load_or_exit {
+    ($expr:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(diags) => {
+                print_diags(&diags);
+                return EXIT_VALIDATION;
+            }
+        }
+    };
+}
+
 fn cmd_validate(dir: &std::path::Path) -> u8 {
     match load_validated(dir) {
         Ok(pb) => {
@@ -289,20 +303,8 @@ fn override_store(cli: &Cli) -> Result<VarStore, Vec<Diag>> {
 }
 
 fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode) -> u8 {
-    let pb = match load_validated(dir) {
-        Ok(pb) => pb,
-        Err(diags) => {
-            print_diags(&diags);
-            return EXIT_VALIDATION;
-        }
-    };
-    let store = match override_store(cli) {
-        Ok(s) => s,
-        Err(diags) => {
-            print_diags(&diags);
-            return EXIT_VALIDATION;
-        }
-    };
+    let pb = load_or_exit!(load_validated(dir));
+    let store = load_or_exit!(override_store(cli));
     let mode_out = report::select_mode(cli.json, cli.no_color);
     let sink = report::progress_sink(mode_out);
     match engine::execute(
@@ -329,86 +331,58 @@ fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode) -> u8 {
     }
 }
 
-/// `config-weave test`: run package convergence tests in disposable
-/// backend instances (PRD-extension; see docs/notes.md, testlab section).
-#[allow(clippy::too_many_arguments)]
-fn cmd_test(
-    cli: &Cli,
-    dir: &std::path::Path,
-    filter: Option<&str>,
-    backend_override: Option<&str>,
-    image_override: Option<&str>,
-    keep: bool,
-    binary: Option<&std::path::Path>,
-    binary_windows: Option<&std::path::Path>,
-    docker_jobs: Option<usize>,
-    vmlab_jobs: Option<usize>,
-) -> u8 {
-    let pb = match load_validated(dir) {
-        Ok(pb) => pb,
-        Err(diags) => {
-            print_diags(&diags);
-            return EXIT_VALIDATION;
-        }
-    };
-
-    // Select tests: no filter = everything, `pkg` = one package,
-    // `pkg:test` = one test.
-    let (fpkg, ftest) = match filter {
+/// Split a test filter into `(package, test)` selectors: no filter selects
+/// everything, `pkg` selects one package, `pkg:test` selects one test.
+fn parse_test_filter(filter: Option<&str>) -> (Option<&str>, Option<&str>) {
+    match filter {
         Some(f) => match f.split_once(':') {
             Some((p, t)) => (Some(p), Some(t)),
             None => (Some(f), None),
         },
         None => (None, None),
-    };
-    let selected: Vec<(&model::Package, &model::TestDecl)> = pb
-        .packages
+    }
+}
+
+/// The `(package, test)` pairs matching the `(package, test)` selectors.
+fn select_matching_tests<'a>(
+    pb: &'a model::Playbook,
+    fpkg: Option<&str>,
+    ftest: Option<&str>,
+) -> Vec<(&'a model::Package, &'a model::TestDecl)> {
+    pb.packages
         .values()
         .filter(|pkg| fpkg.is_none_or(|p| p == pkg.name))
         .flat_map(|pkg| pkg.tests.iter().map(move |t| (pkg, t)))
         .filter(|(_, t)| ftest.is_none_or(|n| n == t.name))
-        .collect();
-    if selected.is_empty() {
-        let available: Vec<String> = pb
-            .packages
-            .values()
-            .flat_map(|p| {
-                p.tests
-                    .iter()
-                    .map(move |t| format!("{}:{}", p.name, t.name))
-            })
-            .collect();
-        if available.is_empty() {
-            eprintln!("error: no package declares any tests");
-        } else {
-            eprintln!(
-                "error: no tests match '{}' (available: {})",
-                filter.unwrap_or("*"),
-                available.join(", ")
-            );
-        }
-        return EXIT_VALIDATION;
-    }
+        .collect()
+}
 
-    if let Some(b) = backend_override
-        && b != "docker"
-        && b != "vmlab"
-    {
-        eprintln!("error: unknown test backend '{b}' (supported: 'docker', 'vmlab')");
-        return EXIT_VALIDATION;
-    }
+/// The `(package, scenario)` pairs matching the selectors. Scenarios share
+/// the `package:name` selection syntax with tests.
+fn select_matching_scenarios<'a>(
+    pb: &'a model::Playbook,
+    fpkg: Option<&str>,
+    fname: Option<&str>,
+) -> Vec<(&'a model::Package, &'a model::ScenarioDecl)> {
+    pb.packages
+        .values()
+        .filter(|pkg| fpkg.is_none_or(|p| p == pkg.name))
+        .flat_map(|pkg| pkg.scenarios.iter().map(move |s| (pkg, s)))
+        .filter(|(_, s)| fname.is_none_or(|n| n == s.name))
+        .collect()
+}
 
-    let mode_out = report::select_mode(cli.json, cli.no_color);
-    let quiet = mode_out == report::OutputMode::Json;
+/// Discovered backends, keyed by name (`docker` / `vmlab`).
+type Backends<'a> = Vec<(&'a str, Box<dyn testlab::backend::TestBackend>)>;
 
-    // Discover each backend the selected tests actually use, once, up
-    // front — a broken environment fails fast with exit 2 instead of
-    // erroring every test. Tests on other backends never probe.
-    let needed: std::collections::BTreeSet<&str> = selected
-        .iter()
-        .map(|(_, t)| backend_override.unwrap_or(t.backend.as_str()))
-        .collect();
-    let mut backends: Vec<(&str, Box<dyn testlab::backend::TestBackend>)> = Vec::new();
+/// Probe each named backend once, up front. On a discovery failure the
+/// error is printed and `Err(EXIT_VALIDATION)` returned so the caller can
+/// fail fast before any test runs.
+fn discover_backends(
+    needed: std::collections::BTreeSet<&str>,
+    quiet: bool,
+) -> Result<Backends<'_>, u8> {
+    let mut backends: Backends = Vec::new();
     for name in needed {
         let discovered: Result<Box<dyn testlab::backend::TestBackend>, diag::Diag> = match name {
             "docker" => testlab::docker::DockerBackend::discover(quiet)
@@ -421,11 +395,25 @@ fn cmd_test(
             Ok(b) => backends.push((name, b)),
             Err(d) => {
                 eprintln!("{}", d.rendered);
-                return EXIT_VALIDATION;
+                return Err(EXIT_VALIDATION);
             }
         }
     }
-    let backend_for = |t: &model::TestDecl| -> &dyn testlab::backend::TestBackend {
+    Ok(backends)
+}
+
+/// Bucket selected tests into shared-instance groups: tests with a
+/// non-empty `group` share one instance (keyed per package, since a group
+/// provisions one instance from one image on one backend); ungrouped tests
+/// each get their own. Selection order is preserved via the carried index
+/// so output is stable despite parallel execution.
+fn bucket_groups<'a>(
+    selected: &[(&'a model::Package, &'a model::TestDecl)],
+    backends: &'a Backends<'_>,
+    backend_override: Option<&str>,
+    image_override: Option<&str>,
+) -> Vec<testlab::runner::GroupSpec<'a>> {
+    let backend_for = |t: &model::TestDecl| -> &'a dyn testlab::backend::TestBackend {
         let name = backend_override.unwrap_or(t.backend.as_str());
         backends
             .iter()
@@ -433,24 +421,6 @@ fn cmd_test(
             .map(|(_, b)| b.as_ref())
             .expect("backend discovered above")
     };
-
-    let opts = testlab::runner::RunnerOptions {
-        binaries: testlab::synth::BinaryResolver::new(
-            binary.map(std::path::Path::to_path_buf),
-            binary_windows.map(std::path::Path::to_path_buf),
-        ),
-        keep,
-        jobs: cli.jobs,
-        quiet,
-        docker_cap: docker_jobs.unwrap_or_else(engine::run::default_jobs).max(1),
-        vmlab_cap: vmlab_jobs.unwrap_or(2).max(1),
-    };
-
-    // Bucket selected tests into shared-instance groups: tests with a
-    // non-empty `group` share one instance (keyed per package, since a
-    // group provisions one instance from one image on one backend);
-    // ungrouped tests each get their own. Selection order is preserved via
-    // the carried index so output is stable despite parallel execution.
     let effective_image = |t: &model::TestDecl| -> String {
         image_override
             .map(str::to_string)
@@ -483,9 +453,129 @@ fn cmd_test(
             }),
         }
     }
+    groups
+}
+
+/// `config-weave test`: run package convergence tests in disposable
+/// backend instances (PRD-extension; see docs/notes.md, testlab section).
+#[allow(clippy::too_many_arguments)]
+fn cmd_test(
+    cli: &Cli,
+    dir: &std::path::Path,
+    filter: Option<&str>,
+    backend_override: Option<&str>,
+    image_override: Option<&str>,
+    keep: bool,
+    binary: Option<&std::path::Path>,
+    binary_windows: Option<&std::path::Path>,
+    docker_jobs: Option<usize>,
+    vmlab_jobs: Option<usize>,
+) -> u8 {
+    let pb = std::rc::Rc::new(load_or_exit!(load_validated(dir)));
+
+    let (fpkg, ftest) = parse_test_filter(filter);
+    let selected = select_matching_tests(&pb, fpkg, ftest);
+    let scenarios_sel = select_matching_scenarios(&pb, fpkg, ftest);
+    if selected.is_empty() && scenarios_sel.is_empty() {
+        let available: Vec<String> = pb
+            .packages
+            .values()
+            .flat_map(|p| {
+                let tests = p.tests.iter().map(move |t| format!("{}:{}", p.name, t.name));
+                let scens = p
+                    .scenarios
+                    .iter()
+                    .map(move |s| format!("{}:{}", p.name, s.name));
+                tests.chain(scens)
+            })
+            .collect();
+        if available.is_empty() {
+            eprintln!("error: no package declares any tests or scenarios");
+        } else {
+            eprintln!(
+                "error: nothing matches '{}' (available: {})",
+                filter.unwrap_or("*"),
+                available.join(", ")
+            );
+        }
+        return EXIT_VALIDATION;
+    }
+
+    if let Some(b) = backend_override
+        && b != "docker"
+        && b != "vmlab"
+    {
+        eprintln!("error: unknown test backend '{b}' (supported: 'docker', 'vmlab')");
+        return EXIT_VALIDATION;
+    }
+
+    let mode_out = report::select_mode(cli.json, cli.no_color);
+    let quiet = mode_out == report::OutputMode::Json;
+
+    // Discover each backend the selected tests actually use, once, up
+    // front — a broken environment fails fast with exit 2 instead of
+    // erroring every test. Tests on other backends never probe.
+    let needed: std::collections::BTreeSet<&str> = selected
+        .iter()
+        .map(|(_, t)| backend_override.unwrap_or(t.backend.as_str()))
+        .chain(
+            scenarios_sel
+                .iter()
+                .map(|_| backend_override.unwrap_or("vmlab")),
+        )
+        .collect();
+    let backends = match discover_backends(needed, quiet) {
+        Ok(b) => b,
+        Err(code) => return code,
+    };
+
+    let opts = testlab::runner::RunnerOptions {
+        binaries: testlab::synth::BinaryResolver::new(
+            binary.map(std::path::Path::to_path_buf),
+            binary_windows.map(std::path::Path::to_path_buf),
+        ),
+        keep,
+        jobs: cli.jobs,
+        quiet,
+        docker_cap: docker_jobs.unwrap_or_else(engine::run::default_jobs).max(1),
+        vmlab_cap: vmlab_jobs.unwrap_or(2).max(1),
+    };
+
+    let groups = bucket_groups(&selected, &backends, backend_override, image_override);
 
     let start = std::time::Instant::now();
-    let tests = testlab::runner::run_groups(&pb, groups, &opts);
+    let mut tests = testlab::runner::run_groups(&pb, groups, &opts);
+
+    // Scenarios run after the (parallel) test groups, sequentially — each
+    // may bring up several machines. They reuse the test report shape.
+    if !scenarios_sel.is_empty() {
+        let backend_for = |name: &str| -> &dyn testlab::backend::TestBackend {
+            let n = backend_override.unwrap_or(name);
+            backends
+                .iter()
+                .find(|(bn, _)| *bn == n)
+                .map(|(_, b)| b.as_ref())
+                .expect("backend discovered above")
+        };
+        let units: Vec<testlab::runner::ScenarioUnit> = scenarios_sel
+            .iter()
+            .map(|(pkg, s)| testlab::runner::ScenarioUnit {
+                package: pkg,
+                scenario: s,
+                backend: backend_for("vmlab"),
+            })
+            .collect();
+        let scenario_reports = testlab::runner::run_scenarios(
+            &pb,
+            units,
+            binary.map(std::path::Path::to_path_buf),
+            binary_windows.map(std::path::Path::to_path_buf),
+            keep,
+            quiet,
+        );
+        tests.extend(scenario_reports);
+    }
+
     let run_report = testlab::report::TestRunReport {
         playbook: pb.name.clone(),
         tests,

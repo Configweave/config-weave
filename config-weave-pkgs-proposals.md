@@ -112,11 +112,20 @@ The current library already establishes the conventions; new work matches them:
 
 ---
 
+## Reversed decision: `template` is now ported (host-side Tera)
+
+`template` was originally in the "NOT porting" list (content composed in WCL via
+`$"…"`). That's now **reversed**: `linux_files.template` ships, backed by a new
+`template` host module that renders **Tera** on the target host —
+`template::render(template, vars) -> string`. The driver is ergonomics: WCL's
+`map`/`join` is awkward for large configs, while Tera gives `{% for %}`/`{% if %}`/
+filters. WCL `$"…"` interpolation still works for simple cases; author Tera bodies as
+raw heredocs (`<<'TMPL'`) and pass dynamic data through the `vars` map.
+
 ## Deliberately NOT porting (Ansible → config-weave divergences)
 
 | Ansible module(s) | Why not | config-weave equivalent |
 |---|---|---|
-| `template` | Content is composed in WCL (vars + `$"…"`), not Jinja in a resource | `file` / `*_file` + WCL interpolation |
 | `command`, `shell`, `raw`, `script`, `expect` | config-weave models desired **state**, not ad-hoc execution | resources; (optional, contentious: a guarded `command_run` with `creates`/`unless` — flag for discussion) |
 | `copy`, `fetch`, `slurp` | No controller→node copy model; reading is a gatherer concern | `file` (content), `download`, `path_stat` |
 | `iptables` | Superseded by modern backend already shipped | `linux_network.nftables_ruleset`, `firewalld_service` |
@@ -150,3 +159,37 @@ The current library already establishes the conventions; new work matches them:
 1. New packages `linux_scm` and `linux_python` vs folding into existing ones?
 2. Removal model confirmed as separate `*_absent` resources (vs a `state` param)? (current norm says separate.)
 3. Any appetite for a guarded `command_run`?
+
+---
+
+## Windows coverage (implemented 2026-06-15)
+
+Four new Windows packages, written to the same norms (PowerShell/`registry` host
+modules; `exclusive` for installer/manager locks, `global` for patching; reboot signalled
+as `RebootRequired` via installer exit code 3010/1641):
+
+- **windows_packages** — `chocolatey_package`/`chocolatey_absent`/`chocolatey_source`,
+  `scoop_package`/`scoop_absent`/`scoop_bucket`, `winget_package`/`winget_absent`.
+- **windows_installers** — `msi_package` (idempotent by ProductCode), `msi_absent`,
+  `exe_installer` (guarded by `creates` or `product_id`).
+- **windows_updates** — `windows_update` (Windows Update Agent COM API), `hotfix_installed`
+  (`Get-HotFix` + `wusa`).
+- **windows_features** — `windows_optional_feature` (DISM), `windows_capability` (FoD),
+  `windows_server_feature` (Server roles); boolean state param per the `firewalld_service`
+  precedent.
+- **windows_domain** — `forest` (create a new AD forest / first DC via
+  `Install-ADDSForest`), `domain_controller` (additional DC via
+  `Install-ADDSDomainController`), `domain_member` (join an existing domain via
+  `Add-Computer`). All `global`; promotion/join is reboot-prone, so apply returns
+  `RebootRequired` and the playbook must install the `AD-Domain-Services` role first via
+  `windows_features.windows_server_feature` (the resources only promote/join).
+  **Convergence-tested** by the `ad_matrix` *scenario* (`tests/ad_matrix.wisp`): a
+  wisp driver that spins up a forest root (serving DNS), an additional DC, a member
+  server and a second forest on vmlab, applying each resource across the reboot it
+  requires — the multi-stage/multi-VM flow the three-run `test` protocol can't express.
+
+**Testing note:** these are validated by wisp compilation (`config-weave validate`, which
+compiles every script against the host API). They are **not** covered by automated
+convergence tests — the only Windows backend is the slow vmlab WS2025 VM, and installers /
+updates / features are network-bound, stateful, and reboot-prone, which makes the three-run
+protocol impractical. `windows_registry:value_converges` remains the Windows smoke test.

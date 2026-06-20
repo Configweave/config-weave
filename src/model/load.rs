@@ -194,13 +194,12 @@ impl PlaybookLoader<'_> {
         let name = label_string(block)?;
         let span = wcl_span(block.span());
         let from = string_field(block, "from", &mut self.ctx)?;
-        let Some((package, gatherer)) = from.split_once('.') else {
-            self.ctx.err(
-                format!("gather 'from' must be 'package.gatherer', got '{from}'"),
-                span,
-            );
-            return None;
-        };
+        let (package, gatherer) = split_qualified(
+            &from,
+            "gather 'from' must be 'package.gatherer'",
+            span,
+            &mut self.ctx,
+        )?;
         let Some(pkg) = self.packages.get(package) else {
             self.ctx.err(
                 format!("unknown package '{package}' in gather '{name}'"),
@@ -309,13 +308,12 @@ impl PlaybookLoader<'_> {
         let name = label_string(block)?;
         let description = string_field(block, "description", &mut self.ctx).unwrap_or_default();
         let resource_ref = string_field(block, "resource", &mut self.ctx)?;
-        let Some((package, resource)) = resource_ref.split_once('.') else {
-            self.ctx.err(
-                format!("step resource must be 'package.resource', got '{resource_ref}'"),
-                span,
-            );
-            return None;
-        };
+        let (package, resource) = split_qualified(
+            &resource_ref,
+            "step resource must be 'package.resource'",
+            span,
+            &mut self.ctx,
+        )?;
         let Some(pkg) = self.packages.get(package) else {
             self.ctx.err(
                 format!("unknown package '{package}' in step '{name}'"),
@@ -397,38 +395,20 @@ impl PlaybookLoader<'_> {
     /// → error when the value evaluates statically (variable references
     /// defer to run time).
     fn check_params(&mut self, block: &Block<'_>, decls: &[ParamDecl], what: &str) {
-        let declared: HashMap<&str, &ParamDecl> =
-            decls.iter().map(|p| (p.name.as_str(), p)).collect();
+        let declared = declared_params(decls);
         let mut present = HashSet::new();
         for f in block.fields() {
             present.insert(f.name().to_string());
-            let Some(decl) = declared.get(f.name()) else {
-                self.ctx.err(
-                    format!("unknown parameter '{}' for {what}", f.name()),
-                    wcl_span(f.span()),
-                );
+            let span = wcl_span(f.span());
+            let Some(decl) = lookup_param(&declared, f.name(), what, span, &mut self.ctx) else {
                 continue;
             };
             match f.value() {
                 Ok(v) => match wcl_to_dyn(v) {
-                    Ok(dv) => {
-                        if !decl.ty.matches(&dv) {
-                            self.ctx.err(
-                                format!(
-                                    "parameter '{}' of {what} expects {}, got {}",
-                                    f.name(),
-                                    decl.ty.as_str(),
-                                    CoarseType::describe(&dv)
-                                ),
-                                wcl_span(f.span()),
-                            );
-                        }
-                    }
+                    Ok(dv) => check_param_type(decl, &dv, what, span, &mut self.ctx),
                     Err(e) => {
-                        self.ctx.err(
-                            format!("parameter '{}' of {what}: {e}", f.name()),
-                            wcl_span(f.span()),
-                        );
+                        self.ctx
+                            .err(format!("parameter '{}' of {what}: {e}", f.name()), span);
                     }
                 },
                 // Variable references resolve at run time; checked then.
@@ -440,25 +420,14 @@ impl PlaybookLoader<'_> {
                 }
             }
         }
-        for p in decls {
-            if p.required && p.default.is_none() && !present.contains(&p.name) {
-                self.ctx.err(
-                    format!("missing required parameter '{}' for {what}", p.name),
-                    wcl_span(block.span()),
-                );
-            }
-        }
+        check_missing_required(decls, what, wcl_span(block.span()), &mut self.ctx, |n| {
+            present.contains(n)
+        });
     }
 
     fn check_param_block_missing(&mut self, decls: &[ParamDecl], span: (usize, usize), what: &str) {
-        for p in decls {
-            if p.required && p.default.is_none() {
-                self.ctx.err(
-                    format!("missing required parameter '{}' for {what}", p.name),
-                    span,
-                );
-            }
-        }
+        // No param block at all, so nothing is present.
+        check_missing_required(decls, what, span, &mut self.ctx, |_| false);
     }
 }
 
@@ -602,6 +571,89 @@ fn validate_tests(packages: &BTreeMap<String, Package>, p: &PendingTests, diags:
     }
 }
 
+/// Index declared params by name, for the membership and type checks
+/// shared by the property/param validators.
+fn declared_params(decls: &[ParamDecl]) -> HashMap<&str, &ParamDecl> {
+    decls.iter().map(|p| (p.name.as_str(), p)).collect()
+}
+
+/// Resolve a supplied param name against the declarations, emitting the
+/// shared "unknown parameter" diagnostic when it isn't declared.
+fn lookup_param<'a>(
+    declared: &HashMap<&str, &'a ParamDecl>,
+    name: &str,
+    what: &str,
+    span: (usize, usize),
+    ctx: &mut Ctx<'_>,
+) -> Option<&'a ParamDecl> {
+    match declared.get(name) {
+        Some(decl) => Some(decl),
+        None => {
+            ctx.err(format!("unknown parameter '{name}' for {what}"), span);
+            None
+        }
+    }
+}
+
+/// Emit the shared coarse type-mismatch diagnostic when `value` doesn't fit
+/// the declared type.
+fn check_param_type(
+    decl: &ParamDecl,
+    value: &DynValue,
+    what: &str,
+    span: (usize, usize),
+    ctx: &mut Ctx<'_>,
+) {
+    if !decl.ty.matches(value) {
+        ctx.err(
+            format!(
+                "parameter '{}' of {what} expects {}, got {}",
+                decl.name,
+                decl.ty.as_str(),
+                CoarseType::describe(value)
+            ),
+            span,
+        );
+    }
+}
+
+/// Emit the shared "missing required parameter" diagnostic for every
+/// required, defaultless param `is_present` reports as absent.
+fn check_missing_required(
+    decls: &[ParamDecl],
+    what: &str,
+    span: (usize, usize),
+    ctx: &mut Ctx<'_>,
+    is_present: impl Fn(&str) -> bool,
+) {
+    for p in decls {
+        if p.required && p.default.is_none() && !is_present(&p.name) {
+            ctx.err(
+                format!("missing required parameter '{}' for {what}", p.name),
+                span,
+            );
+        }
+    }
+}
+
+/// Split a `package.member` reference, emitting `must_be` (e.g. "step
+/// resource must be 'package.resource'") with the offending text when the
+/// `.` separator is absent.
+fn split_qualified<'a>(
+    s: &'a str,
+    must_be: &str,
+    span: (usize, usize),
+    ctx: &mut Ctx<'_>,
+) -> Option<(&'a str, &'a str)> {
+    match s.split_once('.') {
+        Some(pair) => Some(pair),
+        None => {
+            ctx.err(format!("{must_be}, got '{s}'"), span);
+            None
+        }
+    }
+}
+
 /// `check_params` over already-evaluated values: unknown key, coarse type
 /// mismatch, missing required. Test params are fully static, so nothing
 /// defers to run time.
@@ -612,33 +664,16 @@ fn check_params_static(
     what: &str,
     span: (usize, usize),
 ) {
-    let declared: HashMap<&str, &ParamDecl> = decls.iter().map(|p| (p.name.as_str(), p)).collect();
+    let declared = declared_params(decls);
     let mut present = HashSet::new();
     for (name, value, vspan) in pairs.unwrap_or_default() {
         present.insert(name.as_str());
-        let Some(decl) = declared.get(name.as_str()) else {
-            ctx.err(format!("unknown parameter '{name}' for {what}"), *vspan);
+        let Some(decl) = lookup_param(&declared, name, what, *vspan, ctx) else {
             continue;
         };
-        if !decl.ty.matches(value) {
-            ctx.err(
-                format!(
-                    "parameter '{name}' of {what} expects {}, got {}",
-                    decl.ty.as_str(),
-                    CoarseType::describe(value)
-                ),
-                *vspan,
-            );
-        }
+        check_param_type(decl, value, what, *vspan, ctx);
     }
-    for p in decls {
-        if p.required && p.default.is_none() && !present.contains(p.name.as_str()) {
-            ctx.err(
-                format!("missing required parameter '{}' for {what}", p.name),
-                span,
-            );
-        }
-    }
+    check_missing_required(decls, what, span, ctx, |n| present.contains(n));
 }
 
 fn load_package(
@@ -688,12 +723,48 @@ fn load_package(
     let mut gatherers = BTreeMap::new();
     let mut resources = BTreeMap::new();
     let mut test_blocks = Vec::new();
+    let mut scenarios = Vec::new();
+    let mut seen_scenarios = HashSet::new();
 
     for block in pkg_block.blocks() {
         match block.kind() {
             // Tests parse after resources/gatherers so own-package
             // references resolve regardless of declaration order.
             "test" => test_blocks.push(block),
+            "scenario" => {
+                let Some(sname) = label_string(&block) else {
+                    continue;
+                };
+                let sdesc = string_field(&block, "description", &mut ctx).unwrap_or_default();
+                let Some(script) = script_field(&block, pkg_dir, &mut ctx) else {
+                    continue;
+                };
+                // `lab` is a directory holding a vmlab.wcl.
+                let Some(lab_rel) = string_field(&block, "lab", &mut ctx) else {
+                    continue;
+                };
+                let lab = pkg_dir.join(&lab_rel);
+                if !lab.join("vmlab.wcl").is_file() {
+                    ctx.err(
+                        format!(
+                            "scenario lab '{lab_rel}' must be a directory containing vmlab.wcl \
+                             (looked in {})",
+                            pkg_dir.display()
+                        ),
+                        wcl_span(block.span()),
+                    );
+                    continue;
+                }
+                if !seen_scenarios.insert(sname.clone()) {
+                    ctx.err(format!("duplicate scenario '{sname}'"), wcl_span(block.span()));
+                }
+                scenarios.push(ScenarioDecl {
+                    name: sname,
+                    description: sdesc,
+                    lab,
+                    script,
+                });
+            }
             "gatherer" => {
                 let Some(gname) = label_string(&block) else {
                     continue;
@@ -822,6 +893,7 @@ fn load_package(
             gatherers,
             resources,
             tests,
+            scenarios,
         },
         pending,
     ))

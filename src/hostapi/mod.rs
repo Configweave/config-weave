@@ -17,6 +17,8 @@ pub mod registry;
 pub mod service;
 pub mod shell;
 pub mod sys;
+pub mod template;
+pub mod testlab;
 pub mod types;
 #[cfg(windows)]
 pub mod windows_impl;
@@ -44,11 +46,19 @@ pub fn context() -> Context {
         .module(env::module())
         .module(sys::module())
         .module(data::module())
+        .module(template::module())
         .module(registry::module())
         .module(service::module())
         .module(com::module())
         .register_type::<CheckResult>()
         .register_type::<ApplyResult>()
+}
+
+/// The context scenario driver scripts compile and run against: the full
+/// host API plus the `testlab` module (the `Lab`/`Machine` driver API).
+/// Used both by stage-5 validation and by the scenario runner.
+pub fn scenario_context() -> Context {
+    context().module(testlab::module())
 }
 
 /// Install the print hook for the current thread: raw `print`/`println`

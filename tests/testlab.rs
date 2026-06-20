@@ -593,7 +593,10 @@ fn test_without_any_tests_exits_2() {
     });
     let (code, _, stderr) = run(&["test", dir.path().to_str().unwrap()]);
     assert_eq!(code, 2, "{stderr}");
-    assert!(stderr.contains("no package declares any tests"), "{stderr}");
+    assert!(
+        stderr.contains("no package declares any tests or scenarios"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -602,7 +605,7 @@ fn test_with_bad_filter_lists_available() {
     write_fixture(dir.path());
     let (code, _, stderr) = run(&["test", dir.path().to_str().unwrap(), "tlab:nope"]);
     assert_eq!(code, 2);
-    assert!(stderr.contains("no tests match 'tlab:nope'"), "{stderr}");
+    assert!(stderr.contains("nothing matches 'tlab:nope'"), "{stderr}");
     assert!(stderr.contains("tlab:converges"), "{stderr}");
 }
 

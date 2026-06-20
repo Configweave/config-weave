@@ -113,3 +113,11 @@ MD5 is legacy-interop only.
 
 `ini_parse(text) -> Result[Value, string]` — map of sections, global keys under `""`;
 `ini_serialize(map) -> Result[string, string]`.
+
+## `template` — Tera rendering (backs `linux_files.template`)
+
+`render(template, vars) -> Result[string, string]` — render a Tera template string
+against a `vars` map; autoescape is **off** (config files, not HTML). A non-map `vars`
+errors (`Null` is treated as an empty context). Gives `{{ x }}`, `{% for %}`, `{% if %}`,
+and filters (`| join`, …). Author template bodies as raw WCL heredocs (`<<'TMPL'`) so
+WCL's `$"…${}"` interpolation leaves Tera's `{{ }}`/`{% %}` alone; pass data via `vars`.

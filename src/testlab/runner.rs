@@ -10,19 +10,25 @@
 //! true no-op (a resource whose check wrongly reports `not_configured`
 //! re-applies and surfaces as `configured`, failing the test).
 
+use std::cell::RefCell;
 use std::io::Write as _;
 use std::path::Path;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+use wisp::{UnitExt, Vm};
 
 use crate::convert::dyn_to_json;
 use crate::diag::Diag;
 use crate::engine::status::StepStatus;
-use crate::model::{Expect, Package, Playbook, TestDecl};
+use crate::hostapi::testlab::{Lab, LabState, lab_value};
+use crate::model::{Expect, Package, Playbook, ScenarioDecl, TestDecl};
 use crate::report::JsonRunReport;
 
 use super::backend::{GuestOs, TestBackend, TestInstance};
 use super::report::{TestGatherResult, TestOutcome, TestReport, TestStepResult, VerifyResult};
 use super::synth;
+use super::synth::BinaryResolver;
 
 pub struct RunnerOptions {
     /// Resolves the static binary copied into instances, per guest OS.
@@ -641,12 +647,163 @@ fn in_container_script(verify: &Path, paths: &GuestPaths) -> Result<String, Diag
 
 /// First interesting line(s) of command output for diagnostics.
 fn tail(s: &str) -> String {
-    let lines: Vec<&str> = s.trim().lines().rev().take(3).collect();
-    let t: Vec<&str> = lines.into_iter().rev().collect();
-    if t.is_empty() {
-        "(no output)".into()
-    } else {
-        t.join(" / ")
+    super::output::output_tail(s, "(no output)")
+}
+
+// ------------------------------------------------------------- scenarios
+
+/// One scenario to run: its package, declaration, and resolved backend.
+pub struct ScenarioUnit<'a> {
+    pub package: &'a Package,
+    pub scenario: &'a ScenarioDecl,
+    pub backend: &'a dyn TestBackend,
+}
+
+/// How a scenario's `run` ended.
+enum ScenarioEnd {
+    /// `run` returned `false`, or returned `Err(msg)` (a failed assertion).
+    Failed(String),
+    /// Environmental: provisioning, compile, or transport trouble.
+    Error(String),
+}
+
+/// Run each scenario sequentially (each may bring up several machines, so
+/// they are not parallelized). Returns one `TestReport` per scenario,
+/// reusing the test report shape for uniform formatting.
+pub fn run_scenarios(
+    pb: &Rc<Playbook>,
+    scenarios: Vec<ScenarioUnit<'_>>,
+    bin_linux: Option<std::path::PathBuf>,
+    bin_windows: Option<std::path::PathBuf>,
+    keep: bool,
+    quiet: bool,
+) -> Vec<TestReport> {
+    scenarios
+        .into_iter()
+        .map(|u| {
+            if !quiet {
+                eprintln!(
+                    "⟳ scenario {}:{} — {}",
+                    u.package.name, u.scenario.name, u.scenario.description
+                );
+            }
+            run_one_scenario(pb, &u, bin_linux.clone(), bin_windows.clone(), keep, quiet)
+        })
+        .collect()
+}
+
+fn run_one_scenario(
+    pb: &Rc<Playbook>,
+    u: &ScenarioUnit<'_>,
+    bin_linux: Option<std::path::PathBuf>,
+    bin_windows: Option<std::path::PathBuf>,
+    keep: bool,
+    quiet: bool,
+) -> TestReport {
+    let t0 = Instant::now();
+    let mut report = TestReport {
+        package: u.package.name.clone(),
+        name: u.scenario.name.clone(),
+        backend: u.backend.name().to_string(),
+        image: "(scenario)".to_string(),
+        outcome: TestOutcome::Passed,
+        steps: Vec::new(),
+        gathers: Vec::new(),
+        verify: None,
+        error: None,
+        kept: None,
+        duration: Duration::default(),
+    };
+
+    let lab = match u.backend.open_lab(&u.scenario.lab, keep) {
+        Ok(l) => l,
+        Err(d) => {
+            report.outcome = TestOutcome::Error;
+            report.error = Some(d.message);
+            report.duration = t0.elapsed();
+            return report;
+        }
+    };
+    let state = LabState::new(
+        lab,
+        pb.clone(),
+        u.package.dir.clone(),
+        BinaryResolver::new(bin_linux, bin_windows),
+        quiet,
+    );
+    let rc = Rc::new(RefCell::new(state));
+
+    match drive_scenario(&rc, &u.scenario.script) {
+        Ok(true) => {}
+        Ok(false) => {
+            report.outcome = TestOutcome::Failed;
+            report.error = Some("scenario run() returned false".to_string());
+        }
+        Err(ScenarioEnd::Failed(msg)) => {
+            report.outcome = TestOutcome::Failed;
+            report.error = Some(msg);
+        }
+        Err(ScenarioEnd::Error(msg)) => {
+            report.outcome = TestOutcome::Error;
+            report.error = Some(msg);
+        }
+    }
+
+    if keep {
+        report.kept = Some(rc.borrow().handle());
+    } else if let Err(d) = rc.borrow_mut().teardown() {
+        if !quiet {
+            eprintln!("⚠ scenario {} teardown: {}", report.name, d.message);
+        }
+    }
+    report.duration = t0.elapsed();
+    report
+}
+
+/// Compile and run a scenario's driver script against a live lab.
+fn drive_scenario(rc: &Rc<RefCell<LabState>>, script: &Path) -> Result<bool, ScenarioEnd> {
+    let source = std::fs::read_to_string(script)
+        .map_err(|e| ScenarioEnd::Error(format!("cannot read {}: {e}", script.display())))?;
+    let ctx = crate::hostapi::scenario_context();
+    let unit = ctx
+        .compile(&source)
+        .map_err(|e| ScenarioEnd::Error(format!("{}: {}", script.display(), wisp_err(e))))?;
+    let mut vm = Vm::new(&ctx);
+
+    // Contract is validated in stage 5; dispatch on which signature compiled.
+    if unit.fn_handle::<(Lab,), bool>("run").is_ok() {
+        return vm
+            .call_unit::<(Lab,), bool>(&unit, "run", (lab_value(rc.clone()),))
+            .map_err(|e| ScenarioEnd::Error(wisp_err(e)));
+    }
+    if unit
+        .fn_handle::<(Lab,), Result<bool, String>>("run")
+        .is_ok()
+    {
+        return match vm.call_unit::<(Lab,), Result<bool, String>>(
+            &unit,
+            "run",
+            (lab_value(rc.clone()),),
+        ) {
+            Ok(Ok(b)) => Ok(b),
+            Ok(Err(msg)) => Err(ScenarioEnd::Failed(msg)),
+            Err(e) => Err(ScenarioEnd::Error(wisp_err(e))),
+        };
+    }
+    Err(ScenarioEnd::Error(
+        "scenario must define `fn run(lab: Lab) -> bool`".to_string(),
+    ))
+}
+
+/// Render a wisp error (compile or runtime) into a one-line message.
+fn wisp_err(e: wisp::Error) -> String {
+    match e {
+        wisp::Error::Compile(ds) => ds
+            .iter()
+            .map(|d| d.message.clone())
+            .collect::<Vec<_>>()
+            .join("; "),
+        other => other.to_string(),
     }
 }
 

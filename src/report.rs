@@ -50,6 +50,15 @@ fn icon(status: StepStatus) -> (&'static str, &'static str) {
 const RESET: &str = "\x1b[0m";
 const DIM: &str = "\x1b[2m";
 
+/// A step's display path: its name, prefixed by any enclosing containers.
+fn format_step_path(name: &str, container_path: &[String]) -> String {
+    if container_path.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}/{}", container_path.join("/"), name)
+    }
+}
+
 // ------------------------------------------------------------- progress
 
 /// Live progress sink for the rich mode. Completed steps print as
@@ -162,11 +171,7 @@ pub fn plain(report: &RunReport) -> String {
     }
     out.push_str("steps:\n");
     for s in &report.steps {
-        let path = if s.container_path.is_empty() {
-            s.name.clone()
-        } else {
-            format!("{}/{}", s.container_path.join("/"), s.name)
-        };
+        let path = format_step_path(&s.name, &s.container_path);
         let mut line = format!("  [{:>19}] {} ({})", s.status.as_str(), path, s.resource);
         if s.duration.as_millis() > 0 {
             line.push_str(&format!(" {:.1}s", s.duration.as_secs_f64()));
@@ -194,11 +199,7 @@ pub fn rich(report: &RunReport) -> String {
     ));
     for s in &report.steps {
         let (ic, colour) = icon(s.status);
-        let path = if s.container_path.is_empty() {
-            s.name.clone()
-        } else {
-            format!("{}/{}", s.container_path.join("/"), s.name)
-        };
+        let path = format_step_path(&s.name, &s.container_path);
         let mut line = format!(
             "  {colour}{ic}{RESET} {:<30} {:<20}",
             path,

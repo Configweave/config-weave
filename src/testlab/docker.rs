@@ -6,7 +6,8 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use super::backend::{ExecOutput, GuestOs, TestBackend, TestInstance};
+use super::backend::{ExecOutput, GuestOs, TestBackend, TestInstance, TestLab};
+use super::output::stderr_tail;
 use crate::diag::Diag;
 
 #[derive(Debug)]
@@ -21,38 +22,23 @@ impl DockerBackend {
     /// `docker`, then `podman` — probed with `<cmd> version` so a CLI
     /// without a running daemon also fails here, with one clear message.
     pub fn discover(quiet: bool) -> Result<DockerBackend, Diag> {
-        let candidates: Vec<String> = match std::env::var("CONFIG_WEAVE_CONTAINER_CMD") {
-            Ok(c) if !c.is_empty() => vec![c],
-            _ => vec!["docker".into(), "podman".into()],
-        };
-        for cmd in &candidates {
-            let works = Command::new(cmd)
-                .arg("version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            if works {
-                return Ok(DockerBackend {
-                    cmd: cmd.clone(),
-                    quiet,
-                });
-            }
-        }
-        Err(Diag::bare(format!(
-            "config-weave test needs a working container CLI (tried: {}); install \
-             docker or podman, or point CONFIG_WEAVE_CONTAINER_CMD at one",
-            candidates.join(", ")
-        )))
+        let cmd = super::backend::discover_cli(
+            "CONFIG_WEAVE_CONTAINER_CMD",
+            &["docker", "podman"],
+            "version",
+            |tried| {
+                format!(
+                    "config-weave test needs a working container CLI (tried: {}); install \
+                     docker or podman, or point CONFIG_WEAVE_CONTAINER_CMD at one",
+                    tried.join(", ")
+                )
+            },
+        )?;
+        Ok(DockerBackend { cmd, quiet })
     }
 
     fn run(&self, args: &[&str]) -> Result<Output, Diag> {
-        Command::new(&self.cmd).args(args).output().map_err(|e| {
-            Diag::bare(format!(
-                "failed to run `{} {}`: {e}",
-                self.cmd,
-                args.join(" ")
-            ))
-        })
+        super::backend::run_cmd(&self.cmd, args, None)
     }
 
     /// Make the image available locally, pulling when missing.
@@ -112,16 +98,14 @@ impl TestBackend for DockerBackend {
             keep,
             gone: false,
         };
-        // The exec working directory must exist before the first exec.
-        let mkdir = instance.run(&["exec", &instance.id, "mkdir", "-p", "/weave"])?;
-        if !mkdir.status.success() {
-            return Err(Diag::bare(format!(
-                "cannot create /weave inside the container (does '{image}' have a \
-                 shell userland?): {}",
-                stderr_tail(&mkdir)
-            )));
-        }
+        instance.ensure_weave()?;
         Ok(Box::new(instance))
+    }
+
+    fn open_lab(&self, _lab_dir: &std::path::Path, _keep: bool) -> Result<Box<dyn TestLab>, Diag> {
+        Err(Diag::bare(
+            "scenarios require the vmlab backend (docker has no lab file)",
+        ))
     }
 }
 
@@ -135,13 +119,21 @@ pub struct DockerInstance {
 
 impl DockerInstance {
     fn run(&self, args: &[&str]) -> Result<Output, Diag> {
-        Command::new(&self.cmd).args(args).output().map_err(|e| {
-            Diag::bare(format!(
-                "failed to run `{} {}`: {e}",
-                self.cmd,
-                args.join(" ")
-            ))
-        })
+        super::backend::run_cmd(&self.cmd, args, None)
+    }
+
+    /// The exec working directory must exist before the first exec.
+    fn ensure_weave(&self) -> Result<(), Diag> {
+        let mkdir = self.run(&["exec", &self.id, "mkdir", "-p", "/weave"])?;
+        if !mkdir.status.success() {
+            return Err(Diag::bare(format!(
+                "cannot create /weave inside {} (does the image have a shell \
+                 userland?): {}",
+                self.handle(),
+                stderr_tail(&mkdir)
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -187,6 +179,17 @@ impl TestInstance for DockerInstance {
         })
     }
 
+    fn reboot(&self) -> Result<(), Diag> {
+        Err(Diag::bare(
+            "rebooting a machine is only supported on the vmlab backend",
+        ))
+    }
+
+    fn wait_ready(&self, _secs: u64) -> Result<(), Diag> {
+        // A running container is always ready for `exec`.
+        Ok(())
+    }
+
     fn handle(&self) -> String {
         let short = &self.id[..self.id.len().min(12)];
         format!("container {short} (image {})", self.image)
@@ -219,18 +222,6 @@ impl Drop for DockerInstance {
                 .args(["rm", "-f", &self.id])
                 .output();
         }
-    }
-}
-
-/// The interesting last lines of a CLI's stderr, for diagnostics.
-fn stderr_tail(out: &Output) -> String {
-    let s = String::from_utf8_lossy(&out.stderr);
-    let lines: Vec<&str> = s.trim().lines().rev().take(3).collect();
-    let tail: Vec<&str> = lines.into_iter().rev().collect();
-    if tail.is_empty() {
-        format!("(no stderr, exit {})", out.status.code().unwrap_or(-1))
-    } else {
-        tail.join(" / ")
     }
 }
 
