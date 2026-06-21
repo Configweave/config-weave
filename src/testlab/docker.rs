@@ -72,7 +72,11 @@ impl TestBackend for DockerBackend {
         // a literal second count instead of `infinity` keeps busybox
         // images working. `--rm` only when the container will be torn
         // down, so `--keep` leaves something inspectable behind.
-        let mut args = vec!["run", "-d"];
+        // `--user 0:0` forces root: the testlab provisions /weave at the
+        // container root and converges system state, so it always needs
+        // root — a no-op for the usual root images, but it lets images
+        // that default to a non-root user (e.g. mcr.../mssql/server) work.
+        let mut args = vec!["run", "-d", "--user", "0:0"];
         if !keep {
             args.push("--rm");
         }
