@@ -47,7 +47,7 @@ fn write_lifecycle_playbook(root: &Path, plays: &str) {
 
   resource "marker" {
     description = "Behaves as instructed by its parameters"
-    script = "resources/marker.wisp"
+    script = "resources/marker.wscript"
 
     param "path" {
       description = "Marker file path"
@@ -70,7 +70,7 @@ fn write_lifecycle_playbook(root: &Path, plays: &str) {
     )
     .unwrap();
     std::fs::write(
-        pkg.join("resources/marker.wisp"),
+        pkg.join("resources/marker.wscript"),
         r#"use value
 use fs
 

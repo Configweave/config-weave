@@ -1,5 +1,5 @@
-//! M7 gate: init → validate → docs produces a browsable site; wispi emits
-//! the full host API for the LSP/wisp-check authoring loop.
+//! M7 gate: init → validate → docs produces a browsable site; wscripti emits
+//! the full host API for the LSP/wscript-check authoring loop.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -20,15 +20,15 @@ fn wcl_bin() -> Option<String> {
 }
 
 #[test]
-fn wispi_emits_full_host_api() {
+fn wscripti_emits_full_host_api() {
     let dir = tempfile::tempdir().unwrap();
     let out = Command::new(bin())
-        .args(["wispi", dir.path().to_str().unwrap()])
+        .args(["wscripti", dir.path().to_str().unwrap()])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0));
 
-    let wispi = std::fs::read_to_string(dir.path().join("weave.wispi")).unwrap();
+    let wscripti = std::fs::read_to_string(dir.path().join("weave.wscripti")).unwrap();
     // Every module is present on every platform (PRD §7), including the
     // Windows-only ones, plus the contract types.
     for module in [
@@ -48,7 +48,7 @@ fn wispi_emits_full_host_api() {
         "mod service",
         "mod com",
     ] {
-        assert!(wispi.contains(module), "missing `{module}` in weave.wispi");
+        assert!(wscripti.contains(module), "missing `{module}` in weave.wscripti");
     }
     for ty in [
         "enum CheckResult",
@@ -56,11 +56,11 @@ fn wispi_emits_full_host_api() {
         "struct CmdOutput",
         "ComObject",
     ] {
-        assert!(wispi.contains(ty), "missing `{ty}` in weave.wispi");
+        assert!(wscripti.contains(ty), "missing `{ty}` in weave.wscripti");
     }
 
-    let manifest = std::fs::read_to_string(dir.path().join("wisp.toml")).unwrap();
-    assert!(manifest.contains("weave.wispi"));
+    let manifest = std::fs::read_to_string(dir.path().join("wscript.toml")).unwrap();
+    assert!(manifest.contains("weave.wscripti"));
 }
 
 #[test]
@@ -80,8 +80,8 @@ fn init_validate_apply_docs() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(root.join("playbook.wcl").exists());
-    assert!(root.join("weave.wispi").exists());
-    assert!(root.join("wisp.toml").exists());
+    assert!(root.join("weave.wscripti").exists());
+    assert!(root.join("wscript.toml").exists());
     assert!(root.join("pkgs/example/package.wcl").exists());
     assert!(root.join("lib").is_dir());
 

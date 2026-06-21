@@ -58,7 +58,7 @@ pub fn execute(
 
 /// The full validation pipeline (PRD §8) beyond what `model::load`
 /// already performed: DAG construction per play and compilation of every
-/// wisp script against the host context.
+/// wscript script against the host context.
 pub fn validate(pb: &Playbook) -> Vec<Diag> {
     let mut diags = Vec::new();
     for play in &pb.plays {

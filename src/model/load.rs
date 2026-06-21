@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use wcl_lang::{Block, Document, Environment, EvalError, Field, Value};
-use wisp_std::DynValue;
+use wscript_std::DynValue;
 
 use crate::convert::wcl_to_dyn;
 use crate::diag::{Diag, wcl_span};

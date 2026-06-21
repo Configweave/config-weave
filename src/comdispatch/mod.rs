@@ -28,7 +28,7 @@ use windows::Win32::System::Variant::{
 };
 use windows::core::{BSTR, GUID, HSTRING, IUnknown, Interface, PCWSTR};
 
-use wisp_std::DynValue;
+use wscript_std::DynValue;
 
 /// A marshalled COM result: plain data or a nested object.
 pub enum ComValue {

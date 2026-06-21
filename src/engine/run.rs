@@ -3,7 +3,7 @@
 //! Conditions and properties are evaluated **once, on the scheduler
 //! thread, in declaration order** (the WCL document is thread-bound);
 //! workers receive pure data. The scheduler owns the DAG and dispatches
-//! ready steps to a pool of worker threads — one wisp VM world per
+//! ready steps to a pool of worker threads — one wscript VM world per
 //! worker — honouring concurrency classes:
 //!
 //! - `parallel`: no restriction
@@ -19,8 +19,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use wcl_lang::{Block, Value};
-use wisp::{Context, Vm};
-use wisp_std::DynValue;
+use wscript::{Context, Vm};
+use wscript_std::DynValue;
 
 use crate::convert::wcl_to_dyn;
 use crate::diag::Diag;

@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use wisp::Vm;
-use wisp_std::DynValue;
+use wscript::Vm;
+use wscript_std::DynValue;
 
 use crate::convert::{canonicalise, dyn_to_wcl, wcl_to_dyn};
 use crate::diag::{Diag, wcl_span};
@@ -22,7 +22,7 @@ use super::vars::{Origin, VarStore};
 pub fn run(
     pb: &Playbook,
     scripts: &ScriptSet,
-    ctx: &wisp::Context,
+    ctx: &wscript::Context,
     store: &mut VarStore,
     events: &EventSink,
 ) -> Result<(), Vec<Diag>> {
@@ -156,7 +156,7 @@ pub fn run(
 /// subcommand.
 pub fn run_single(
     scripts: &ScriptSet,
-    ctx: &wisp::Context,
+    ctx: &wscript::Context,
     key: &str,
     params: DynValue,
 ) -> Result<DynValue, String> {

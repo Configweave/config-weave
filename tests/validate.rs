@@ -57,7 +57,7 @@ fn list_shows_plays() {
 fn script_typo_fails_validation() {
     let dir = tempfile::tempdir().unwrap();
     copy_sample(dir.path());
-    let script = dir.path().join("pkgs/core/resources/file_present.wisp");
+    let script = dir.path().join("pkgs/core/resources/file_present.wscript");
     let src = std::fs::read_to_string(&script).unwrap();
     std::fs::write(&script, src.replace("log::info", "log::inof")).unwrap();
 
@@ -70,7 +70,7 @@ fn script_typo_fails_validation() {
 fn bad_entrypoint_signature_fails_validation() {
     let dir = tempfile::tempdir().unwrap();
     copy_sample(dir.path());
-    let script = dir.path().join("pkgs/core/resources/file_present.wisp");
+    let script = dir.path().join("pkgs/core/resources/file_present.wscript");
     let src = std::fs::read_to_string(&script).unwrap();
     // Rename check so the contract is unsatisfied.
     std::fs::write(&script, src.replace("fn check(", "fn checkk(")).unwrap();

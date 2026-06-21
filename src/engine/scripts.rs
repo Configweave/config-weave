@@ -1,4 +1,4 @@
-//! Stage 5 of the validation pipeline (PRD §8): compile **every** wisp
+//! Stage 5 of the validation pipeline (PRD §8): compile **every** wscript
 //! script in the playbook against the full host context before anything
 //! runs, and enforce the entry-point contracts:
 //!
@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use wisp::{CompiledUnit, Context, UnitExt};
-use wisp_std::DynValue;
+use wscript::{CompiledUnit, Context, UnitExt};
+use wscript_std::DynValue;
 
 use crate::diag::Diag;
 use crate::hostapi::{ApplyResult, CheckResult};
@@ -127,8 +127,8 @@ fn compile_one(
     };
     match ctx.compile(&source) {
         Ok(unit) => Some((unit, source)),
-        Err(wisp::Error::Compile(ds)) => {
-            diags.extend(Diag::from_wisp(&ds, path, &source));
+        Err(wscript::Error::Compile(ds)) => {
+            diags.extend(Diag::from_wscript(&ds, path, &source));
             None
         }
         Err(e) => {
@@ -138,9 +138,9 @@ fn compile_one(
     }
 }
 
-/// Shared wisp code under `lib/` must compile too. wisp v1 has no
+/// Shared wscript code under `lib/` must compile too. wscript v1 has no
 /// script-to-script imports, so lib files are compiled standalone; once
-/// wisp ships imports, these folders become resolution roots.
+/// wscript ships imports, these folders become resolution roots.
 fn compile_lib(ctx: &Context, dir: &Path, diags: &mut Vec<Diag>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -148,7 +148,7 @@ fn compile_lib(ctx: &Context, dir: &Path, diags: &mut Vec<Diag>) {
     let mut paths: Vec<PathBuf> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "wisp"))
+        .filter(|p| p.extension().is_some_and(|x| x == "wscript"))
         .collect();
     paths.sort();
     for path in paths {
@@ -183,7 +183,7 @@ fn entry_kind<R>(
     diags: &mut Vec<Diag>,
 ) -> Option<EntryKind>
 where
-    R: wisp::FromValue + wisp::ScriptType + 'static,
+    R: wscript::FromValue + wscript::ScriptType + 'static,
 {
     if unit.fn_handle::<(DynValue,), R>(name).is_ok() {
         return Some(EntryKind::Plain);

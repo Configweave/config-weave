@@ -266,7 +266,7 @@ pub fn synthesize(pb: &Playbook, pkg: &Package, test: &TestDecl) -> Result<Synth
 pub fn synthesize_resource(
     pb: &Playbook,
     key: &str,
-    props: &wisp_std::DynValue,
+    props: &wscript_std::DynValue,
 ) -> Result<(SynthesizedTest, String), Diag> {
     let (package, _resource) = key
         .split_once('.')
@@ -300,11 +300,11 @@ pub fn synthesize_resource(
     Ok((SynthesizedTest { dir }, step.to_string()))
 }
 
-/// Render a wisp map value as a WCL `properties { … }` block. Resource
+/// Render a wscript map value as a WCL `properties { … }` block. Resource
 /// params are scalars (string/int/float/bool); anything else is rendered
 /// as a string for a best-effort pass.
-fn render_props(props: &wisp_std::DynValue) -> Result<String, Diag> {
-    use wisp_std::DynValue;
+fn render_props(props: &wscript_std::DynValue) -> Result<String, Diag> {
+    use wscript_std::DynValue;
     let map = match props {
         DynValue::Map(m) => m,
         DynValue::Null => {
@@ -324,8 +324,8 @@ fn render_props(props: &wisp_std::DynValue) -> Result<String, Diag> {
     Ok(out)
 }
 
-fn render_value(v: &wisp_std::DynValue) -> String {
-    use wisp_std::DynValue;
+fn render_value(v: &wscript_std::DynValue) -> String {
+    use wscript_std::DynValue;
     match v {
         DynValue::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
         DynValue::Int(i) => i.to_string(),
@@ -391,7 +391,7 @@ mod tests {
 
   resource "touch" {
     description = "Create a file"
-    script = "resources/touch.wisp"
+    script = "resources/touch.wscript"
     param "path" {
       description = "Where"
       type = "string"
@@ -426,7 +426,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
-            pkg_dir.join("resources/touch.wisp"),
+            pkg_dir.join("resources/touch.wscript"),
             r#"use value
 use fs
 
@@ -485,7 +485,7 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
     #[test]
     fn renders_scenario_props_and_values() {
         use std::collections::HashMap;
-        use wisp_std::DynValue;
+        use wscript_std::DynValue;
 
         // Scalars render to WCL literals; strings are quote-escaped.
         assert_eq!(render_value(&DynValue::Int(42)), "42");

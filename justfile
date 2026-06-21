@@ -30,7 +30,7 @@ sample: build
 # copy into containers, then runs the #[ignore]-gated tests. Needs
 # docker (or podman) and `cross`.
 test-lab:
-    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+    CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
         cross build --release --target x86_64-unknown-linux-musl
     CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
         cargo test --test testlab -- --ignored
@@ -39,7 +39,7 @@ test-lab:
 # every package test in disposable VMs cloned from the given template.
 # Needs vmlab, KVM, and a built template (see ../vmlab).
 test-lab-vm dir='../config-weave-pkgs' template='x86_64/ubuntu-24.04': build
-    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+    CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
         cross build --release --target x86_64-unknown-linux-musl
     CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
         target/debug/config-weave test {{dir}} --backend vmlab --image {{template}}
@@ -49,9 +49,9 @@ test-lab-vm dir='../config-weave-pkgs' template='x86_64/ubuntu-24.04': build
 # and the x86_64/windows-server-2025 template in the store.
 test-ad: build
     test -d ../config-weave-pkgs
-    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+    CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
         cross build --release --target x86_64-unknown-linux-musl
-    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+    CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
         cross build --release --target x86_64-pc-windows-gnu
     target/debug/config-weave test ../config-weave-pkgs windows_domain:ad_matrix \
         --binary target-cross/x86_64-unknown-linux-musl/release/config-weave \
@@ -64,11 +64,11 @@ test-ad: build
 # built windows template for the vmlab/windows tests.
 test-pkgs: build
     test -d ../config-weave-pkgs
-    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+    CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
         cross build --release --target x86_64-unknown-linux-musl
-    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+    CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
         cross build --release --target x86_64-pc-windows-gnu
-    target/debug/config-weave wispi ../config-weave-pkgs
+    target/debug/config-weave wscripti ../config-weave-pkgs
     target/debug/config-weave validate ../config-weave-pkgs
     target/debug/config-weave test ../config-weave-pkgs \
         --binary target-cross/x86_64-unknown-linux-musl/release/config-weave \
@@ -87,9 +87,9 @@ serve-pkgs-docs: build
 # Requires `cross` and a container runtime; path deps are mounted into
 # the build container (see Cross.toml).
 release:
-    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+    CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
         cross build --release --target x86_64-unknown-linux-musl
-    CW_WCL=$(realpath ../WCL) CW_WISP=$(realpath ../wisp) CARGO_TARGET_DIR=target-cross \
+    CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
         cross build --release --target x86_64-pc-windows-gnu
     mkdir -p dist
     cp target-cross/x86_64-unknown-linux-musl/release/config-weave dist/config-weave-linux-x86_64

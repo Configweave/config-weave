@@ -1,14 +1,14 @@
 //! The `com` module (PRD §7): late-bound COM via IDispatch. Registered on
 //! every platform; calls fail at runtime off Windows.
 //!
-//! Binding note: the PRD sketches `obj.call("Method", args...)` — wisp
+//! Binding note: the PRD sketches `obj.call("Method", args...)` — wscript
 //! has fixed arity, so `call` takes a `List[Value]`. VT_DISPATCH results
 //! (nested objects) surface through the `*_object` variants; `wmi_query`
 //! flattens each result row into a property map host-side, covering the
 //! mandatory WMI collection case without scripts touching enumerators.
 
-use wisp::{Module, Script};
-use wisp_std::DynValue;
+use wscript::{Module, Script};
+use wscript_std::DynValue;
 
 #[cfg(windows)]
 use crate::comdispatch::{self, ComValue};
@@ -81,7 +81,7 @@ pub fn module() -> Module {
 }
 
 #[cfg(windows)]
-fn build_methods(mut ty: wisp::core::module::TypeBuilder<'_, ComObject>) {
+fn build_methods(mut ty: wscript::core::module::TypeBuilder<'_, ComObject>) {
     ty.method(
         "get",
         |o: &ComObject, name: &str| -> Result<DynValue, String> {
@@ -122,7 +122,7 @@ fn build_methods(mut ty: wisp::core::module::TypeBuilder<'_, ComObject>) {
 }
 
 #[cfg(not(windows))]
-fn build_methods(mut ty: wisp::core::module::TypeBuilder<'_, ComObject>) {
+fn build_methods(mut ty: wscript::core::module::TypeBuilder<'_, ComObject>) {
     ty.method(
         "get",
         |_o: &ComObject, _name: &str| -> Result<DynValue, String> { Err(NOT_WINDOWS.to_string()) },

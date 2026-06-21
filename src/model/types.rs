@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use wisp_std::DynValue;
+use wscript_std::DynValue;
 
 #[derive(Debug)]
 pub struct Playbook {
@@ -145,7 +145,7 @@ pub struct Package {
     pub resources: BTreeMap<String, ResourceDecl>,
     /// Convergence tests, in declaration order.
     pub tests: Vec<TestDecl>,
-    /// Wisp-scripted scenarios, in declaration order.
+    /// Wscript-scripted scenarios, in declaration order.
     pub scenarios: Vec<ScenarioDecl>,
 }
 
@@ -191,14 +191,14 @@ pub struct TestDecl {
     pub group: Option<String>,
     /// Optional shell provisioning, run via `sh -c` before anything else.
     pub setup: Option<String>,
-    /// Absolute path to the optional wisp verify script.
+    /// Absolute path to the optional wscript verify script.
     pub verify: Option<PathBuf>,
     pub steps: Vec<TestStep>,
     pub gathers: Vec<TestGather>,
     pub span: (usize, usize),
 }
 
-/// A wisp-scripted, multi-stage test declared in `package.wcl`, executed
+/// A wscript-scripted, multi-stage test declared in `package.wcl`, executed
 /// by `config-weave test` over a declared vmlab lab. The driver script
 /// brings VMs up by name, applies config-weave, reboots, and asserts —
 /// see `hostapi::testlab`.
@@ -208,7 +208,7 @@ pub struct ScenarioDecl {
     pub description: String,
     /// Absolute path to the lab directory holding a `vmlab.wcl`.
     pub lab: PathBuf,
-    /// Absolute path to the driver wisp script (`fn run(lab) -> bool`).
+    /// Absolute path to the driver wscript script (`fn run(lab) -> bool`).
     pub script: PathBuf,
 }
 

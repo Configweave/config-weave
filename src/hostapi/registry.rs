@@ -3,8 +3,8 @@
 //! written as a hive-prefixed path: `HKLM\Software\Vendor\App`.
 //! Registered on every platform; calls fail at runtime off Windows.
 
-use wisp::Module;
-use wisp_std::DynValue;
+use wscript::Module;
+use wscript_std::DynValue;
 
 #[cfg(not(windows))]
 const NOT_WINDOWS: &str = "the 'registry' module is only available on Windows";
@@ -100,7 +100,7 @@ mod win {
         RegQueryValueExW, RegSetValueExW,
     };
     use windows::core::{HSTRING, PCWSTR};
-    use wisp_std::DynValue;
+    use wscript_std::DynValue;
 
     fn split_hive(key: &str) -> Result<(HKEY, String), String> {
         let (hive, rest) = key.split_once('\\').unwrap_or((key, ""));

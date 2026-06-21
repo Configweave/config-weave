@@ -1,15 +1,15 @@
-//! The `data` module (PRD §7). JSON and TOML are wisp-std modules
+//! The `data` module (PRD §7). JSON and TOML are wscript-std modules
 //! (`use json`, `use toml`) registered as-is — re-exported, not
 //! duplicated, per the PRD's overlap note. This module adds INI, which
-//! wisp-std does not cover.
+//! wscript-std does not cover.
 //!
 //! INI maps to a `Value` map of sections: keys before any `[section]`
 //! header land under `""`. All INI values are strings.
 
 use std::collections::HashMap;
 
-use wisp::Module;
-use wisp_std::DynValue;
+use wscript::Module;
+use wscript_std::DynValue;
 
 fn ini_parse(text: &str) -> Result<DynValue, String> {
     let mut sections: HashMap<String, DynValue> = HashMap::new();

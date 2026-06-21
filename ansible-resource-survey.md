@@ -136,7 +136,7 @@ linux_* packages) — verify before relying on it.
 
 Highest-value 🟢 resource candidates config-weave doesn't appear to cover yet:
 
-1. **`template`** — rendered config files (big one; pairs with the existing wisp/vars).
+1. **`template`** — rendered config files (big one; pairs with the existing wscript/vars).
 2. **`blockinfile`** / **`replace`** — text-block + regex file editing (complements `line_in_file`).
 3. **`get_url`** + **`unarchive`** — fetch & extract (install-from-tarball flows).
 4. **Repo/key family** — `deb822_repository`, `yum_repository`, `rpm_key`, `apt_key` (modernize repo management beyond `apt_repository`).

@@ -1,7 +1,7 @@
 //! The `env` module (PRD §7): process environment, PATH-style helpers,
 //! identity (hostname, user, home) and elevation.
 
-use wisp::Module;
+use wscript::Module;
 
 fn is_elevated_impl() -> bool {
     #[cfg(unix)]

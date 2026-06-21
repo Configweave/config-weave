@@ -1,7 +1,7 @@
 //! The `sys` module (PRD §7): OS and hardware facts. Gatherer fodder —
-//! gatherers are ordinary wisp scripts with no special powers.
+//! gatherers are ordinary wscript scripts with no special powers.
 
-use wisp::Module;
+use wscript::Module;
 
 /// `std::env::consts::FAMILY` is "unix"/"windows"; the PRD's platform
 /// conditions want linux/windows/macos.

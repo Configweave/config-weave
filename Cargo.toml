@@ -3,12 +3,12 @@ name = "config-weave"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Single-binary configuration management driven by WCL playbooks and wisp scripts"
+description = "Single-binary configuration management driven by WCL playbooks and wscript scripts"
 
 [dependencies]
 wcl_lang = { path = "../WCL/crates/wcl_lang" }
-wisp = { path = "../wisp/wisp" }
-wisp-std = { path = "../wisp/wisp-std" }
+wscript = { path = "../wscript/wscript" }
+wscript-std = { path = "../wscript/wscript-std" }
 
 clap = { version = "4", features = ["derive"] }
 petgraph = "0.8"

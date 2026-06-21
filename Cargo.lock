@@ -254,8 +254,8 @@ dependencies = [
  "ureq",
  "wcl_lang",
  "windows 0.62.2",
- "wisp",
- "wisp-std",
+ "wscript",
+ "wscript-std",
  "zip",
 ]
 
@@ -1924,55 +1924,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wisp"
-version = "0.1.0"
-dependencies = [
- "wisp-compiler",
- "wisp-core",
- "wisp-macros",
- "wisp-std",
- "wisp-vm",
-]
-
-[[package]]
-name = "wisp-compiler"
-version = "0.1.0"
-dependencies = [
- "wisp-core",
-]
-
-[[package]]
-name = "wisp-core"
-version = "0.1.0"
-
-[[package]]
-name = "wisp-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "wisp-std"
-version = "0.1.0"
-dependencies = [
- "quick-xml",
- "serde_json",
- "toml",
- "wisp-core",
- "wisp-macros",
-]
-
-[[package]]
-name = "wisp-vm"
-version = "0.1.0"
-dependencies = [
- "wisp-core",
-]
-
-[[package]]
 name = "wit-bindgen"
 version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2064,6 +2015,55 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "wscript"
+version = "0.1.0"
+dependencies = [
+ "wscript-compiler",
+ "wscript-core",
+ "wscript-macros",
+ "wscript-std",
+ "wscript-vm",
+]
+
+[[package]]
+name = "wscript-compiler"
+version = "0.1.0"
+dependencies = [
+ "wscript-core",
+]
+
+[[package]]
+name = "wscript-core"
+version = "0.1.0"
+
+[[package]]
+name = "wscript-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "wscript-std"
+version = "0.1.0"
+dependencies = [
+ "quick-xml",
+ "serde_json",
+ "toml",
+ "wscript-core",
+ "wscript-macros",
+]
+
+[[package]]
+name = "wscript-vm"
+version = "0.1.0"
+dependencies = [
+ "wscript-core",
 ]
 
 [[package]]

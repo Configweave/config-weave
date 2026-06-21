@@ -39,12 +39,12 @@ const PACKAGE: &str = r#"package "tlab" {
 
   gatherer "os_info" {
     description = "Report basic operating system facts"
-    script = "gatherers/os_info.wisp"
+    script = "gatherers/os_info.wscript"
   }
 
   resource "file_present" {
     description = "Ensure a file exists with the given content"
-    script = "resources/file_present.wisp"
+    script = "resources/file_present.wscript"
 
     param "path" {
       description = "Absolute path of the file"
@@ -61,7 +61,7 @@ const PACKAGE: &str = r#"package "tlab" {
   test "converges" {
     description = "file_present creates the file and is idempotent"
     image = "debian:12"
-    verify = "tests/verify.wisp"
+    verify = "tests/verify.wscript"
 
     step "create" {
       description = "Create a marker file"
@@ -153,9 +153,9 @@ fn write_fixture(dir: &Path) {
     std::fs::create_dir_all(pkg.join("tests")).unwrap();
     std::fs::write(dir.join("playbook.wcl"), PLAYBOOK).unwrap();
     std::fs::write(pkg.join("package.wcl"), PACKAGE).unwrap();
-    std::fs::write(pkg.join("resources/file_present.wisp"), RESOURCE).unwrap();
-    std::fs::write(pkg.join("gatherers/os_info.wisp"), GATHERER).unwrap();
-    std::fs::write(pkg.join("tests/verify.wisp"), VERIFY).unwrap();
+    std::fs::write(pkg.join("resources/file_present.wscript"), RESOURCE).unwrap();
+    std::fs::write(pkg.join("gatherers/os_info.wscript"), GATHERER).unwrap();
+    std::fs::write(pkg.join("tests/verify.wscript"), VERIFY).unwrap();
 }
 
 /// Fixture with `package.wcl` rewritten through `f`.
@@ -318,11 +318,11 @@ fn unknown_package_in_test_fails() {
 
 #[test]
 fn missing_verify_script_fails() {
-    let dir = fixture_with(|s| s.replace("tests/verify.wisp", "tests/missing.wisp"));
+    let dir = fixture_with(|s| s.replace("tests/verify.wscript", "tests/missing.wscript"));
     let (code, _, stderr) = validate(dir.path());
     assert_eq!(code, 2);
     assert!(
-        stderr.contains("verify script 'tests/missing.wisp' does not exist"),
+        stderr.contains("verify script 'tests/missing.wscript' does not exist"),
         "{stderr}"
     );
 }
@@ -403,7 +403,7 @@ fn success_step_requiring_failing_step_fails() {
 fn broken_verify_signature_fails() {
     let dir = tempfile::tempdir().unwrap();
     write_fixture(dir.path());
-    let verify = dir.path().join("pkgs/tlab/tests/verify.wisp");
+    let verify = dir.path().join("pkgs/tlab/tests/verify.wscript");
     let src = std::fs::read_to_string(&verify).unwrap();
     std::fs::write(&verify, src.replace("fn verify(", "fn verifyy(")).unwrap();
     let (code, _, stderr) = validate(dir.path());
@@ -501,7 +501,7 @@ fn gather_one_rejects_bad_params_json() {
 fn run_verify_passes_and_fails_on_state() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("checked.txt");
-    let script = dir.path().join("verify.wisp");
+    let script = dir.path().join("verify.wscript");
     std::fs::write(
         &script,
         format!(
@@ -535,7 +535,7 @@ fn verify(facts: Value) -> Result[bool, string] {{
 #[test]
 fn run_verify_reads_facts_file() {
     let dir = tempfile::tempdir().unwrap();
-    let script = dir.path().join("verify.wisp");
+    let script = dir.path().join("verify.wscript");
     std::fs::write(
         &script,
         r#"use value
@@ -575,7 +575,7 @@ fn verify(facts: Value) -> bool {
 #[test]
 fn run_verify_bad_contract_exits_2() {
     let dir = tempfile::tempdir().unwrap();
-    let script = dir.path().join("verify.wisp");
+    let script = dir.path().join("verify.wscript");
     std::fs::write(&script, "fn nothing() -> bool { true }\n").unwrap();
     let (code, _, stderr) = run(&["__verify", script.to_str().unwrap()]);
     assert_eq!(code, 2, "{stderr}");
@@ -720,11 +720,11 @@ fn lab_grouped_tests_share_one_instance() {
     std::fs::create_dir_all(pkg.join("gatherers")).unwrap();
     std::fs::create_dir_all(pkg.join("tests")).unwrap();
     std::fs::write(dir.path().join("playbook.wcl"), PLAYBOOK).unwrap();
-    std::fs::write(pkg.join("resources/file_present.wisp"), RESOURCE).unwrap();
-    std::fs::write(pkg.join("gatherers/os_info.wisp"), GATHERER).unwrap();
-    std::fs::write(pkg.join("tests/verify.wisp"), VERIFY).unwrap();
+    std::fs::write(pkg.join("resources/file_present.wscript"), RESOURCE).unwrap();
+    std::fs::write(pkg.join("gatherers/os_info.wscript"), GATHERER).unwrap();
+    std::fs::write(pkg.join("tests/verify.wscript"), VERIFY).unwrap();
     std::fs::write(
-        pkg.join("tests/shared.wisp"),
+        pkg.join("tests/shared.wscript"),
         r#"use value
 use fs
 
@@ -741,12 +741,12 @@ fn verify(facts: Value) -> Result[bool, string] {
 
   gatherer "os_info" {
     description = "Report basic operating system facts"
-    script = "gatherers/os_info.wisp"
+    script = "gatherers/os_info.wscript"
   }
 
   resource "file_present" {
     description = "Ensure a file exists with the given content"
-    script = "resources/file_present.wisp"
+    script = "resources/file_present.wscript"
 
     param "path" {
       description = "Absolute path of the file"
@@ -764,7 +764,7 @@ fn verify(facts: Value) -> Result[bool, string] {
     description = "First grouped test creates the shared file"
     image = "debian:12"
     group = "shared"
-    verify = "tests/verify.wisp"
+    verify = "tests/verify.wscript"
 
     step "create" {
       description = "Create a marker file"
@@ -780,7 +780,7 @@ fn verify(facts: Value) -> Result[bool, string] {
     description = "Second grouped test sees the first test's file"
     image = "debian:12"
     group = "shared"
-    verify = "tests/shared.wisp"
+    verify = "tests/shared.wscript"
 
     gather "os" {
       description = "OS facts inside the container"
@@ -860,7 +860,7 @@ fn lab_non_idempotent_resource_fails_second_apply() {
     write_fixture(dir.path());
     let pkg = dir.path().join("pkgs/tlab");
     std::fs::write(
-        pkg.join("resources/amnesiac.wisp"),
+        pkg.join("resources/amnesiac.wscript"),
         r#"use value
 use fs
 
@@ -883,7 +883,7 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
             "  test \"converges\" {",
             r#"  resource "amnesiac" {
     description = "Applies but never remembers"
-    script = "resources/amnesiac.wisp"
+    script = "resources/amnesiac.wscript"
   }
 
   test "amnesiac_is_caught" {

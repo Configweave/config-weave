@@ -3,7 +3,7 @@
 //! enum variants — scripts use `Result`/`?` and an `Err` maps to the step's
 //! Error status (PRD §6).
 
-use wisp::Script;
+use wscript::Script;
 
 #[derive(Script, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckResult {

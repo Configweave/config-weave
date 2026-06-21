@@ -1,6 +1,6 @@
 //! Diagnostics: everything `validate` (and the implicit validation phase of
 //! every run) can report. Diagnostics render through miette so WCL parse
-//! errors, schema violations, engine-side structural errors and wisp
+//! errors, schema violations, engine-side structural errors and wscript
 //! compile errors all look the same on the terminal.
 
 use std::path::Path;
@@ -63,11 +63,11 @@ impl Diag {
         Diag { message, rendered }
     }
 
-    /// Wrap wisp compile diagnostics for one script file.
-    pub fn from_wisp(diags: &[wisp::Diagnostic], file: &Path, source: &str) -> Vec<Diag> {
+    /// Wrap wscript compile diagnostics for one script file.
+    pub fn from_wscript(diags: &[wscript::Diagnostic], file: &Path, source: &str) -> Vec<Diag> {
         diags
             .iter()
-            .filter(|d| d.severity == wisp::Severity::Error)
+            .filter(|d| d.severity == wscript::Severity::Error)
             .map(|d| {
                 let mut labels = vec![LabeledSpan::at(
                     (d.span.lo as usize)..(d.span.hi as usize),

@@ -119,8 +119,8 @@ enum Command {
         playbook_dir: PathBuf,
         outdir: Option<PathBuf>,
     },
-    /// Emit .wispi interface files for the host API plus a starter wisp.toml.
-    Wispi { outdir: Option<PathBuf> },
+    /// Emit .wscripti interface files for the host API plus a starter wscript.toml.
+    Wscripti { outdir: Option<PathBuf> },
     /// Scaffold a skeleton playbook.
     Init { dir: PathBuf },
     /// Print version information.
@@ -193,11 +193,11 @@ fn main() -> ExitCode {
             playbook_dir,
             outdir,
         } => cmd_docs(playbook_dir, outdir.as_deref()),
-        Command::Wispi { outdir } => {
+        Command::Wscripti { outdir } => {
             let dir = outdir.clone().unwrap_or_else(|| PathBuf::from("."));
-            match scaffold::wispi(&dir) {
+            match scaffold::wscripti(&dir) {
                 Ok(()) => {
-                    println!("wrote {} and wisp.toml", dir.join("weave.wispi").display());
+                    println!("wrote {} and wscript.toml", dir.join("weave.wscripti").display());
                     EXIT_OK
                 }
                 Err(d) => {
@@ -626,7 +626,7 @@ fn cmd_gather_one(dir: &std::path::Path, gatherer: &str, params_json: Option<&st
             Err(e) => return fail(format!("invalid --params-json: {e}")),
         };
         match convert::json_to_dyn(&parsed) {
-            Ok(wisp_std::DynValue::Map(m)) => params.extend(m),
+            Ok(wscript_std::DynValue::Map(m)) => params.extend(m),
             Ok(_) => return fail("--params-json must be a JSON object".into()),
             Err(e) => return fail(format!("invalid --params-json: {e}")),
         }
@@ -643,7 +643,7 @@ fn cmd_gather_one(dir: &std::path::Path, gatherer: &str, params_json: Option<&st
             return EXIT_VALIDATION;
         }
     };
-    match engine::gather::run_single(&scripts, &ctx, gatherer, wisp_std::DynValue::Map(params)) {
+    match engine::gather::run_single(&scripts, &ctx, gatherer, wscript_std::DynValue::Map(params)) {
         Ok(value) => {
             println!(
                 "{}",
@@ -655,13 +655,13 @@ fn cmd_gather_one(dir: &std::path::Path, gatherer: &str, params_json: Option<&st
     }
 }
 
-/// `__verify`: compile a wisp verify script against the host API and run
+/// `__verify`: compile a wscript verify script against the host API and run
 /// `verify(facts)`. Exit 0 = passed, 1 = failed (message on stdout),
 /// 2 = the script is broken. The testlab runner execs this inside the
 /// container; host-runnable too.
 fn cmd_run_verify(script: &std::path::Path, facts: Option<&std::path::Path>) -> u8 {
-    use wisp::UnitExt;
-    use wisp_std::DynValue;
+    use wscript::UnitExt;
+    use wscript_std::DynValue;
 
     let source = match std::fs::read_to_string(script) {
         Ok(s) => s,
@@ -673,8 +673,8 @@ fn cmd_run_verify(script: &std::path::Path, facts: Option<&std::path::Path>) -> 
     let ctx = hostapi::context();
     let unit = match ctx.compile(&source) {
         Ok(u) => u,
-        Err(wisp::Error::Compile(ds)) => {
-            print_diags(&Diag::from_wisp(&ds, script, &source));
+        Err(wscript::Error::Compile(ds)) => {
+            print_diags(&Diag::from_wscript(&ds, script, &source));
             return EXIT_VALIDATION;
         }
         Err(e) => {
@@ -711,7 +711,7 @@ fn cmd_run_verify(script: &std::path::Path, facts: Option<&std::path::Path>) -> 
     };
 
     let _worker = hostapi::worker_init();
-    let mut vm = wisp::Vm::new(&ctx);
+    let mut vm = wscript::Vm::new(&ctx);
     let outcome: Result<bool, String> = if unit.fn_handle::<(DynValue,), bool>("verify").is_ok() {
         vm.call_unit(&unit, "verify", (facts_value,))
             .map_err(|e| e.to_string())

@@ -1,6 +1,6 @@
 # Playbooks (`playbook.wcl`)
 
-A playbook is a directory containing `playbook.wcl`, optional `lib/` (shared wisp code),
+A playbook is a directory containing `playbook.wcl`, optional `lib/` (shared wscript code),
 and `pkgs/<name>/` packages (see `packages.md`). The engine appends the system import
 `<weave/playbook.wcl>` automatically — never write import lines.
 

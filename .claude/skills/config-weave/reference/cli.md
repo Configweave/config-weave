@@ -9,10 +9,10 @@
 | `check` | `<playbook-dir> <play>` | Report configuration status of all steps (never mutates) |
 | `apply` | `<playbook-dir> <play>` | Apply all unconfigured steps in a play |
 | `list` | `<playbook-dir>` | List all plays defined in the playbook |
-| `validate` | `<playbook-dir>` | Full validation pipeline (WCL syntax, schema, refs, DAG, wisp compilation of every script), no execution |
+| `validate` | `<playbook-dir>` | Full validation pipeline (WCL syntax, schema, refs, DAG, wscript compilation of every script), no execution |
 | `test` | `<playbook-dir> [filter]` | Run package convergence tests in disposable instances (docker containers or vmlab VMs); filter is `pkg` or `pkg:test` (see `testing.md`) |
 | `docs` | `<playbook-dir> [outdir]` | Generate wdoc documentation (default outdir `<dir>/docs/`); shares the validation pipeline |
-| `wispi` | `[outdir]` | Emit `weave.wispi` (host API interface) plus a starter `wisp.toml` (default: cwd) |
+| `wscripti` | `[outdir]` | Emit `weave.wscripti` (host API interface) plus a starter `wscript.toml` (default: cwd) |
 | `init` | `<dir>` | Scaffold a skeleton playbook with example package, resource and gatherer |
 | `version` | | Print version information |
 

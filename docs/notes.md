@@ -1,6 +1,6 @@
 # Implementation notes
 
-Decisions made while binding the PRD to the real WCL and wisp APIs. The
+Decisions made while binding the PRD to the real WCL and wscript APIs. The
 PRD (docs/PRD.md) marks several syntax sketches as illustrative; this file
 records the actual bindings.
 
@@ -70,7 +70,7 @@ windows 0.6x.
   the escape hatches when shell features are wanted. `powershell` tries
   `powershell` then `pwsh`, so it also works on Linux boxes with
   PowerShell Core.
-- The `data` module covers INI only; JSON and TOML are wisp-std's `json`
+- The `data` module covers INI only; JSON and TOML are wscript-std's `json`
   and `toml` modules registered as-is (the PRD's "re-export, don't
   duplicate" note).
 - The `template` module renders a Tera template string against a `vars`
@@ -83,14 +83,14 @@ windows 0.6x.
   heredocs (`<<'TMPL'`) so WCL's own `$"…${}"` interpolation leaves Tera's
   `{{ }}`/`{% %}` untouched, and feed dynamic data through `vars`.
 - `print`/`println` route into `log::info` via a per-thread print hook
-  added upstream in wisp-vm (`set_print_hook`).
+  added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:
   `url = url` is a self-reference (cycle error). Use distinct variable
   names (`tool_url`) for values fed to same-named parameters.
 
 ## Authoring & docs (PRD §12/§13)
 
-- `com` binding details: wisp has fixed arity, so `obj.call(name, args)`
+- `com` binding details: wscript has fixed arity, so `obj.call(name, args)`
   takes a `List[Value]`; VT_DISPATCH results surface through
   `get_object`/`call_object`/`items()` because the dynamic `Value` cannot
   hold an object handle. `wmi_query` flattens each SWbemObject row into a
@@ -103,8 +103,8 @@ windows 0.6x.
   installed `wcl` rather than linking `wcl_wdoc`. `wcl` must be on PATH at
   runtime (override the binary with `CONFIG_WEAVE_WCL`). The
   `serve-pkgs-docs` recipe likewise serves via `wcl wdoc serve`.
-- `wisp check`/LSP against the emitted `weave.wispi` required a wisp-cli
-  fix (committed upstream): when a `wisp.toml` manifest exists, the CLI
+- `wscript check`/LSP against the emitted `weave.wscripti` required a wscript-cli
+  fix (committed upstream): when a `wscript.toml` manifest exists, the CLI
   now type-checks against exactly the declared interfaces instead of
   overlaying them on its own stdlib, whose same-named `fs` shadowed the
   config-weave surface.
@@ -236,10 +236,10 @@ runs each in a disposable backend instance. Bindings fixed here:
   holding a `vmlab.wcl` (the full vmlab feature set — segments, static
   IPs, DC-as-DNS, depends_on), and `script` is a driver
   (`fn run(lab: Lab) -> bool`/`Result[bool,string]`) that runs
-  **host-side** against the live lab via the `testlab` wisp host module
+  **host-side** against the live lab via the `testlab` wscript host module
   (`src/hostapi/testlab.rs`): `Lab`/`Machine` opaque handles over the
   `TestLab`/`TestInstance` traits. The handles hold `Rc<RefCell<LabState>>`
-  — wisp opaque values are `Rc`-backed and single-threaded, so scenarios
+  — wscript opaque values are `Rc`-backed and single-threaded, so scenarios
   run on one thread (no `Arc` needed, unlike vmlab's own scripting which
   bridges to tokio). **Why a declared lab, not script-provisioned:** the
   vmlab lab daemon loads its config once at first `up` and never reloads
@@ -264,16 +264,16 @@ runs each in a disposable backend instance. Bindings fixed here:
   → additional DC → second forest (own segment), all over real reboots.
   The two-VM + reboot integration is smoke-verified on vmlab with Alpine.
 
-## wisp binding (PRD §6/§7)
+## wscript binding (PRD §6/§7)
 
 - Script entry points accept two signatures each: plain
   (`fn check(params: Value) -> CheckResult`) or fallible
   (`-> Result[CheckResult, string]`), because `?` requires a `Result`
   return. An `Err` maps to the step's Error status, per the PRD.
-- wisp v1 has **no script-to-script imports**: `lib/` folders are
+- wscript v1 has **no script-to-script imports**: `lib/` folders are
   compiled standalone during validation but cannot be imported by
   resource scripts yet. This is the degradation the PRD's risk table
-  anticipated; it lifts when wisp ships imports (its v2 roadmap).
-- `print`/`println` in wisp-vm write directly to stdout; routing them
-  into `log::info` needs a small upstream hook in wisp-vm (planned with
+  anticipated; it lifts when wscript ships imports (its v2 roadmap).
+- `print`/`println` in wscript-vm write directly to stdout; routing them
+  into `log::info` needs a small upstream hook in wscript-vm (planned with
   M3's stdout-redirection work).

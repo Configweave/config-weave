@@ -3,7 +3,7 @@
 //! Linux uses `shell::run("systemctl …")`. Registered on every platform;
 //! calls fail at runtime off Windows.
 
-use wisp::Module;
+use wscript::Module;
 
 #[cfg(not(windows))]
 const NOT_WINDOWS: &str = "the 'service' module is only available on Windows (v1); use \

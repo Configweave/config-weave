@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use wisp::Module;
+use wscript::Module;
 
 fn extract_zip(archive: &str, dest: &str) -> Result<i64, String> {
     let file = std::fs::File::open(archive).map_err(|e| format!("cannot open {archive}: {e}"))?;

@@ -1,14 +1,14 @@
 //! Conversions between WCL's `Value` (the engine's "plain data" after WCL
-//! evaluation) and wisp's dynamic `DynValue` (script-side `Value`).
-//! WCL and wisp never see each other; everything crosses through here.
+//! evaluation) and wscript's dynamic `DynValue` (script-side `Value`).
+//! WCL and wscript never see each other; everything crosses through here.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use wcl_lang::Value as WclValue;
-use wisp_std::DynValue;
+use wscript_std::DynValue;
 
-/// WCL → wisp. Fails on values that have no dynamic representation
+/// WCL → wscript. Fails on values that have no dynamic representation
 /// (functions, tensors, variants, data paths).
 pub fn wcl_to_dyn(v: &WclValue) -> Result<DynValue, String> {
     Ok(match v {
@@ -60,7 +60,7 @@ pub fn wcl_to_dyn(v: &WclValue) -> Result<DynValue, String> {
     })
 }
 
-/// wisp → WCL. Maps become anonymous records, so member access
+/// wscript → WCL. Maps become anonymous records, so member access
 /// (`os.family`) works naturally in playbook expressions.
 pub fn dyn_to_wcl(v: &DynValue) -> WclValue {
     match v {
@@ -81,7 +81,7 @@ pub fn dyn_to_wcl(v: &DynValue) -> WclValue {
     }
 }
 
-/// wisp → JSON, for the in-container test protocol (`__gather` output,
+/// wscript → JSON, for the in-container test protocol (`__gather` output,
 /// verify facts files).
 pub fn dyn_to_json(v: &DynValue) -> serde_json::Value {
     match v {
@@ -99,7 +99,7 @@ pub fn dyn_to_json(v: &DynValue) -> serde_json::Value {
     }
 }
 
-/// JSON → wisp. Fails on numbers outside the script range.
+/// JSON → wscript. Fails on numbers outside the script range.
 pub fn json_to_dyn(v: &serde_json::Value) -> Result<DynValue, String> {
     Ok(match v {
         serde_json::Value::Null => DynValue::Null,

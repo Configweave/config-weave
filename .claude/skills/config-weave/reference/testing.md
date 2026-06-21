@@ -17,7 +17,7 @@ test "file_present_converges" {
   image = "debian:12"                   // required; vmlab: template ref like "x86_64/linux-modern"
   group = "files"                       // optional; share one instance with same-group tests
   setup = "..."                         // optional
-  verify = "tests/file_present_verify.wisp"   // optional custom assertions
+  verify = "tests/file_present_verify.wscript"   // optional custom assertions
 
   step "create" {
     description = "Create a marker file"
@@ -158,14 +158,14 @@ problem.
 Some convergence can't be expressed by the three-run protocol: a Windows DC
 promotion needs **apply → reboot → apply again** to finish, and a member server
 needs a **reachable DC** (a second networked VM). For these, a package declares a
-`scenario` — a **declared vmlab lab** plus a wisp **driver script** that brings the
+`scenario` — a **declared vmlab lab** plus a wscript **driver script** that brings the
 lab's VMs up by name, applies config-weave, reboots, and asserts.
 
 ```wcl
 scenario "ad_matrix" {
   description = "Forest, additional DC and a member join over real reboots"
   lab    = "tests/ad-lab"          // dir holding a vmlab.wcl (vmlab only)
-  script = "tests/ad_matrix.wisp"
+  script = "tests/ad_matrix.wscript"
 }
 ```
 
@@ -178,7 +178,7 @@ up and reports its handle; teardown is `vmlab destroy`.
 
 The script exports `fn run(lab: Lab) -> bool` (or `Result[bool, string]`) and runs
 **host-side** against the live lab. `Ok(true)` passes; `Ok(false)` / `Err(msg)`
-fail; a wisp/transport error is an environment error. It compiles in stage-5
+fail; a wscript/transport error is an environment error. It compiles in stage-5
 validation against the `testlab` host module, so `config-weave validate` catches a
 broken driver.
 

@@ -1,12 +1,12 @@
-//! The `fs` module: file IO for scripts (PRD §7). Richer than wisp-std's
+//! The `fs` module: file IO for scripts (PRD §7). Richer than wscript-std's
 //! `fs` — metadata, glob, temp files/dirs, symlinks — so Config Weave
 //! registers this module instead of the stdlib one.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use wisp::Module;
-use wisp_std::DynValue;
+use wscript::Module;
+use wscript_std::DynValue;
 
 fn err(e: std::io::Error) -> String {
     e.to_string()

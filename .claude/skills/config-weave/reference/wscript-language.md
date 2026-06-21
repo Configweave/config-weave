@@ -1,8 +1,8 @@
-# The wisp language
+# The wscript language
 
 Statically typed, Rust-flavored scripting language (Rust minus borrow checker,
 lifetimes and generics). Scripts are **single files in v1** — no script-to-script
-imports. Full tour: `~/dev/wisp/docs/tour.md`.
+imports. Full tour: `~/dev/wscript/docs/tour.md`.
 
 ## Values and types
 
@@ -46,7 +46,7 @@ impl Player {
 }
 ```
 
-`self` is implicit and always by reference (there is no `&` in wisp). **Reference
+`self` is implicit and always by reference (there is no `&` in wscript). **Reference
 semantics**: assignment/passing/returning reference types copies the reference, never
 the data — mutations are visible through all aliases. `same(a, b)` tests reference
 identity; deep copy is explicit via `#[derive(Clone)]` + `.clone()`.
@@ -92,7 +92,7 @@ xs.map(|x| x * 2).filter(|x| x > 2).fold(0, |a, x| a + x)
 ```
 
 Strings are immutable; operations are methods returning new strings, indexed in
-characters (not bytes). Method lists: `wisp-stdlib.md`.
+characters (not bytes). Method lists: `wscript-stdlib.md`.
 
 ## Loops
 
@@ -125,7 +125,7 @@ where failure is expected.
 surface is in `hostapi.md`). Registered types are ambient. The prelude — always
 available — is `print println str fmt same weak int float`.
 
-## Not in wisp (v1)
+## Not in wscript (v1)
 
 Borrow checker, `&`/`&mut`, lifetimes, user-defined generics, exceptions, async,
 threads, implicit conversions, truthiness, string interpolation (use `fmt`), compound

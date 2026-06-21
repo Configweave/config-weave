@@ -1,10 +1,10 @@
 # Host API — cross-platform modules
 
-The wisp surface config-weave registers for all scripts (resources, gatherers, verify).
+The wscript surface config-weave registers for all scripts (resources, gatherers, verify).
 Identical on every platform: foreign-platform functions exist everywhere and return
 runtime errors off their platform. Windows-only modules (`registry`, `service`, `com`)
-are in `hostapi-windows.md`. Authoritative source: `config-weave wispi` →
-`weave.wispi`, generated from `src/hostapi/*.rs`.
+are in `hostapi-windows.md`. Authoritative source: `config-weave wscripti` →
+`weave.wscripti`, generated from `src/hostapi/*.rs`.
 
 Import with `use <module>`. All fallible functions return `Result[…, string]` and
 compose with `?`.
@@ -14,7 +14,7 @@ compose with `?`.
 `debug(msg)` · `info(msg)` · `warn(msg)` · `error(msg)` — all `(string)`.
 Raw `print`/`println` also route into `log::info`.
 
-## `fs` — file IO (richer than wisp-std's; replaces it)
+## `fs` — file IO (richer than wscript-std's; replaces it)
 
 | function | signature | notes |
 |---|---|---|
@@ -44,7 +44,7 @@ Raw `print`/`println` also route into `log::info`.
 ## `shell` — external commands
 
 All take `(cmd_or_script: string, opts: Value)` and return `Result[CmdOutput, string]`.
-**opts is required** (wisp has fixed arity): pass `Value::Null` for defaults or a
+**opts is required** (wscript has fixed arity): pass `Value::Null` for defaults or a
 `Value::Map` with `cwd` (string), `env` (map of strings), `timeout` (int/float secs),
 `stdin` (string). Timeout kills the child and returns `Err`.
 
@@ -109,7 +109,7 @@ MD5 is legacy-interop only.
 `os_version()` · `kernel_version()` · `arch()` (x86_64, aarch64, …) ·
 `cpu_count() -> int` · `total_memory() -> int` / `available_memory() -> int` (bytes).
 
-## `data` — INI (JSON/TOML live in the `json`/`toml` modules, see `wisp-stdlib.md`)
+## `data` — INI (JSON/TOML live in the `json`/`toml` modules, see `wscript-stdlib.md`)
 
 `ini_parse(text) -> Result[Value, string]` — map of sections, global keys under `""`;
 `ini_serialize(map) -> Result[string, string]`.

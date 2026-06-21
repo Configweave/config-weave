@@ -17,7 +17,7 @@ type WeavePackage {
   @children("scenario") scenarios: list<WeaveScenarioDecl>
 }
 
-// A wisp-scripted, multi-stage test over a declared vmlab lab. `lab` points
+// A wscript-scripted, multi-stage test over a declared vmlab lab. `lab` points
 // at a directory holding a vmlab.wcl (the full vmlab feature set: segments,
 // DNS, static IPs, depends_on, …); `script` is the driver (fn run(lab) -> bool)
 // that brings VMs up by name, applies config-weave, reboots, and asserts —

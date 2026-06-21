@@ -11,12 +11,12 @@ Three languages divide the work:
 - **WCL** encodes playbooks: plays, steps, variables, conditions,
   gatherer invocations and resource/gatherer declarations. WCL never
   executes against the system.
-- **wisp** implements gatherers and resources: the scripts that inspect
+- **wscript** implements gatherers and resources: the scripts that inspect
   and mutate the machine, through a host API registered by config-weave.
-- **config-weave** (Rust) mediates. WCL and wisp never interact directly.
+- **config-weave** (Rust) mediates. WCL and wscript never interact directly.
 
 See `docs/PRD.md` for the full design and `docs/notes.md` for the
-decisions made while binding the PRD to the real WCL and wisp APIs.
+decisions made while binding the PRD to the real WCL and wscript APIs.
 
 ## Quick start
 
@@ -27,11 +27,11 @@ config-weave list my-playbook     # list plays
 config-weave check my-playbook baseline   # dry run (never mutates)
 config-weave apply my-playbook baseline   # converge
 config-weave docs my-playbook     # render a wdoc site to my-playbook/docs/
-config-weave wispi                # emit .wispi for LSP/wisp-check support
+config-weave wscripti                # emit .wscripti for LSP/wscript-check support
 ```
 
 Everything validates before anything runs: WCL parses, parameters
-schema-check, and every wisp script compiles and type-checks against the
+schema-check, and every wscript script compiles and type-checks against the
 host API before the first script executes. Exit codes: 0 success, 1 step
 error, 2 validation failure, 3 reboot required.
 
@@ -40,11 +40,11 @@ error, 2 validation failure, 3 reboot required.
 ```
 my-playbook/
   playbook.wcl              # plays, variables, gatherer invocations
-  lib/                      # shared wisp code (compiled at validate time)
+  lib/                      # shared wscript code (compiled at validate time)
   pkgs/<name>/
     package.wcl             # gatherer + resource declarations (schemas)
-    resources/<r>.wisp      # exports check() and apply()
-    gatherers/<g>.wisp      # exports gather()
+    resources/<r>.wscript      # exports check() and apply()
+    gatherers/<g>.wscript      # exports gather()
 ```
 
 ## Building
@@ -54,7 +54,7 @@ artifacts for both targets (`x86_64-unknown-linux-musl`,
 `x86_64-pc-windows-gnu`) cross-build from Linux with `just release`
 (requires `cross` and a container runtime; see `Cross.toml`).
 
-The `../WCL` and `../wisp` sibling checkouts are path dependencies.
+The `../WCL` and `../wscript` sibling checkouts are path dependencies.
 
 Previous iterations are archived in the private graveyard
 (`config-weave`, `config-weave-old`, `configweave-zig`, `config-weave-2`).

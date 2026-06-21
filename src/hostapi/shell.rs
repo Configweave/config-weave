@@ -10,8 +10,8 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use wisp::{Module, Script};
-use wisp_std::DynValue;
+use wscript::{Module, Script};
+use wscript_std::DynValue;
 
 use super::log;
 

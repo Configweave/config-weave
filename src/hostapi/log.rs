@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 
-use wisp::Module;
+use wscript::Module;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {

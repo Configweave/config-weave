@@ -1,4 +1,4 @@
-//! Integration spike: verifies the WCL/wisp embedding assumptions that the
+//! Integration spike: verifies the WCL/wscript embedding assumptions that the
 //! config-weave architecture rests on. These tests pin behaviour we depend
 //! on in the dependencies; if one breaks, the engine design needs a rethink.
 
@@ -130,10 +130,10 @@ step broken {
     assert!(condition.optional());
 }
 
-// ---------------------------------------------------------------- wisp
+// ---------------------------------------------------------------- wscript
 
-use wisp::{Context, Script, UnitExt, Vm};
-use wisp_std::DynValue;
+use wscript::{Context, Script, UnitExt, Vm};
+use wscript_std::DynValue;
 
 #[derive(Script, Debug, Clone, PartialEq)]
 enum CheckResult {
@@ -143,10 +143,10 @@ enum CheckResult {
 }
 
 fn weave_ctx() -> Context {
-    let mut log = wisp::Module::new("log");
+    let mut log = wscript::Module::new("log");
     log.fn_("info", |_msg: &str| {});
     Context::new()
-        .module(wisp_std::value())
+        .module(wscript_std::value())
         .module(log)
         .register_type::<CheckResult>()
 }
@@ -155,7 +155,7 @@ fn weave_ctx() -> Context {
 /// compiles, type-checks against the host context, and runs with a
 /// DynValue argument built host-side.
 #[test]
-fn wisp_check_entrypoint_roundtrip() {
+fn wscript_check_entrypoint_roundtrip() {
     let ctx = weave_ctx();
     let unit = ctx
         .compile(
@@ -193,7 +193,7 @@ fn check(params: Value) -> CheckResult {
 /// The fallible contract: `fn check(params: Value) -> Result[CheckResult, string]`
 /// also works, and an Err comes back to the host as Err.
 #[test]
-fn wisp_fallible_entrypoint() {
+fn wscript_fallible_entrypoint() {
     let ctx = weave_ctx();
     let unit = ctx
         .compile(
@@ -219,7 +219,7 @@ fn check(params: Value) -> Result[CheckResult, string] {
 
 /// A typo against the host API fails compilation with a diagnostic.
 #[test]
-fn wisp_typo_fails_compile() {
+fn wscript_typo_fails_compile() {
     let ctx = weave_ctx();
     let err = ctx
         .compile(

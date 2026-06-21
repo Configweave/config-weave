@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use wisp::{Module, Script};
-use wisp_std::DynValue;
+use wscript::{Module, Script};
+use wscript_std::DynValue;
 
 /// An HTTP response as scripts see it.
 #[derive(Script, Debug, Clone)]

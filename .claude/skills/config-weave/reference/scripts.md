@@ -1,9 +1,9 @@
-# Writing resource & gatherer scripts (wisp)
+# Writing resource & gatherer scripts (wscript)
 
-Resource, gatherer and verify scripts are single-file wisp programs compiled against the
+Resource, gatherer and verify scripts are single-file wscript programs compiled against the
 config-weave host API. Import host modules with `use <module>`; registered types
 (`Value`, `CheckResult`, `ApplyResult`, `CmdOutput`, `HttpResponse`, `ComObject`) are
-ambient — no `use` needed for type names. See `wisp-language.md` for the language,
+ambient — no `use` needed for type names. See `wscript-language.md` for the language,
 `hostapi.md` for the modules.
 
 ## Entry-point contracts
@@ -11,14 +11,14 @@ ambient — no `use` needed for type names. See `wisp-language.md` for the langu
 Each entry point accepts two signatures — plain, or fallible when you want `?`:
 
 ```rust
-// resources/<name>.wisp
+// resources/<name>.wscript
 fn check(params: Value) -> CheckResult            // or -> Result[CheckResult, string]
 fn apply(params: Value) -> ApplyResult            // or -> Result[ApplyResult, string]
 
-// gatherers/<name>.wisp
+// gatherers/<name>.wscript
 fn gather(params: Value) -> Value                 // or -> Result[Value, string]
 
-// tests/<name>.wisp (testlab verify, see testing.md)
+// tests/<name>.wscript (testlab verify, see testing.md)
 fn verify(facts: Value) -> bool                   // or -> Result[bool, string]
 ```
 
@@ -109,8 +109,8 @@ fn gather(params: Value) -> Value {
 
 ## Editor support
 
-`config-weave wispi [outdir]` emits `weave.wispi` (the full host interface) plus a
-starter `wisp.toml`. With those next to your scripts, `wisp check` and the wisp LSP
+`config-weave wscripti [outdir]` emits `weave.wscripti` (the full host interface) plus a
+starter `wscript.toml`. With those next to your scripts, `wscript check` and the wscript LSP
 type-check scripts against the exact config-weave surface — host API misuse is a
 compile-time error, also caught by `config-weave validate` (stage that compiles every
 script).

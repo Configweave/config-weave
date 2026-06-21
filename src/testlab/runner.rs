@@ -16,7 +16,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use wisp::{UnitExt, Vm};
+use wscript::{UnitExt, Vm};
 
 use crate::convert::dyn_to_json;
 use crate::diag::Diag;
@@ -767,14 +767,14 @@ fn drive_scenario(rc: &Rc<RefCell<LabState>>, script: &Path) -> Result<bool, Sce
     let ctx = crate::hostapi::scenario_context();
     let unit = ctx
         .compile(&source)
-        .map_err(|e| ScenarioEnd::Error(format!("{}: {}", script.display(), wisp_err(e))))?;
+        .map_err(|e| ScenarioEnd::Error(format!("{}: {}", script.display(), wscript_err(e))))?;
     let mut vm = Vm::new(&ctx);
 
     // Contract is validated in stage 5; dispatch on which signature compiled.
     if unit.fn_handle::<(Lab,), bool>("run").is_ok() {
         return vm
             .call_unit::<(Lab,), bool>(&unit, "run", (lab_value(rc.clone()),))
-            .map_err(|e| ScenarioEnd::Error(wisp_err(e)));
+            .map_err(|e| ScenarioEnd::Error(wscript_err(e)));
     }
     if unit
         .fn_handle::<(Lab,), Result<bool, String>>("run")
@@ -787,7 +787,7 @@ fn drive_scenario(rc: &Rc<RefCell<LabState>>, script: &Path) -> Result<bool, Sce
         ) {
             Ok(Ok(b)) => Ok(b),
             Ok(Err(msg)) => Err(ScenarioEnd::Failed(msg)),
-            Err(e) => Err(ScenarioEnd::Error(wisp_err(e))),
+            Err(e) => Err(ScenarioEnd::Error(wscript_err(e))),
         };
     }
     Err(ScenarioEnd::Error(
@@ -795,10 +795,10 @@ fn drive_scenario(rc: &Rc<RefCell<LabState>>, script: &Path) -> Result<bool, Sce
     ))
 }
 
-/// Render a wisp error (compile or runtime) into a one-line message.
-fn wisp_err(e: wisp::Error) -> String {
+/// Render a wscript error (compile or runtime) into a one-line message.
+fn wscript_err(e: wscript::Error) -> String {
     match e {
-        wisp::Error::Compile(ds) => ds
+        wscript::Error::Compile(ds) => ds
             .iter()
             .map(|d| d.message.clone())
             .collect::<Vec<_>>()
@@ -828,18 +828,18 @@ mod tests {
 
     #[test]
     fn verify_path_maps_into_the_container() {
-        let p = Path::new("/host/playbook/pkgs/core/tests/verify.wisp");
+        let p = Path::new("/host/playbook/pkgs/core/tests/verify.wscript");
         let linux = GuestPaths::for_test(GuestOs::Linux, "0-core__t");
         assert_eq!(
             in_container_script(p, &linux).unwrap(),
-            "/weave/t/0-core__t/playbook/pkgs/core/tests/verify.wisp"
+            "/weave/t/0-core__t/playbook/pkgs/core/tests/verify.wscript"
         );
         let windows = GuestPaths::for_test(GuestOs::Windows, "0-core__t");
         assert_eq!(
             in_container_script(p, &windows).unwrap(),
-            "C:/weave/t/0-core__t/playbook/pkgs/core/tests/verify.wisp"
+            "C:/weave/t/0-core__t/playbook/pkgs/core/tests/verify.wscript"
         );
-        assert!(in_container_script(Path::new("/elsewhere/verify.wisp"), &linux).is_err());
+        assert!(in_container_script(Path::new("/elsewhere/verify.wscript"), &linux).is_err());
     }
 
     #[test]

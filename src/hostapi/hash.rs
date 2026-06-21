@@ -4,7 +4,7 @@
 
 use md5::Md5;
 use sha2::{Digest, Sha256, Sha512};
-use wisp::Module;
+use wscript::Module;
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

@@ -1,4 +1,4 @@
-//! The `testlab` wisp host module: the driver API a scenario script gets.
+//! The `testlab` wscript host module: the driver API a scenario script gets.
 //!
 //! A scenario is `fn run(lab: Lab) -> Result[bool, string]`. The script
 //! provisions VMs/containers (`lab.provision`), applies config-weave inside
@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use wisp::{Module, Script};
-use wisp_std::DynValue;
+use wscript::{Module, Script};
+use wscript_std::DynValue;
 
 use crate::diag::Diag;
 use crate::model::Playbook;

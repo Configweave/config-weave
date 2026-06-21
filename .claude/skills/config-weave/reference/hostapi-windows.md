@@ -44,7 +44,7 @@ Windows-only in v1 — manage Linux services with `shell::run("systemctl …", V
 | `get` | `(name) -> Result[Value, string]` | property read |
 | `get_object` | `(name) -> Result[ComObject, string]` | property read returning an object (VT_DISPATCH) |
 | `set` | `(name, value: Value) -> Result[unit, string]` | property write |
-| `call` | `(name, args: List[Value]) -> Result[Value, string]` | method call — wisp has fixed arity, so args is always a `List[Value]` (pass `[]` for none) |
+| `call` | `(name, args: List[Value]) -> Result[Value, string]` | method call — wscript has fixed arity, so args is always a `List[Value]` (pass `[]` for none) |
 | `call_object` | `(name, args: List[Value]) -> Result[ComObject, string]` | method call returning an object |
 | `items` | `() -> Result[List[ComObject], string]` | enumerate a collection |
 

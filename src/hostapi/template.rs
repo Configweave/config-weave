@@ -10,11 +10,11 @@
 
 use std::error::Error;
 
-use wisp::Module;
-use wisp_std::DynValue;
+use wscript::Module;
+use wscript_std::DynValue;
 
 /// Convert a `DynValue` into a `serde_json::Value` so it can seed a Tera
-/// context. Mirrors `wisp-std`'s `json::to_json` (which is crate-private).
+/// context. Mirrors `wscript-std`'s `json::to_json` (which is crate-private).
 fn to_json(v: &DynValue) -> serde_json::Value {
     match v {
         DynValue::Null => serde_json::Value::Null,

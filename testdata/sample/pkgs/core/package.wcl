@@ -3,12 +3,12 @@ package "core" {
 
   gatherer "os_info" {
     description = "Report basic operating system facts"
-    script = "gatherers/os_info.wisp"
+    script = "gatherers/os_info.wscript"
   }
 
   resource "file_present" {
     description = "Ensure a file exists with the given content"
-    script = "resources/file_present.wisp"
+    script = "resources/file_present.wscript"
     concurrency = "parallel"
 
     param "path" {
@@ -26,7 +26,7 @@ package "core" {
   test "file_present_converges" {
     description = "file_present creates the file and is idempotent"
     image = "debian:12"
-    verify = "tests/file_present_verify.wisp"
+    verify = "tests/file_present_verify.wscript"
 
     step "create" {
       description = "Create a marker file"

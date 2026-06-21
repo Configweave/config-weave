@@ -1,5 +1,5 @@
-//! Authoring support (PRD §13): `wispi` dumps the host API as `.wispi`
-//! interface files plus a starter `wisp.toml`; `init` scaffolds a working
+//! Authoring support (PRD §13): `wscripti` dumps the host API as `.wscripti`
+//! interface files plus a starter `wscript.toml`; `init` scaffolds a working
 //! skeleton playbook so the new-playbook path is init → edit → validate →
 //! check.
 
@@ -7,21 +7,21 @@ use std::path::Path;
 
 use crate::diag::Diag;
 
-/// `config-weave wispi [outdir]`: emit the complete host API interface
+/// `config-weave wscripti [outdir]`: emit the complete host API interface
 /// (all modules, both platforms, CheckResult/ApplyResult, ComObject,
-/// CmdOutput, …) and a starter wisp.toml referencing it.
-pub fn wispi(outdir: &Path) -> Result<(), Diag> {
+/// CmdOutput, …) and a starter wscript.toml referencing it.
+pub fn wscripti(outdir: &Path) -> Result<(), Diag> {
     std::fs::create_dir_all(outdir)
         .map_err(|e| Diag::bare(format!("cannot create {}: {e}", outdir.display())))?;
     let ctx = crate::hostapi::context();
-    let wispi_path = outdir.join("weave.wispi");
-    ctx.write_interface(&wispi_path)
-        .map_err(|e| Diag::bare(format!("cannot write {}: {e}", wispi_path.display())))?;
+    let wscripti_path = outdir.join("weave.wscripti");
+    ctx.write_interface(&wscripti_path)
+        .map_err(|e| Diag::bare(format!("cannot write {}: {e}", wscripti_path.display())))?;
 
     // Don't clobber an existing manifest; authors may have customised it.
-    let toml_path = outdir.join("wisp.toml");
+    let toml_path = outdir.join("wscript.toml");
     if !toml_path.exists() {
-        std::fs::write(&toml_path, "interfaces = [\"weave.wispi\"]\n")
+        std::fs::write(&toml_path, "interfaces = [\"weave.wscripti\"]\n")
             .map_err(|e| Diag::bare(format!("cannot write {}: {e}", toml_path.display())))?;
     }
     Ok(())
@@ -47,14 +47,14 @@ pub fn init(dir: &Path) -> Result<(), Diag> {
 
     write("playbook.wcl", PLAYBOOK)?;
     write("pkgs/example/package.wcl", PACKAGE)?;
-    write("pkgs/example/resources/file_present.wisp", RESOURCE)?;
-    write("pkgs/example/gatherers/os_info.wisp", GATHERER)?;
-    write("pkgs/example/tests/greeting_verify.wisp", VERIFY)?;
+    write("pkgs/example/resources/file_present.wscript", RESOURCE)?;
+    write("pkgs/example/gatherers/os_info.wscript", GATHERER)?;
+    write("pkgs/example/tests/greeting_verify.wscript", VERIFY)?;
     write("lib/README.md", LIB_README)?;
     write("pkgs/example/lib/README.md", LIB_README)?;
 
-    // Authoring support: the LSP and `wisp check` pick these up.
-    wispi(dir)?;
+    // Authoring support: the LSP and `wscript check` pick these up.
+    wscripti(dir)?;
     Ok(())
 }
 
@@ -93,12 +93,12 @@ const PACKAGE: &str = r#"package "example" {
 
   gatherer "os_info" {
     description = "Report basic operating system facts"
-    script = "gatherers/os_info.wisp"
+    script = "gatherers/os_info.wscript"
   }
 
   resource "file_present" {
     description = "Ensure a file exists with the given content"
-    script = "resources/file_present.wisp"
+    script = "resources/file_present.wscript"
     concurrency = "parallel"
 
     param "path" {
@@ -122,7 +122,7 @@ const PACKAGE: &str = r#"package "example" {
   test "greeting_converges" {
     description = "file_present creates the greeting file and is idempotent"
     image = "debian:12"
-    verify = "tests/greeting_verify.wisp"
+    verify = "tests/greeting_verify.wscript"
 
     step "greet" {
       description = "Create the greeting file"
@@ -199,5 +199,5 @@ fn verify(facts: Value) -> Result[bool, string] {
 }
 "#;
 
-const LIB_README: &str = "Shared wisp helpers live here. They are compiled during validation;\n\
-script-to-script imports arrive with wisp's module system (v2 roadmap).\n";
+const LIB_README: &str = "Shared wscript helpers live here. They are compiled during validation;\n\
+script-to-script imports arrive with wscript's module system (v2 roadmap).\n";

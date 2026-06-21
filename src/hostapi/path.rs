@@ -3,7 +3,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use wisp::Module;
+use wscript::Module;
 
 pub fn module() -> Module {
     let mut m = Module::new("path");

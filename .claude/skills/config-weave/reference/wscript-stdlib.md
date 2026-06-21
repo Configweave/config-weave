@@ -1,9 +1,9 @@
-# Wisp built-ins available in config-weave scripts
+# Wscript built-ins available in config-weave scripts
 
 The prelude, the built-in container/string/Option/Result methods, and the `value`,
-`json`, `toml` modules (re-exported from wisp-std).
+`json`, `toml` modules (re-exported from wscript-std).
 
-> **Not available in config-weave scripts:** wisp-std's `math`, `process`, `xml`, and
+> **Not available in config-weave scripts:** wscript-std's `math`, `process`, `xml`, and
 > standalone `fs` modules are **not registered**. config-weave provides its own richer
 > `fs`, and `shell` replaces `process` — see `hostapi.md`. There is no `math` module;
 > use plain operators.
