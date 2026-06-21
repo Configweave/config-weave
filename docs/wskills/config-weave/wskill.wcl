@@ -1,0 +1,131 @@
+// config-weave — wskill root document.
+//
+// A complete reference for config-weave: authoring WCL playbooks and packages,
+// writing wscript resource/gatherer/verify scripts, the host API, and running and
+// testing playbooks. `wcl check wskill.wcl` validates the whole model; the wdoc
+// template sets in wdoc/ project it into the book and the Claude Code skill.
+
+import <wdoc.wcl>
+import "./schema/base.wcl"
+import "./schema/extensions.wcl"
+import "./schema/language.wcl"          // CodeExample, reused by the cli module
+import "./schema/cli.wcl"               // opt-in: map the config-weave CLI as data
+
+// Data — reference concepts, the CLI, glossary, and processes.
+import "./data/reference/concepts.wcl"
+import "./data/reference/cli.wcl"
+import "./data/reference/glossary.wcl"
+import "./data/processes/processes.wcl"
+
+schema_version = "1.1.0"
+
+topic config_weave {
+  name    = "config-weave"
+  summary = "Single-binary configuration management driven by WCL playbooks and wscript resource scripts, with a check → apply → re-check convergence contract and a disposable-instance testlab."
+  version = "0.1.0"
+  description = <<END
+config-weave is a single-binary configuration management tool. You copy the binary
+onto a target machine alongside a **playbook** folder and run it — no agent, no
+runtime, no package installs. A **playbook** (`playbook.wcl`, a WCL document) runs
+**plays** of **steps**; each step invokes a **resource** declared in a **package**
+(`pkgs/<name>/package.wcl`) and implemented as a **wscript** script obeying a
+check → apply → re-check contract. **Gatherers** collect facts into playbook
+variables. config-weave can **check** whether a machine matches the playbook (a
+report-only dry run) or **apply** it (converge the machine). The **testlab**
+(`config-weave test`) proves package convergence in disposable docker containers or
+vmlab VMs with a three-run idempotence protocol. Three languages divide the work:
+WCL encodes playbooks and packages, wscript implements resources and gatherers, and
+the config-weave (Rust) engine mediates — validating everything before anything runs,
+then scheduling steps over a DAG with concurrency classes.
+END
+  tags = ["config-weave", "configuration-management", "wcl", "wscript", "devops", "idempotence"]
+  created    = "2026-06-22"
+  maintainer = "ai@wiltaylor.dev"
+}
+
+// Skill-projection config (→ SKILL.md frontmatter). Auto-activation and the agent
+// guardrails carried over from the previous hand-authored skill.
+wcl.wskill::skill {
+  allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent"]
+  summary {
+    overview = [
+      "config-weave is single-binary configuration management. Playbooks are WCL documents whose plays run steps; each step invokes a resource (declared in a package, implemented as a wscript script) with a check → apply → re-check convergence contract. This skill captures every layer as data — playbooks, packages, scripts, the host API, the CLI, and the testlab — projected from one model.",
+    ]
+  }
+  skill_param "$ARGUMENTS" {
+    description = "The config-weave topic to look up — a playbook/package block, a wscript contract, a host-API module, a CLI subcommand, or a testlab feature."
+    value       = "Take it from the user's request. If empty, summarise the reference and ask which layer they need."
+  }
+  skill_boundary {
+    always = [
+      "Read docs/notes.md before changing the WCL vocabulary, variable scheme, host API surface, or test protocol — it is the binding source of truth over the PRD's sketches.",
+      "Trust real source over these references if they disagree: src/vocab/*.wcl, src/hostapi/*.rs, src/main.rs, ~/dev/wscript/docs — then update the reference.",
+      "Regenerate weave.wscripti (config-weave wscripti) after changing the host API, and update the host-API reference to match.",
+    ]
+    ask = [
+      "Before running config-weave apply against the local machine (it mutates system state) — validate, check, and test are safe.",
+      "Before adding new fields to the WCL vocabulary (src/vocab/*.wcl) — that is a schema change, not playbook authoring.",
+    ]
+    never = [
+      "Invent host API functions or modules not listed in the host-API reference — the surface is exactly what config-weave wscripti emits.",
+      "Use wscript-std's math / process / xml / standalone-fs in playbook scripts — they are not registered.",
+      "Write WCL import lines in playbooks or packages — the engine appends system imports.",
+    ]
+  }
+}
+
+// ---- Sources (update-workflow metadata only) ----
+
+source prd {
+  kind         = "docs"
+  locator      = "/home/wil/dev/config-weave/docs/PRD.md"
+  covers       = "The config-weave v1 product requirements — design rationale, playbook/package WCL syntax, wscript contracts, execution semantics, non-goals."
+  last_checked = "2026-06-22"
+  reflects_version = "0.1.0"
+}
+
+source notes {
+  kind         = "docs"
+  locator      = "/home/wil/dev/config-weave/docs/notes.md"
+  covers       = "Binding decisions where the PRD's sketches are illustrative — WCL vocabulary, variable scheme, host API surface, and the testlab protocol. Authoritative over the PRD."
+  last_checked = "2026-06-22"
+  reflects_version = "0.1.0"
+}
+
+source vocab {
+  kind         = "repo"
+  locator      = "/home/wil/dev/config-weave/src/vocab"
+  covers       = "The embedded WCL schema served as system imports (weave/playbook.wcl, weave/package.wcl) — the authoritative playbook/package vocabulary."
+  last_checked = "2026-06-22"
+  reflects_version = "0.1.0"
+}
+
+source hostapi {
+  kind         = "repo"
+  locator      = "/home/wil/dev/config-weave/src/hostapi"
+  covers       = "The wscript host API modules (Linux + Windows). config-weave wscripti emits weave.wscripti from these — the authoritative host surface."
+  last_checked = "2026-06-22"
+  reflects_version = "0.1.0"
+}
+
+source wscript_docs {
+  kind         = "docs"
+  locator      = "/home/wil/dev/wscript/docs"
+  covers       = "The wscript language itself — the tour and reference for the scripting language config-weave embeds."
+  last_checked = "2026-06-22"
+  reflects_version = "0.1.0"
+}
+
+// ---- Cross-references to other wskills ----
+
+wskill_ref wcl {
+  name     = "WCL"
+  relation = "WCL is the configuration language config-weave playbooks and packages are written in"
+  status   = "exists"
+}
+
+wskill_ref wdoc {
+  name     = "wdoc"
+  relation = "config-weave docs renders playbook documentation with wdoc (via the wcl CLI)"
+  status   = "exists"
+}

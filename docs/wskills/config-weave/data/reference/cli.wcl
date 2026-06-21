@@ -1,0 +1,102 @@
+// The `config-weave` CLI, mapped as data via the opt-in cli module (schema/cli.wcl).
+// Sourced from src/main.rs and the CLI reference. The book renders a "CLI Reference"
+// section; the skill renders references/cli_ref.md. `audience = :both` includes it in
+// both projections.
+
+cli config_weave_cli {
+  name        = "config-weave"
+  version     = "0.1.0"
+  audience    = :both
+  description = "Single-binary configuration management — validate, check, and apply WCL playbooks, test packages in disposable instances, and scaffold/emit authoring aids."
+
+  // Global switches (apply to every subcommand).
+  cli_switch sw_var      { long = "--var"       value_name = "KEY=VALUE"  description = "Override a playbook variable. Repeatable. VALUE parses as a WCL expression when possible, else a plain string." }
+  cli_switch sw_var_file { long = "--var-file"  value_name = "PATH"       description = "Merge a WCL file's top-level name = value pairs into scope (evaluate standalone; cannot reference other variables)." }
+  cli_switch sw_jobs     { long = "--jobs"      value_name = "N"          description = "Worker pool size (default min(cpu_count, 8)); forwarded into test instances." }
+  cli_switch sw_continue { long = "--continue-on-error"  description = "Continue dispatching steps after an Error (check/apply)." }
+  cli_switch sw_json     { long = "--json"      description = "JSON output: a single schema-stable object on stdout at completion; script log output never goes to stdout." }
+  cli_switch sw_nocolor  { long = "--no-color"  description = "Plain ASCII output (auto-selected when stdout is not a TTY)." }
+  cli_switch sw_logfile  { long = "--log-file"  value_name = "PATH"   description = "Enable NDJSON file logging (independent of terminal mode)." }
+  cli_switch sw_loglevel { long = "--log-level" value_name = "LEVEL"  description = "File log level (independent of terminal verbosity), default info." }
+  cli_switch sw_verbose  { long = "--verbose"   short = "-v"  description = "Increase terminal verbosity (repeatable: -v, -vv, -vvv)." }
+
+  subcommand cmd_validate {
+    name = "validate"
+    audience = :both
+    description = "Full validation pipeline (WCL syntax, schema, refs, DAG, wscript compilation of every script), no execution."
+    cli_arg arg_dir { name = "playbook-dir"  description = "The playbook directory (contains playbook.wcl)." }
+    code_example { lang = "console"  code = "config-weave validate ./my-playbook" }
+  }
+
+  subcommand cmd_check {
+    name = "check"
+    audience = :both
+    description = "Report configuration status of all steps in a play (never mutates)."
+    cli_arg arg_dir  { name = "playbook-dir"  description = "The playbook directory." }
+    cli_arg arg_play { name = "play"  description = "The play to check." }
+    code_example { lang = "console"  code = "config-weave check ./my-playbook baseline" }
+  }
+
+  subcommand cmd_apply {
+    name = "apply"
+    audience = :both
+    description = "Apply all unconfigured steps in a play (converge the machine), then re-check each."
+    cli_arg arg_dir  { name = "playbook-dir"  description = "The playbook directory." }
+    cli_arg arg_play { name = "play"  description = "The play to apply." }
+    code_example { lang = "console"  code = "config-weave apply ./my-playbook baseline" }
+  }
+
+  subcommand cmd_list {
+    name = "list"
+    audience = :both
+    description = "List all plays defined in the playbook."
+    cli_arg arg_dir { name = "playbook-dir"  description = "The playbook directory." }
+    code_example { lang = "console"  code = "config-weave list ./my-playbook" }
+  }
+
+  subcommand cmd_test {
+    name = "test"
+    audience = :both
+    description = "Run package convergence tests in disposable instances (docker containers or vmlab VMs) using the three-run protocol."
+    cli_arg arg_dir    { name = "playbook-dir"  description = "The playbook directory." }
+    cli_arg arg_filter { name = "filter"  required = false  description = "Limit to a package or one test: `pkg` or `pkg:test`." }
+    cli_switch sw_backend  { long = "--backend"  value_name = "NAME"  description = "Override every test's backend (docker or vmlab)." }
+    cli_switch sw_image    { long = "--image"  value_name = "IMAGE"  description = "Run every test against this image instead of its own." }
+    cli_switch sw_keep     { long = "--keep"  description = "Leave instances running for post-mortem debugging (handle reported)." }
+    cli_switch sw_binary   { long = "--binary"  value_name = "PATH"  description = "Static linux config-weave binary to copy into instances." }
+    cli_switch sw_binwin   { long = "--binary-windows"  value_name = "PATH"  description = "Windows config-weave binary for windows vmlab guests." }
+    code_example { lang = "console"  code = "config-weave test ./my-playbook core:file_present_converges" }
+  }
+
+  subcommand cmd_docs {
+    name = "docs"
+    audience = :both
+    description = "Generate wdoc documentation for the playbook (shares the validation pipeline)."
+    cli_arg arg_dir    { name = "playbook-dir"  description = "The playbook directory." }
+    cli_arg arg_outdir { name = "outdir"  required = false  description = "Output directory (default <dir>/docs/)." }
+    code_example { lang = "console"  code = "config-weave docs ./my-playbook" }
+  }
+
+  subcommand cmd_wscripti {
+    name = "wscripti"
+    audience = :both
+    description = "Emit weave.wscripti (the host API interface) plus a starter wscript.toml so editors and the wscript LSP type-check scripts against the exact host surface."
+    cli_arg arg_outdir { name = "outdir"  required = false  description = "Output directory (default: cwd)." }
+    code_example { lang = "console"  code = "config-weave wscripti ./my-playbook/pkgs/core/resources" }
+  }
+
+  subcommand cmd_init {
+    name = "init"
+    audience = :both
+    description = "Scaffold a skeleton playbook with an example package, resource and gatherer."
+    cli_arg arg_dir { name = "dir"  description = "Destination directory for the new playbook." }
+    code_example { lang = "console"  code = "config-weave init ./my-playbook" }
+  }
+
+  subcommand cmd_version {
+    name = "version"
+    audience = :both
+    description = "Print version information."
+    code_example { lang = "console"  code = "config-weave version" }
+  }
+}

@@ -1,0 +1,221 @@
+// Processes for config-weave — runbooks for doing a task with the CLI. Each step
+// stores two addressable body fragments: `body screen { … }` (what's on screen) and
+// `body steps { … }` (the action). All :both so they ship in the skill too.
+
+procedure scaffold_validate {
+  title    = "Scaffold and validate a playbook"
+  purpose  = "Start a new playbook from the built-in skeleton and confirm it validates before running anything."
+  preconditions = ["The config-weave binary is on PATH."]
+  related  = [playbooks, packages]
+  audience = :both
+
+  step 1 {
+    title = "Scaffold a skeleton"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave init ./my-playbook
+created ./my-playbook (playbook.wcl, pkgs/core/…)
+SH
+      }
+    }
+    body steps { p "Run `config-weave init ./my-playbook`. It writes a skeleton playbook with an example package, resource and gatherer — a working starting point." }
+  }
+
+  step 2 {
+    title = "Validate the whole pipeline"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave validate ./my-playbook
+ok
+SH
+      }
+      callout "What validate covers" { class = ["info"]  body = "WCL syntax, schema, ref resolution, the step DAG, and **wscript compilation of every script** — host-API misuse is caught here, before any execution." }
+    }
+    body steps { p "Run `config-weave validate ./my-playbook`. Nothing executes; fix any reported syntax, schema, ref, DAG or script-compilation error before moving on." }
+  }
+
+  step 3 {
+    title = "List the plays"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave list ./my-playbook
+baseline
+SH
+      }
+    }
+    body steps { p "Run `config-weave list ./my-playbook` to see the plays you can `check` or `apply`." }
+  }
+
+  verification = "`config-weave validate` exits 0 and `list` prints the expected play names."
+}
+
+procedure add_resource {
+  title    = "Add a package resource"
+  purpose  = "Declare a new resource in a package and implement its check/apply wscript script against the host API."
+  preconditions = ["A playbook with a pkgs/<name>/package.wcl already exists."]
+  related  = [packages, scripts, hostapi]
+  audience = :both
+
+  step 1 {
+    title = "Declare the resource and its params"
+    body screen {
+      code "wcl" { source = <<'SRC'
+resource "file_present" {
+  description = "Ensure a file exists with the given content"
+  script = "resources/file_present.wscript"
+  concurrency = "parallel"
+  param "path"    { description = "Absolute path"  type = "string"  required = true }
+  param "content" { description = "File content"   type = "string"  default = "" }
+}
+SRC
+      }
+    }
+    body steps { p "Add a `resource` block to `package.wcl` with `script` (a path relative to the package dir) and a `param` per input. Params are validated against playbook properties at validation time." }
+  }
+
+  step 2 {
+    title = "Implement check() and apply()"
+    body screen {
+      code "rust" { source = <<'SRC'
+use value
+use fs
+use path
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let p = params.get("path")?.as_string()?
+    if !fs::exists(p) { return Ok(CheckResult::NotConfigured) }
+    if fs::read(p)? == params.get("content")?.as_string()? {
+        Ok(CheckResult::AlreadyConfigured)
+    } else { Ok(CheckResult::NotConfigured) }
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    let p = params.get("path")?.as_string()?
+    fs::mkdir(path::parent(p))?
+    fs::write(p, params.get("content")?.as_string()?)?
+    Ok(ApplyResult::Success)
+}
+SRC
+      }
+      callout "The contract" { class = ["warning"]  body = "`check` must never mutate; `apply` must converge so a re-check returns `AlreadyConfigured` — even in a fresh process." }
+    }
+    body steps { p "Write the script under `resources/`. Export `check(params)` and `apply(params)`; import host modules with `use`. Run `config-weave wscripti` next to the scripts so the wscript LSP type-checks against the exact host surface." }
+  }
+
+  step 3 {
+    title = "Validate the script compiles"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave validate ./my-playbook
+ok
+SH
+      }
+    }
+    body steps { p "Run `config-weave validate` — its final stage compiles every wscript script against the host API, so a bad signature or unknown host function is a hard error." }
+  }
+
+  verification = "`config-weave validate` exits 0 with the new resource's script compiled."
+}
+
+procedure test_package {
+  title    = "Test a package for idempotence"
+  purpose  = "Prove a package's resources converge and stay converged using the testlab's three-run protocol in a disposable instance."
+  preconditions = ["A package with at least one test block.", "docker (or podman) available for the default backend."]
+  related  = [testing, packages]
+  audience = :both
+
+  step 1 {
+    title = "Declare a test"
+    body screen {
+      code "wcl" { source = <<'SRC'
+test "file_present_converges" {
+  description = "file_present creates the file and is idempotent"
+  image = "debian:12"
+  step "create" {
+    description = "Create a marker file"
+    resource = "file_present"
+    properties { path = "/var/tmp/weave.txt"  content = "hello" }
+  }
+}
+SRC
+      }
+    }
+    body steps { p "Add a `test` block to `package.wcl` with a required `image` and one or more `step`s. All test values must be **static** — no variable references. Unqualified `resource`/`from` refs resolve to the declaring package." }
+  }
+
+  step 2 {
+    title = "Run the test"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave test ./my-playbook core:file_present_converges
+core:file_present_converges … passed
+SH
+      }
+    }
+    body steps { p "Run `config-weave test ./my-playbook [pkg[:test]]`. config-weave provisions a disposable instance and runs check → apply → apply. Run 3 catches state that only exists in-process (it would re-apply and surface as `configured`, failing the test)." }
+  }
+
+  step 3 {
+    title = "Debug a failure with --keep"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave test ./my-playbook core --keep
+… instance kept: <handle>
+SH
+      }
+    }
+    body steps { p "On failure, re-run with `--keep` to leave the instance up (its handle is reported) and inspect state. Exit codes: 0 all passed, 1 any failed, 2 validation/environment problem." }
+  }
+
+  verification = "`config-weave test` reports the test(s) passed and exits 0."
+}
+
+procedure check_then_apply {
+  title    = "Check, then apply a play"
+  purpose  = "Preview what a play would change (report-only), then converge the machine."
+  preconditions = ["A validated playbook.", "Authorization to mutate the target machine before applying."]
+  related  = [playbooks, scripts]
+  audience = :both
+
+  step 1 {
+    title = "Dry-run with check"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave check ./my-playbook baseline
+make-a   not configured
+make-b   not configured
+SH
+      }
+      callout "check never mutates" { class = ["info"]  body = "Each step's check() runs report-only: already configured / not configured / skipped (condition false). Nothing is written." }
+    }
+    body steps { p "Run `config-weave check ./my-playbook <play>` to see the per-step status without changing anything. Use `--var KEY=VALUE` / `--var-file` to supply variables." }
+  }
+
+  step 2 {
+    title = "Apply to converge"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave apply ./my-playbook baseline
+make-a   configured
+make-b   configured
+SH
+      }
+    }
+    body steps { p "Run `config-weave apply ./my-playbook <play>`. Each unconfigured step applies, then re-checks; `configured` means apply changed it and the re-check confirmed. A reboot-required step halts the play with exit 3." }
+  }
+
+  step 3 {
+    title = "Confirm idempotence"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave apply ./my-playbook baseline
+make-a   already configured
+make-b   already configured
+SH
+      }
+    }
+    body steps { p "Run `apply` again: every step should report `already configured`. If a step re-applies, its `check` depends on in-process state and the convergence contract is broken." }
+  }
+
+  verification = "A second `apply` reports every step `already configured` and exits 0."
+}

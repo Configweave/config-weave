@@ -1,0 +1,71 @@
+// config-weave landing page. `start = true` makes it the page served at `/`.
+// The site header already shows "config-weave", so the page leads with the
+// motivation rather than a redundant H1.
+page index { sites = [:config_weave]  title = "Why config-weave?"  start = true
+  callout "Heavy development — not production ready" {
+    class = ["warning"]
+    body  = "config-weave is under **active development**. The playbook/package vocabulary, the host API, and the CLI can change without notice."
+  }
+
+  h1 "Why config-weave?"
+
+  p "**Single-binary configuration management.** Copy the binary onto a target machine alongside a playbook folder and run it — no agent, no runtime, no package installs. A playbook describes the desired state of a system; config-weave can **check** whether the machine matches (a report-only dry run) or **apply** it (converge the machine to the playbook)."
+
+  h2 "Three languages, cleanly divided"
+
+  p "WCL and wscript never interact directly — the config-weave engine mediates."
+
+  table {
+    header = ["Layer", "Job"]
+    rows = [
+      ["**WCL**", "Encodes playbooks and packages: plays, steps, variables, conditions, gatherer invocations, and resource/gatherer declarations. WCL never executes against the system."],
+      ["**wscript**", "Implements gatherers and resources — the scripts that inspect and mutate the machine, through a host API registered by config-weave."],
+      ["**config-weave** (Rust)", "Mediates: validates everything before anything runs, then schedules steps over a DAG with concurrency classes."],
+    ]
+  }
+
+  h2 "The convergence contract"
+
+  p "Every resource obeys a **check → apply → re-check** lifecycle: `check` never mutates; after a successful `apply`, a re-check must return *already configured* — even in a fresh process. The [testlab](./wskills/config-weave/) proves this with a three-run protocol in disposable docker containers or vmlab VMs."
+
+  h2 "Reference"
+
+  p "config-weave's reference is published as a **wskill** — a self-contained WCL model projected into both the book linked below and a Claude Code skill."
+
+  // One linked entry per wskill under docs/wskills/, discovered by the `include` in
+  // main.wcl. Title / summary come from the wskill's book site.
+  wdoc_repeater { each = included_sites({ folder: "wskills", entry: "wdoc/book/main.wcl" })  as = :s
+    p $"**[${s.title}](./${s.href})**${match s.summary { none => "", su => $" — ${su}" }}"
+  }
+
+  h2 "A taste"
+
+  p "A playbook is a WCL document. Plays run steps; each step invokes a resource and supplies properties validated against the resource's declared params."
+
+  code wcl {
+    source = <<'WCL'
+      playbook "Sample Baseline" {
+        description = "Create a marker file"
+
+        gather "os" { from = "core.os_info" }   // facts → the `os` variable
+
+        vars {
+          work_root = "/tmp/config-weave-sample"
+          is_linux  = os.family == "linux"
+        }
+
+        play "baseline" {
+          step "make-a" {
+            description = "Create the first marker file"
+            resource  = "core.file_present"     // package.resource
+            condition = is_linux                // false => Skipped
+            properties {
+              path    = $"${work_root}/a.txt"
+              content = "alpha"
+            }
+          }
+        }
+      }
+      WCL
+  }
+}

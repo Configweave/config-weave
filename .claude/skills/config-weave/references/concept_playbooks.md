@@ -1,8 +1,12 @@
-# Playbooks (`playbook.wcl`)
+# Playbooks
 
-A playbook is a directory containing `playbook.wcl`, optional `lib/` (shared wscript code),
-and `pkgs/<name>/` packages (see `packages.md`). The engine appends the system import
-`<weave/playbook.wcl>` automatically — never write import lines.
+_playbook.wcl — plays of steps, gather blocks, vars, and the scheduling semantics._
+
+A playbook is a directory containing `playbook.wcl`, an optional `lib/` of shared
+wscript code, and `pkgs/<name>/` packages (see [Packages](../references/concept_packages.md)). The
+engine appends the system import `<weave/playbook.wcl>` automatically — \*\*never write
+import lines\*\*.
+
 
 ## Full example
 
@@ -60,14 +64,14 @@ playbook "Sample Baseline" {
 ## Block reference
 
 | Block | Fields | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `playbook "name"` | `description` (required), `version` (default `"0.0.0"`), `gather*`, `vars?`, `play*` | one per file |
-| `gather "label"` | `description?`, `from` (required, `pkg.gatherer`), `params?` block | label becomes the variable holding the result |
+| `gather "label"` | `description?`, `from` (required, `pkg.gatherer`), `params?` | label becomes the variable holding the result |
 | `vars` | free-form `name = expr` | expressions may reference gatherer results and other vars |
 | `play "name"` | `description` (required), `parallel` (default `true`), `step*`, `container*` | `parallel = false` = strict declaration order |
 | `container "name"` | `description` (required), `condition?`, `step*`, `container*` | condition applies to all children |
-| `step "name"` | `description` (required), `resource` (required), `condition?`, `requires?` (list of step names), `concurrency?`, `properties?` block | `concurrency` may *tighten* the resource's class, never loosen |
-| `properties` / `params` | free-form `name = expr` | validated against the resource/gatherer `param` declarations (types, required, unknown keys) |
+| `step "name"` | `description` (required), `resource` (required), `condition?`, `requires?`, `concurrency?`, `properties?` | `concurrency` may \*tighten\* the resource's class, never loosen |
+| `properties` / `params` | free-form `name = expr` | validated against the resource/gatherer `param` declarations |
 
 `description` is mandatory wherever shown as required — the loader enforces it.
 
@@ -75,8 +79,8 @@ playbook "Sample Baseline" {
 
 Precedence (lowest → highest): **vars declaration → gatherer result → `--var-file` → `--var`**.
 
-- `--var KEY=VALUE` parses VALUE as a WCL expression when possible (`--var count=3` is an
-  int), falling back to a plain string. Repeatable.
+- `--var KEY=VALUE` parses VALUE as a WCL expression when possible (`--var count=3` is
+  an int), falling back to a plain string. Repeatable.
 - `--var-file file.wcl` is a flat `name = value` collection; expressions evaluate
   standalone and **cannot reference other variables**.
 - **Gather params evaluate before variables resolve**: they may reference `--var` /
@@ -85,20 +89,30 @@ Precedence (lowest → highest): **vars declaration → gatherer result → `--v
   `(gatherer, canonicalized params)`; any gatherer failure aborts before step execution.
 - Conditions and properties evaluate lazily at run time against the full scope.
 
-### Shadowing pitfall
 
-Property/params block fields **shadow** outer variables: `url = url` inside a
-`properties` block is a self-reference cycle error. Use distinct variable names
-(`tool_url = ...` then `url = tool_url`).
+> [!WARNING]
+> **Shadowing pitfall**
+> Property/params block fields **shadow** outer variables: `url = url` inside a `properties` block is a self-reference cycle error. Use distinct names (`tool_url = ...` then `url = tool_url`).
 
 ## Scheduling semantics
 
-- `requires` is **ordering, not a success demand**: a *skipped* dependency does not block
-  a dependent; an *errored* or *not-run* dependency blocks dependents (`not run`) in
-  apply mode.
+- `requires` is **ordering, not a success demand**: a \*skipped\* dependency does not
+  block a dependent; an \*errored\* or \*not-run\* dependency blocks dependents (`not run`)
+  in apply mode.
 - In a `parallel` play the DAG scheduler dispatches steps as dependencies complete,
   subject to each resource's concurrency class (`parallel` / `exclusive` / `global` —
-  see `packages.md`).
+  see [Packages](../references/concept_packages.md)).
 - Steps left undispatched when a run halts report **not run**.
-- Step lifecycle (check → apply → re-check) is in `scripts.md`; CLI flags and exit codes
-  in `cli.md`.
+- The per-step check → apply → re-check lifecycle is in [Scripts](../references/concept_scripts.md); CLI
+  flags and exit codes are in the CLI reference.
+
+
+## Related
+
+- [Packages](../references/concept_packages.md)
+
+- [Resource & gatherer scripts](../references/concept_scripts.md)
+
+- [Testing & the testlab](../references/concept_testing.md)
+
+[← All concepts](../references/concepts_ref.md)

@@ -1,11 +1,14 @@
-# Packages (`package.wcl`)
+# Packages
+
+_package.wcl — resources, gatherers, tests, params, the directory layout, and concurrency classes._
 
 A package bundles resources, gatherers and tests under `pkgs/<name>/` inside a playbook
 directory. The engine appends the system import `<weave/package.wcl>` automatically.
 
+
 ## Directory layout
 
-```
+```text
 my-playbook/
   playbook.wcl
   lib/                          # playbook-level shared wscript (see note below)
@@ -21,8 +24,9 @@ my-playbook/
         file_present_verify.wscript  # optional verify() for tests
 ```
 
-> **lib/ caveat:** wscript v1 has no script-to-script imports. `lib/` folders are compiled
-> standalone during validation but **cannot be imported** by resource scripts yet.
+> [!NOTE]
+> **lib/ caveat**
+> wscript v1 has no script-to-script imports. `lib/` folders are compiled standalone during validation but **cannot be imported** by resource scripts yet.
 
 ## Full example
 
@@ -53,7 +57,7 @@ package "core" {
     }
   }
 
-  test "file_present_converges" {         // see testing.md
+  test "file_present_converges" {         // see the Testing concept
     description = "file_present creates the file and is idempotent"
     image = "debian:12"
     verify = "tests/file_present_verify.wscript"
@@ -69,26 +73,33 @@ package "core" {
 ## Block reference
 
 | Block | Fields | Notes |
-|---|---|---|
-| `package "name"` | `description` (required), `gatherer*`, `resource*`, `test*` | name is how playbooks qualify refs: `core.file_present` |
+| --- | --- | --- |
+| `package "name"` | `description` (required), `gatherer*`, `resource*`, `test*` | name qualifies playbook refs: `core.file_present` |
 | `gatherer "name"` | `description`, `script`, `param*` | script exports `gather(params: Value) -> Value` |
 | `resource "name"` | `description`, `script`, `concurrency` (default `"parallel"`), `param*` | script exports `check()` + `apply()` |
-| `param "name"` | `description`, `type`, `required` (default `false`), `default?` | coarse types: `string\|int\|float\|bool\|list\|map` |
-| `test "name"` | see `testing.md` | run by `config-weave test` in disposable containers |
+| `param "name"` | `description`, `type`, `required` (default `false`), `default?` | types: `string\|int\|float\|bool\|list\|map` |
+| `test "name"` | see the Testing concept | run by `config-weave test` in disposable instances |
 
-Properties/params in playbooks are validated against these `param` declarations at
-validation time: unknown keys, missing required params and type mismatches are errors;
-declared defaults are applied before the script runs.
+Properties/params in playbooks are validated against these `param` declarations at validation time: unknown keys, missing required params and type mismatches are errors; declared defaults are applied before the script runs.
 
 ## Concurrency classes
 
-Declared on the resource; a step may *tighten* its resource's class but never loosen it.
+Declared on the resource; a step may \*tighten\* its resource's class but never loosen it.
 
 | Class | Meaning |
-|---|---|
+| --- | --- |
 | `parallel` (default) | no restriction |
 | `exclusive` | at most one step using this resource type at a time (the apt/MSI lock case) |
 | `global` | step runs completely alone: scheduler drains in-flight steps, runs solo, resumes |
 
-Writing the wscript scripts themselves (entry-point contracts, lifecycle, params access) is
-covered in `scripts.md`.
+Writing the wscript scripts themselves is covered in [Scripts](../references/concept_scripts.md).
+
+## Related
+
+- [Playbooks](../references/concept_playbooks.md)
+
+- [Resource & gatherer scripts](../references/concept_scripts.md)
+
+- [Testing & the testlab](../references/concept_testing.md)
+
+[← All concepts](../references/concepts_ref.md)

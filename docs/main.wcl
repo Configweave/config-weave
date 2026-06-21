@@ -1,0 +1,41 @@
+// config-weave's documentation site, authored in wdoc and rendered by `wcl wdoc`.
+//
+//   wcl wdoc serve docs/main.wcl                 # / = landing, /wskills/config-weave/ = reference
+//   wcl wdoc build docs/main.wcl --out docs/_site
+//     → docs/_site/index.html             config-weave landing (webpage template)
+//       docs/_site/wskills/config-weave/  the config-weave reference book
+//
+// The reference content lives in a wskill — a self-contained WCL model under
+// docs/wskills/config-weave/ — projected into a book (included here) and a Claude
+// Code skill (`just skill-build`). The single `import <wdoc.wcl>` pulls in the
+// embedded wdoc standard library so every stdlib block is in scope here and in every
+// imported page.
+import <wdoc.wcl>
+
+// Build the wskill's book under docs/_site/wskills/config-weave/; the landing page
+// lists it via `included_sites(...)`.
+include "wskills" { entry = "wdoc/book/main.wcl" }
+
+// The landing site: the `webpage` template (title header + top navbar). `root = true`
+// serves it at `/`; the reference book renders under `/wskills/config-weave/`.
+site config_weave {
+  default_template = :webpage
+  title            = "config-weave"
+  root             = true
+  theme            = :nord
+  accent           = :cyan
+  menu {
+    item "Home"            { page = index }
+    item "Features"        { page = features }
+    item "Getting started" { page = getting_started }
+    // The reference is its own built site (the included wskill book); link by
+    // root-relative output path.
+    item "Reference"       { href = "wskills/config-weave/" }
+    item "Source"          { href = "https://github.com/Configweave/config-weave" }
+  }
+}
+
+// Landing pages (sites = [:config_weave]).
+import "./pages/config-weave/index.wcl"
+import "./pages/config-weave/features.wcl"
+import "./pages/config-weave/getting-started.wcl"

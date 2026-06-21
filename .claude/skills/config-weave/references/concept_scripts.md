@@ -1,10 +1,13 @@
-# Writing resource & gatherer scripts (wscript)
+# Resource & gatherer scripts
 
-Resource, gatherer and verify scripts are single-file wscript programs compiled against the
-config-weave host API. Import host modules with `use <module>`; registered types
+_wscript entry-point contracts, the per-step check → apply → re-check lifecycle, reading params, logging._
+
+Resource, gatherer and verify scripts are single-file wscript programs compiled against
+the config-weave host API. Import host modules with `use <module>`; registered types
 (`Value`, `CheckResult`, `ApplyResult`, `CmdOutput`, `HttpResponse`, `ComObject`) are
-ambient — no `use` needed for type names. See `wscript-language.md` for the language,
-`hostapi.md` for the modules.
+ambient — no `use` needed. See [the wscript language](../references/concept_wscript_language.md) and
+[the host API](../references/concept_hostapi.md).
+
 
 ## Entry-point contracts
 
@@ -18,7 +21,7 @@ fn apply(params: Value) -> ApplyResult            // or -> Result[ApplyResult, s
 // gatherers/<name>.wscript
 fn gather(params: Value) -> Value                 // or -> Result[Value, string]
 
-// tests/<name>.wscript (testlab verify, see testing.md)
+// tests/<name>.wscript (testlab verify)
 fn verify(facts: Value) -> bool                   // or -> Result[bool, string]
 ```
 
@@ -31,23 +34,23 @@ enum ApplyResult { Success, RebootRequired }
 
 ## Step lifecycle (per step)
 
-1. **Check** — `AlreadyConfigured` → report *Already Configured*, continue.
-   `RebootRequired` → in apply mode report *Reboot Required* and halt the play (exit 3);
+1. **Check** — `AlreadyConfigured` → report \*Already Configured\*, continue.
+   `RebootRequired` → in apply mode report \*Reboot Required\* and halt the play (exit 3);
    in check mode it is an ordinary report status (check is report-only).
-   `NotConfigured` → proceed to apply (check mode just reports *Not Configured*).
+   `NotConfigured` → proceed to apply (check mode just reports \*Not Configured\*).
    Error → halt unless `--continue-on-error`.
 2. **Apply** — `Success` → re-check. `RebootRequired` → report and halt.
-3. **Re-check** — must return `AlreadyConfigured`, which reports *Configured*; anything
-   else reports *Error* ("apply claimed success but check disagrees").
+3. **Re-check** — must return `AlreadyConfigured`, which reports \*Configured\*; anything
+   else reports \*Error\* ("apply claimed success but check disagrees").
 
-`check` must never mutate; `apply` must converge so the re-check passes — and must
-converge **across processes** too (the testlab's third run catches state that only
-exists in-process).
+
+> [!WARNING]
+> **Cross-process idempotence**
+> `check` must never mutate; `apply` must converge so the re-check passes — and must converge **across processes** too (the testlab's third run catches state that only exists in-process).
 
 ## Reading params
 
-`params` is a `Value::Map` with declared defaults already applied and types already
-validated (see `packages.md`). Typical access pattern:
+`params` is a `Value::Map` with declared defaults already applied and types already validated. Typical access pattern:
 
 ```rust
 use value
@@ -84,8 +87,7 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
 
 ## Gatherer example
 
-Gatherers return any `Value`; the result lands in the playbook variable named by the
-`gather` block's label (e.g. `os.family`).
+Gatherers return any `Value`; the result lands in the playbook variable named by the `gather` block's label (e.g. `os.family`).
 
 ```rust
 use value
@@ -107,10 +109,17 @@ fn gather(params: Value) -> Value {
 - Raw `print`/`println` are redirected into `log::info` (stdout stays clean for `--json`).
 - `shell::run_streaming` pipes a long command's output through `log` live.
 
+
 ## Editor support
 
-`config-weave wscripti [outdir]` emits `weave.wscripti` (the full host interface) plus a
-starter `wscript.toml`. With those next to your scripts, `wscript check` and the wscript LSP
-type-check scripts against the exact config-weave surface — host API misuse is a
-compile-time error, also caught by `config-weave validate` (stage that compiles every
-script).
+`config-weave wscripti [outdir]` emits `weave.wscripti` (the full host interface) plus a starter `wscript.toml`. With those next to your scripts, `wscript check` and the wscript LSP type-check scripts against the exact config-weave surface — host API misuse is a compile-time error, also caught by `config-weave validate`.
+
+## Related
+
+- [Packages](../references/concept_packages.md)
+
+- [The wscript language](../references/concept_wscript_language.md)
+
+- [Host API — cross-platform](../references/concept_hostapi.md)
+
+[← All concepts](../references/concepts_ref.md)

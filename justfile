@@ -83,6 +83,20 @@ serve-pkgs-docs: build
     @echo "serving package docs at http://127.0.0.1:8080"
     wcl wdoc serve ../config-weave-pkgs/docs/_weave_docs.wcl
 
+# Serve config-weave's own documentation site (landing at /, the config-weave
+# reference book under /wskills/config-weave/) with live reload. Needs `wcl` on PATH.
+docs-serve *ARGS:
+    wcl wdoc serve docs/main.wcl {{ARGS}}
+
+# Build config-weave's documentation site into docs/_site/ (gitignored). Needs `wcl`.
+docs-build *ARGS:
+    wcl wdoc build docs/main.wcl --out docs/_site {{ARGS}}
+
+# Regenerate the committed Claude Code skill (.claude/skills/config-weave/) from the
+# config-weave wskill (docs/wskills/config-weave/). Overwrites the generated skill.
+skill-build *ARGS:
+    wcl wdoc skill docs/wskills/config-weave/wdoc/skill/main.wcl --out .claude/skills/config-weave {{ARGS}}
+
 # Release artifacts for both PRD targets plus a checksums file.
 # Requires `cross` and a container runtime; path deps are mounted into
 # the build container (see Cross.toml).

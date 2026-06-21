@@ -1,0 +1,3 @@
+# Rendered documentation site / markdown — regenerate with `just docs-build`.
+/_site/
+/_md/

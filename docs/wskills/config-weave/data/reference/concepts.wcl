@@ -1,0 +1,723 @@
+// Concepts — the config-weave layers, one concept per reference page. Ported from
+// the hand-authored skill reference (playbooks, packages, scripts, wscript, host
+// API, testlab). Every concept is `:both` so it renders in the book and the skill.
+
+concept playbooks {
+  name     = "Playbooks"
+  summary  = "playbook.wcl — plays of steps, gather blocks, vars, and the scheduling semantics."
+  related  = [packages, scripts, testing]
+  audience = :both
+  body {
+    p <<PROSE
+A playbook is a directory containing `playbook.wcl`, an optional `lib/` of shared
+wscript code, and `pkgs/<name>/` packages (see [Packages](concept_packages)). The
+engine appends the system import `<weave/playbook.wcl>` automatically — **never write
+import lines**.
+PROSE
+    h2 "Full example"
+    code "wcl" { source = <<'SRC'
+playbook "Sample Baseline" {
+  description = "Exercises the model loader, validation and execution"
+  version = "1.0.0"                      // optional, default "0.0.0"
+
+  gather "os" {                          // label = the variable the result lands in
+    description = "Operating system facts"
+    from = "core.os_info"                // package.gatherer
+    params {                             // optional, validated against gatherer's params
+      depth = 2
+    }
+  }
+
+  vars {
+    work_root = "/tmp/config-weave-sample"
+    is_linux = os.family == "linux"      // may reference gatherer results
+    marker_a = $"${work_root}/a.txt"     // WCL string interpolation: $"...${expr}..."
+  }
+
+  play "baseline" {
+    description = "Create marker files in order"
+    // parallel = true is the default; false runs steps in declaration order
+
+    step "make-a" {
+      description = "Create the first marker file"
+      resource = "core.file_present"     // package.resource
+      condition = is_linux               // optional bool expr; false => Skipped
+      properties {                       // validated against the resource's declared params
+        path = marker_a
+        content = "alpha"
+      }
+    }
+
+    container "secondary" {              // grouping for organisation/docs; nestable
+      description = "Files that depend on the first"
+      // condition here would apply to all children
+
+      step "make-b" {
+        description = "Create the second marker file"
+        resource = "core.file_present"
+        requires = ["make-a"]            // ordering edges by step name
+        properties {
+          path = $"${work_root}/b.txt"
+          content = "beta"
+        }
+      }
+    }
+  }
+}
+SRC
+    }
+    h2 "Block reference"
+    table {
+      header = ["Block", "Fields", "Notes"]
+      rows = [
+        ["`playbook \"name\"`", "`description` (required), `version` (default `\"0.0.0\"`), `gather*`, `vars?`, `play*`", "one per file"],
+        ["`gather \"label\"`", "`description?`, `from` (required, `pkg.gatherer`), `params?`", "label becomes the variable holding the result"],
+        ["`vars`", "free-form `name = expr`", "expressions may reference gatherer results and other vars"],
+        ["`play \"name\"`", "`description` (required), `parallel` (default `true`), `step*`, `container*`", "`parallel = false` = strict declaration order"],
+        ["`container \"name\"`", "`description` (required), `condition?`, `step*`, `container*`", "condition applies to all children"],
+        ["`step \"name\"`", "`description` (required), `resource` (required), `condition?`, `requires?`, `concurrency?`, `properties?`", "`concurrency` may *tighten* the resource's class, never loosen"],
+        ["`properties` / `params`", "free-form `name = expr`", "validated against the resource/gatherer `param` declarations"],
+      ]
+    }
+    p "`description` is mandatory wherever shown as required — the loader enforces it."
+    h2 "Variables"
+    p "Precedence (lowest → highest): **vars declaration → gatherer result → `--var-file` → `--var`**."
+    p <<PROSE
+- `--var KEY=VALUE` parses VALUE as a WCL expression when possible (`--var count=3` is
+  an int), falling back to a plain string. Repeatable.
+- `--var-file file.wcl` is a flat `name = value` collection; expressions evaluate
+  standalone and **cannot reference other variables**.
+- **Gather params evaluate before variables resolve**: they may reference `--var` /
+  `--var-file` overrides, but not gatherer results or vars that depend on them.
+- Gatherer invocations all run concurrently and are deduplicated by
+  `(gatherer, canonicalized params)`; any gatherer failure aborts before step execution.
+- Conditions and properties evaluate lazily at run time against the full scope.
+PROSE
+    callout "Shadowing pitfall" { class = ["warning"]  body = "Property/params block fields **shadow** outer variables: `url = url` inside a `properties` block is a self-reference cycle error. Use distinct names (`tool_url = ...` then `url = tool_url`)." }
+    h2 "Scheduling semantics"
+    p <<PROSE
+- `requires` is **ordering, not a success demand**: a *skipped* dependency does not
+  block a dependent; an *errored* or *not-run* dependency blocks dependents (`not run`)
+  in apply mode.
+- In a `parallel` play the DAG scheduler dispatches steps as dependencies complete,
+  subject to each resource's concurrency class (`parallel` / `exclusive` / `global` —
+  see [Packages](concept_packages)).
+- Steps left undispatched when a run halts report **not run**.
+- The per-step check → apply → re-check lifecycle is in [Scripts](concept_scripts); CLI
+  flags and exit codes are in the CLI reference.
+PROSE
+  }
+}
+
+concept packages {
+  name     = "Packages"
+  summary  = "package.wcl — resources, gatherers, tests, params, the directory layout, and concurrency classes."
+  related  = [playbooks, scripts, testing]
+  audience = :both
+  body {
+    p <<PROSE
+A package bundles resources, gatherers and tests under `pkgs/<name>/` inside a playbook
+directory. The engine appends the system import `<weave/package.wcl>` automatically.
+PROSE
+    h2 "Directory layout"
+    code "text" { source = <<'SRC'
+my-playbook/
+  playbook.wcl
+  lib/                          # playbook-level shared wscript (see note below)
+  pkgs/
+    core/
+      package.wcl
+      lib/                      # package-level shared wscript
+      resources/
+        file_present.wscript       # exports check() and apply()
+      gatherers/
+        os_info.wscript            # exports gather()
+      tests/
+        file_present_verify.wscript  # optional verify() for tests
+SRC
+    }
+    callout "lib/ caveat" { class = ["note"]  body = "wscript v1 has no script-to-script imports. `lib/` folders are compiled standalone during validation but **cannot be imported** by resource scripts yet." }
+    h2 "Full example"
+    code "wcl" { source = <<'SRC'
+package "core" {
+  description = "Core sample package"
+
+  gatherer "os_info" {
+    description = "Report basic operating system facts"
+    script = "gatherers/os_info.wscript"     // path relative to the package dir
+    // param blocks allowed here too, same shape as on resources
+  }
+
+  resource "file_present" {
+    description = "Ensure a file exists with the given content"
+    script = "resources/file_present.wscript"
+    concurrency = "parallel"              // parallel (default) | exclusive | global
+
+    param "path" {
+      description = "Absolute path of the file"
+      type = "string"                     // string | int | float | bool | list | map
+      required = true                     // default false
+    }
+    param "content" {
+      description = "File content"
+      type = "string"
+      default = ""                        // default value when omitted
+    }
+  }
+
+  test "file_present_converges" {         // see the Testing concept
+    description = "file_present creates the file and is idempotent"
+    image = "debian:12"
+    verify = "tests/file_present_verify.wscript"
+    step "create" {
+      description = "Create a marker file"
+      resource = "file_present"
+      properties { path = "/var/tmp/weave-sample.txt"  content = "hello" }
+    }
+  }
+}
+SRC
+    }
+    h2 "Block reference"
+    table {
+      header = ["Block", "Fields", "Notes"]
+      rows = [
+        ["`package \"name\"`", "`description` (required), `gatherer*`, `resource*`, `test*`", "name qualifies playbook refs: `core.file_present`"],
+        ["`gatherer \"name\"`", "`description`, `script`, `param*`", "script exports `gather(params: Value) -> Value`"],
+        ["`resource \"name\"`", "`description`, `script`, `concurrency` (default `\"parallel\"`), `param*`", "script exports `check()` + `apply()`"],
+        ["`param \"name\"`", "`description`, `type`, `required` (default `false`), `default?`", "types: `string|int|float|bool|list|map`"],
+        ["`test \"name\"`", "see the Testing concept", "run by `config-weave test` in disposable instances"],
+      ]
+    }
+    p "Properties/params in playbooks are validated against these `param` declarations at validation time: unknown keys, missing required params and type mismatches are errors; declared defaults are applied before the script runs."
+    h2 "Concurrency classes"
+    p "Declared on the resource; a step may *tighten* its resource's class but never loosen it."
+    table {
+      header = ["Class", "Meaning"]
+      rows = [
+        ["`parallel` (default)", "no restriction"],
+        ["`exclusive`", "at most one step using this resource type at a time (the apt/MSI lock case)"],
+        ["`global`", "step runs completely alone: scheduler drains in-flight steps, runs solo, resumes"],
+      ]
+    }
+    p "Writing the wscript scripts themselves is covered in [Scripts](concept_scripts)."
+  }
+}
+
+concept scripts {
+  name     = "Resource & gatherer scripts"
+  summary  = "wscript entry-point contracts, the per-step check → apply → re-check lifecycle, reading params, logging."
+  related  = [packages, wscript_language, hostapi]
+  audience = :both
+  body {
+    p <<PROSE
+Resource, gatherer and verify scripts are single-file wscript programs compiled against
+the config-weave host API. Import host modules with `use <module>`; registered types
+(`Value`, `CheckResult`, `ApplyResult`, `CmdOutput`, `HttpResponse`, `ComObject`) are
+ambient — no `use` needed. See [the wscript language](concept_wscript_language) and
+[the host API](concept_hostapi).
+PROSE
+    h2 "Entry-point contracts"
+    p "Each entry point accepts two signatures — plain, or fallible when you want `?`:"
+    code "rust" { source = <<'SRC'
+// resources/<name>.wscript
+fn check(params: Value) -> CheckResult            // or -> Result[CheckResult, string]
+fn apply(params: Value) -> ApplyResult            // or -> Result[ApplyResult, string]
+
+// gatherers/<name>.wscript
+fn gather(params: Value) -> Value                 // or -> Result[Value, string]
+
+// tests/<name>.wscript (testlab verify)
+fn verify(facts: Value) -> bool                   // or -> Result[bool, string]
+SRC
+    }
+    p "An `Err` (or a VM fault) maps to the step's **Error** status."
+    code "rust" { source = <<'SRC'
+enum CheckResult { AlreadyConfigured, NotConfigured, RebootRequired }
+enum ApplyResult { Success, RebootRequired }
+SRC
+    }
+    h2 "Step lifecycle (per step)"
+    p <<PROSE
+1. **Check** — `AlreadyConfigured` → report *Already Configured*, continue.
+   `RebootRequired` → in apply mode report *Reboot Required* and halt the play (exit 3);
+   in check mode it is an ordinary report status (check is report-only).
+   `NotConfigured` → proceed to apply (check mode just reports *Not Configured*).
+   Error → halt unless `--continue-on-error`.
+2. **Apply** — `Success` → re-check. `RebootRequired` → report and halt.
+3. **Re-check** — must return `AlreadyConfigured`, which reports *Configured*; anything
+   else reports *Error* ("apply claimed success but check disagrees").
+PROSE
+    callout "Cross-process idempotence" { class = ["warning"]  body = "`check` must never mutate; `apply` must converge so the re-check passes — and must converge **across processes** too (the testlab's third run catches state that only exists in-process)." }
+    h2 "Reading params"
+    p "`params` is a `Value::Map` with declared defaults already applied and types already validated. Typical access pattern:"
+    code "rust" { source = <<'SRC'
+use value
+use fs
+use path
+use log
+
+fn param_str(params: Value, key: string, fallback: string) -> string {
+    if let Some(v) = params.get(key) {
+        if let Some(s) = v.as_string() { return s }
+    }
+    fallback
+}
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let p = param_str(params, "path", "")
+    if p == "" { return Err("missing 'path' parameter") }
+    if !fs::exists(p) { return Ok(CheckResult::NotConfigured) }
+    if fs::read(p)? == param_str(params, "content", "") {
+        Ok(CheckResult::AlreadyConfigured)
+    } else {
+        Ok(CheckResult::NotConfigured)
+    }
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    let p = param_str(params, "path", "")
+    log::info("writing " + p)
+    fs::mkdir(path::parent(p))?
+    fs::write(p, param_str(params, "content", ""))?
+    Ok(ApplyResult::Success)
+}
+SRC
+    }
+    h2 "Gatherer example"
+    p "Gatherers return any `Value`; the result lands in the playbook variable named by the `gather` block's label (e.g. `os.family`)."
+    code "rust" { source = <<'SRC'
+use value
+use sys
+
+fn gather(params: Value) -> Value {
+    Value::Map(#{
+        "family": Value::String(sys::family()),
+        "name": Value::String(sys::os_name()),
+        "cpus": Value::Int(sys::cpu_count())
+    })
+}
+SRC
+    }
+    h2 "Logging & output"
+    p <<PROSE
+- Use `log::debug/info/warn/error` — messages carry step context into the terminal
+  output and the NDJSON file log.
+- Raw `print`/`println` are redirected into `log::info` (stdout stays clean for `--json`).
+- `shell::run_streaming` pipes a long command's output through `log` live.
+PROSE
+    h2 "Editor support"
+    p "`config-weave wscripti [outdir]` emits `weave.wscripti` (the full host interface) plus a starter `wscript.toml`. With those next to your scripts, `wscript check` and the wscript LSP type-check scripts against the exact config-weave surface — host API misuse is a compile-time error, also caught by `config-weave validate`."
+  }
+}
+
+concept wscript_language {
+  name     = "The wscript language"
+  summary  = "Statically typed, Rust-flavored scripting — values, functions, structs/enums, match, Option/Result, containers, traits, memory."
+  related  = [scripts, wscript_stdlib]
+  audience = :both
+  body {
+    p <<PROSE
+Statically typed, Rust-flavored scripting language (Rust minus borrow checker,
+lifetimes and generics). Scripts are **single files in v1** — no script-to-script
+imports. Full tour: `~/dev/wscript/docs/tour.md`.
+PROSE
+    h2 "Values and types"
+    p "Primitives (value types): `int` (64-bit signed, wrapping), `float`, `bool`, `char`, `unit` (`()`). Everything else is a **reference type**: `string`, structs, enums, `List[T]`, `Map[K, V]`, function values, `weak[T]`."
+    code "rust" { source = <<'SRC'
+let x = 5                  // inferred; annotations optional on lets
+let name: string = "wil"
+let log = "hp: " + str(99) // + concatenates strings; str() converts
+let msg = fmt("{} of {}", 3, 10)   // NO string interpolation — use fmt()
+SRC
+    }
+    p <<PROSE
+- **No implicit numeric conversion** (`1 + 2.0` is a type error — use `int()`/`float()`).
+- **No truthiness** — conditions must be `bool`.
+- Statements end at newlines; semicolons permitted, never required.
+PROSE
+    h2 "Functions and closures"
+    code "rust" { source = <<'SRC'
+fn area(w: int, h: int) -> int { w * h }
+fn apply(f: fn(int) -> int, x: int) -> int { f(x) }
+let double = |x| x * 2          // closures capture by reference
+SRC
+    }
+    h2 "Structs, enums, methods"
+    code "rust" { source = <<'SRC'
+struct Player { name: string, hp: int }
+enum Event { Quit, Key(char), Click { x: int, y: int } }
+
+impl Player {
+    fn heal(self, amount: int) { self.hp = self.hp + amount }
+}
+SRC
+    }
+    p "`self` is implicit and always by reference (there is no `&` in wscript). **Reference semantics**: assignment/passing/returning reference types copies the reference, never the data. `same(a, b)` tests reference identity; deep copy is explicit via `#[derive(Clone)]` + `.clone()`."
+    h2 "Pattern matching"
+    p "`match` is an expression, **exhaustiveness-checked at compile time**:"
+    code "rust" { source = <<'SRC'
+match e {
+    Event::Quit => false,
+    Event::Key(c) if c == 'q' => false,          // guards (don't count for exhaustiveness)
+    Event::Key('h') | Event::Key('?') => help(), // or-patterns (no bindings inside, v1)
+    Event::Key(_) => true,
+    Event::Click { x, y } => x >= 0 && y >= 0,
+}
+SRC
+    }
+    p "`if let Some(x) = opt { … }` and `let Some(n) = expr else { return Err(\"…\") }` work as in Rust (let-else block must diverge)."
+    h2 "Option, Result and ?"
+    p "`Option[T]` and `Result[T, E]` are always available. `?` early-returns the `None`/`Err` and composes across the host boundary — host errors arrive as `Err`. Methods: `is_some is_none unwrap unwrap_or expect` / `is_ok is_err unwrap unwrap_or unwrap_err expect`."
+    h2 "Containers"
+    code "rust" { source = <<'SRC'
+let xs = [1, 2, 3]                  // List[int]; xs[0] faults OOB, xs.get(0) is Option
+let ages = #{ "alice": 30 }         // Map[string, int]; keys: int|bool|char|string
+ages["bob"] = 25                    // insert or overwrite; ages["nope"] faults — use .get
+xs.map(|x| x * 2).filter(|x| x > 2).fold(0, |a, x| a + x)
+SRC
+    }
+    p "Strings are immutable; operations are methods returning new strings, indexed in characters (not bytes). Method lists: [wscript built-ins](concept_wscript_stdlib)."
+    h2 "Loops"
+    code "rust" { source = <<'SRC'
+for i in 0..10 { }       // exclusive; 0..=10 inclusive (ranges only in for headers)
+for x in [1, 2, 3] { }   // list elements; maps iterate keys; strings iterate chars
+while cond { }
+loop { if done { break } }   // break / continue
+SRC
+    }
+    h2 "Traits and operators"
+    p "Go-flavored interfaces, Rust syntax; static dispatch when concrete, `dyn Trait` for dynamic. No default bodies or trait inheritance in v1. Operator overloading via builtin traits `Add Sub Mul Div Rem Neg Eq Ord Display Index` (`Index` read-only; `Ord` custom form is `fn cmp(self, other: Self) -> int` returning -1/0/1). `==` on structs/enums **requires** an `Eq` impl. Derives: `#[derive(Eq, Ord, Display, Clone)]`."
+    h2 "Memory and faults"
+    p "Pure reference counting — **cycles leak** (no cycle collector); break cycles with `weak(x)` / `w.upgrade() -> Option[T]`. VM faults (index OOB, div by zero, `unwrap()` on `None`) are trappable errors delivered to the host with a stack trace — in config-weave they surface as the step's Error status. Prefer `xs.get(i)` / `m.get(k)` where failure is expected."
+    h2 "Not in wscript (v1)"
+    p "Borrow checker, `&`/`&mut`, lifetimes, user-defined generics, exceptions, async, threads, implicit conversions, truthiness, string interpolation (use `fmt`), compound assignment (`+=`), bitwise operators, range values outside `for` headers, script imports."
+  }
+}
+
+concept wscript_stdlib {
+  name     = "wscript built-ins"
+  summary  = "The prelude, container/string/Option/Result methods, the Value type, and the json/toml modules available in config-weave scripts."
+  related  = [wscript_language, hostapi]
+  audience = :both
+  body {
+    callout "Not available in config-weave scripts" { class = ["warning"]  body = "wscript-std's `math`, `process`, `xml`, and standalone `fs` modules are **not registered**. config-weave provides its own richer `fs`, and `shell` replaces `process`. There is no `math` module; use plain operators." }
+    h2 "Prelude (always available, no import)"
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`print` / `println`", "`(any)` / `(any?)`", "redirected into `log::info`"],
+        ["`str`", "`(any) -> string`", "uses `Display` impls"],
+        ["`fmt`", "`(string, any…) -> string`", "`{}` placeholders; `{{`/`}}` escape; count compile-checked"],
+        ["`same`", "`(T, T) -> bool`", "reference identity"],
+        ["`weak`", "`(T) -> weak[T]`", "reference types only"],
+        ["`int`", "`(int|float|char) -> int`", "float truncates; char gives code point"],
+        ["`float`", "`(int|float) -> float`", ""],
+      ]
+    }
+    h2 "String methods (immutable; char-indexed)"
+    p "`len bytes_len is_empty split trim trim_start trim_end to_upper to_lower starts_with ends_with contains find replace repeat pad_left pad_right chars slice parse_int parse_float`"
+    p "`find -> Option[int]`; `parse_int/parse_float -> Result[…, string]`; concatenate with `+`."
+    h2 "List methods"
+    p "`len is_empty push pop get set insert remove clear contains index_of reverse sort join map filter fold first last slice concat clone`"
+    p "`xs[i]` faults out of bounds; `xs.get(i) -> Option[T]` never does."
+    h2 "Map methods (keys: int|bool|char|string)"
+    p "`len is_empty insert remove get contains_key keys values clear clone` · `m[k]` faults on a missing key (reads); `m[k] = v` inserts or overwrites."
+    h2 "Option / Result methods"
+    p "`Option`: `is_some is_none unwrap unwrap_or expect` · `Result`: `is_ok is_err unwrap unwrap_or unwrap_err expect` · plus the `?` operator."
+    h2 "The Value type (use value for the methods)"
+    p "The single dynamic escape hatch — gatherer results, step params, json/toml documents:"
+    code "rust" { source = <<'SRC'
+enum Value {
+    Null, Bool(bool), Int(int), Float(float), String(string),
+    List(List[Value]), Map(Map[string, Value]),
+}
+SRC
+    }
+    p <<PROSE
+Match on it like any enum, or use accessors: `get(key: string) -> Option[Value]` ·
+`at(idx: int) -> Option[Value]` · `keys() -> List[string]` · `len() -> int` ·
+`is_null() -> bool` · `as_bool / as_int / as_float / as_string / as_list / as_map ->
+Option[…]` (`as_float` also accepts `Int`). Construct with variant syntax:
+`Value::Map(#{ "family": Value::String(sys::family()) })`.
+PROSE
+    h2 "json (use json)"
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`parse`", "`(string) -> Result[Value, string]`"],
+        ["`to_string`", "`(Value) -> string` (keys sorted — deterministic)"],
+        ["`to_string_pretty`", "`(Value) -> string`"],
+      ]
+    }
+    h2 "toml (use toml)"
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`parse`", "`(string) -> Result[Value, string]` (datetimes become strings)"],
+        ["`to_string`", "`(Value) -> Result[string, string]`"],
+        ["`to_string_pretty`", "`(Value) -> Result[string, string]`"],
+      ]
+    }
+    p "TOML serialization fails on `Null` anywhere and on non-map top levels. INI lives in the host `data` module ([host API](concept_hostapi))."
+  }
+}
+
+concept hostapi {
+  name     = "Host API — cross-platform"
+  summary  = "The wscript modules config-weave registers everywhere: log, fs, path, shell, http, hash, archive, env, sys, data, template."
+  related  = [scripts, wscript_stdlib, hostapi_windows]
+  audience = :both
+  body {
+    p <<PROSE
+The wscript surface config-weave registers for all scripts (resources, gatherers,
+verify). Identical on every platform: foreign-platform functions exist everywhere and
+return runtime errors off their platform. Windows-only modules (`registry`, `service`,
+`com`) are in [the Windows host API](concept_hostapi_windows). Authoritative source:
+`config-weave wscripti` → `weave.wscripti`, generated from `src/hostapi/*.rs`. Import
+with `use <module>`. All fallible functions return `Result[…, string]` and compose
+with `?`.
+PROSE
+    h2 "log — structured logging (step context attached)"
+    p "`debug(msg)` · `info(msg)` · `warn(msg)` · `error(msg)` — all `(string)`. Raw `print`/`println` also route into `log::info`."
+    h2 "fs — file IO (richer than wscript-std's; replaces it)"
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`read`", "`(path) -> Result[string, string]`", "text"],
+        ["`read_bytes`", "`(path) -> Result[List[int], string]`", ""],
+        ["`write` / `append`", "`(path, content) -> Result[unit, string]`", "write replaces; append creates if absent"],
+        ["`write_bytes`", "`(path, List[int]) -> Result[unit, string]`", ""],
+        ["`copy` / `move`", "`(from, to) -> Result[unit, string]`", "move = rename, works on dirs"],
+        ["`delete`", "`(path) -> Result[unit, string]`", "file or symlink"],
+        ["`delete_dir`", "`(path) -> Result[unit, string]`", "recursive"],
+        ["`mkdir`", "`(path) -> Result[unit, string]`", "creates missing parents"],
+        ["`exists` / `is_file` / `is_dir`", "`(path) -> bool`", ""],
+        ["`list_dir`", "`(path) -> Result[List[string], string]`", "sorted names"],
+        ["`metadata`", "`(path) -> Result[Value, string]`", "map: size, modified, readonly, is_file, is_dir, is_symlink, mode"],
+        ["`glob`", "`(pattern) -> Result[List[string], string]`", "sorted"],
+        ["`temp_file` / `temp_dir`", "`() -> Result[string, string]`", "fresh path returned"],
+        ["`symlink`", "`(target, link) -> Result[unit, string]`", ""],
+        ["`read_link`", "`(path) -> Result[string, string]`", ""],
+      ]
+    }
+    h2 "path — pure path-string manipulation, no IO"
+    p "`join(a, b) -> string` · `parent(p) -> string` (empty at root) · `filename(p) -> string` · `extension(p) -> string` (no dot) · `normalize(p) -> string` (lexical `.`/`..`) · `absolutize(p) -> Result[string, string]` (against cwd, then normalize)."
+    h2 "shell — external commands"
+    p <<PROSE
+All take `(cmd_or_script: string, opts: Value)` and return `Result[CmdOutput, string]`.
+**opts is required** (wscript has fixed arity): pass `Value::Null` for defaults or a
+`Value::Map` with `cwd` (string), `env` (map), `timeout` (int/float secs), `stdin`
+(string). Timeout kills the child and returns `Err`.
+PROSE
+    table {
+      header = ["function", "behaviour"]
+      rows = [
+        ["`run`", "splits cmd with shell-words, executes the program **directly — no shell interpretation** (no globs, pipes, `$VAR`)"],
+        ["`run_streaming`", "like `run`, but streams output lines through `log` live (stdout → info, stderr → warn) — for long installs"],
+        ["`bash`", "`bash -c script` (falls back to `sh`) — the shell-features escape hatch"],
+        ["`powershell`", "tries `powershell` then `pwsh` with `-NoProfile -NonInteractive`; works on Linux with PowerShell Core"],
+      ]
+    }
+    code "rust" { source = <<'SRC'
+struct CmdOutput { stdout: string, stderr: string, code: int, success: bool }
+
+use shell
+use value
+let out = shell::run("systemctl is-active nginx", Value::Null)?
+if !out.success { return Ok(CheckResult::NotConfigured) }
+SRC
+    }
+    callout "Non-zero exit is not an Err" { class = ["note"]  body = "Inspect `out.success`/`out.code`. `Err` means the command could not run (spawn failure, timeout)." }
+    h2 "http — HTTP client (rustls; no system TLS dependency)"
+    p "opts is required: `Value::Null` or a map of `headers` (map), `timeout` (secs), `redirects` (bool, default true)."
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`get`", "`(url, opts) -> Result[HttpResponse, string]`"],
+        ["`post`", "`(url, body: string, opts) -> Result[HttpResponse, string]`"],
+        ["`download`", "`(url, dest_path, opts) -> Result[int, string]` — returns byte count"],
+      ]
+    }
+    code "rust" { source = <<'SRC'
+struct HttpResponse { status: int, body: string, headers: Map[string, string] }
+SRC
+    }
+    h2 "hash — digests (hex output)"
+    p "`sha256(s)` / `sha512(s)` / `md5(s)` — `(string) -> string`; `sha256_file(p)` / `sha512_file(p)` / `md5_file(p)` — `(path) -> Result[string, string]`. MD5 is legacy-interop only."
+    h2 "archive — extraction (no external tar/unzip needed)"
+    p "`extract_zip(archive, dest)` · `extract_tar_gz(archive, dest)` · `extract(archive, dest)` (auto by extension: .zip, .tar.gz, .tgz) — all `-> Result[int, string]` returning the entry count."
+    h2 "env — process environment and host identity"
+    p "`get(name) -> Option[string]` · `set(name, value)` · `unset(name)` · `path_split(value) -> List[string]` / `path_join(parts) -> Result[string, string]` · `hostname() -> string` · `current_user() -> string` · `home_dir() -> string` · `is_elevated() -> bool` (root/Administrator)."
+    h2 "sys — OS and hardware facts (gatherer fodder)"
+    p "`family() -> string` (linux/windows/macos) · `os_name()` (distro on Linux) · `os_version()` · `kernel_version()` · `arch()` · `cpu_count() -> int` · `total_memory() -> int` / `available_memory() -> int` (bytes)."
+    h2 "data — INI"
+    p "`ini_parse(text) -> Result[Value, string]` — map of sections, global keys under `\"\"`; `ini_serialize(map) -> Result[string, string]`. (JSON/TOML live in the `json`/`toml` modules — see [wscript built-ins](concept_wscript_stdlib).)"
+    h2 "template — Tera rendering (backs linux_files.template)"
+    p "`render(template, vars) -> Result[string, string]` — render a Tera template string against a `vars` map; autoescape is **off** (config files, not HTML). A non-map `vars` errors (`Null` is an empty context). Gives `{{ x }}`, `{% for %}`, `{% if %}`, and filters. Author template bodies as raw WCL heredocs (`<<'TMPL'`) so WCL's `$\"…${}\"` interpolation leaves Tera's `{{ }}`/`{% %}` alone; pass data via `vars`."
+  }
+}
+
+concept hostapi_windows {
+  name     = "Host API — Windows"
+  summary  = "registry, service, and com (IDispatch/WMI) — registered everywhere, runtime-erroring off Windows."
+  related  = [hostapi, scripts]
+  audience = :both
+  body {
+    p "`registry`, `service` and `com` are **registered on every platform** so playbooks compile and validate identically everywhere; off Windows their calls return runtime errors. Guard with a condition (`os.family == \"windows\"`) or `sys::family()`."
+    h2 "registry — Windows registry"
+    p "Keys are hive-prefixed paths: `HKLM\\Software\\Vendor\\App`. Constants: `registry::HKLM HKCU HKCR HKU HKCC`."
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`read`", "`(key, name) -> Result[Option[Value], string]`", "`None` when absent; typed values (SZ, DWORD, QWORD, EXPAND_SZ, MULTI_SZ)"],
+        ["`write`", "`(key, name, value: Value, kind: string) -> Result[unit, string]`", "kind: `sz | dword | qword | expand_sz | multi_sz`"],
+        ["`delete_value`", "`(key, name) -> Result[unit, string]`", ""],
+        ["`create_key`", "`(key) -> Result[unit, string]`", "creates parents"],
+        ["`delete_key`", "`(key) -> Result[unit, string]`", "deletes the subtree"],
+        ["`key_exists`", "`(key) -> Result[bool, string]`", ""],
+      ]
+    }
+    h2 "service — Windows service management (SCM)"
+    p "Windows-only in v1 — manage Linux services with `shell::run(\"systemctl …\", Value::Null)`."
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`status`", "`(name) -> Result[string, string]`", "`running | stopped | start_pending | stop_pending | paused | …`"],
+        ["`start` / `stop`", "`(name) -> Result[unit, string]`", "no-op when already in the target state"],
+        ["`set_startup`", "`(name, mode) -> Result[unit, string]`", "mode: `automatic | manual | disabled`"],
+        ["`startup`", "`(name) -> Result[string, string]`", "returns the startup type"],
+      ]
+    }
+    h2 "com — late-bound COM via IDispatch"
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`create`", "`(progid) -> Result[ComObject, string]`", "e.g. `\"WScript.Shell\"`"],
+        ["`get_object`", "`(name) -> Result[ComObject, string]`", "moniker or running object"],
+        ["`wmi_query`", "`(query) -> Result[Value, string]`", "runs against `root\\cimv2`; returns a **list of property maps**"],
+      ]
+    }
+    p "`ComObject` is an opaque handle with methods `get` / `get_object` / `set` / `call(name, args: List[Value])` / `call_object` / `items()`. VT_DISPATCH results must come through `get_object`/`call_object`/`items()` because the dynamic `Value` cannot hold an object handle."
+    code "rust" { source = <<'SRC'
+use com
+use value
+
+fn gather(params: Value) -> Result[Value, string] {
+    com::wmi_query("SELECT Name, State FROM Win32_Service WHERE StartMode='Auto'")
+}
+SRC
+    }
+    p "Worker threads are COM (STA) initialised by the engine — scripts never deal with COM lifetime or apartment setup."
+  }
+}
+
+concept testing {
+  name     = "Testing & the testlab"
+  summary  = "config-weave test — test blocks, the three-run protocol, docker/vmlab backends, grouping, verify scripts, and scenarios."
+  related  = [packages, scripts]
+  audience = :both
+  body {
+    p <<PROSE
+Packages declare `test` blocks in `package.wcl`; `config-weave test` runs each in a
+disposable backend instance — a docker container (linux) or a vmlab VM (linux or
+windows) — and proves convergence with a **three-run protocol**: `check`, `apply`,
+`apply` (all `--json --continue-on-error`). Run 2's internal re-check proves
+convergence within one process; run 3 proves **cross-process idempotence** — a check
+that only passes on in-process state re-applies on run 3, surfaces as `configured`,
+and fails the test.
+PROSE
+    h2 "Test block syntax"
+    code "wcl" { source = <<'SRC'
+test "file_present_converges" {
+  description = "file_present creates the file and is idempotent"
+  backend = "docker"                    // default; or "vmlab" (QEMU/KVM VMs)
+  image = "debian:12"                   // required; vmlab: template ref like "x86_64/linux-modern"
+  group = "files"                       // optional; share one instance with same-group tests
+  setup = "..."                         // optional
+  verify = "tests/file_present_verify.wscript"   // optional custom assertions
+
+  step "create" {
+    description = "Create a marker file"
+    resource = "file_present"           // unqualified = this package
+    expect = "converge"                 // default; see table below
+    properties { path = "/var/tmp/weave-sample.txt"  content = "hello" }
+  }
+
+  gather "os" {                         // gatherer invocation with assertions
+    description = "OS facts inside the container"
+    from = "os_info"
+    expect {                            // top-level key equality assertions
+      family = "linux"
+    }
+  }
+}
+SRC
+    }
+    callout "Test values are static" { class = ["warning"]  body = "**All test values must be static** — tests run against a synthesized variable-free playbook; a variable reference in test properties/conditions is a validation error. Unqualified `resource` / `from` refs resolve to the declaring package." }
+    h2 "Step expectation table"
+    p "`expect = converge | already_configured | error | skip | reboot_required` (— = unasserted):"
+    table {
+      header = ["expect", "run 1: check", "run 2: apply", "run 3: apply again"]
+      rows = [
+        ["`converge` (default)", "not_configured", "configured", "already_configured"],
+        ["`already_configured`", "already_configured", "already_configured", "already_configured"],
+        ["`error`", "—", "error", "—"],
+        ["`skip`", "skipped", "skipped", "skipped"],
+        ["`reboot_required`", "—", "reboot_required", "—"],
+      ]
+    }
+    h2 "Grouping tests into one instance"
+    p "By default each test provisions its own instance. Give several tests the **same non-empty `group`** (within a package) to run them sequentially inside **one** shared instance — amortizing container start, and especially VM boot. Grouped tests must agree on `backend` and `image`; they **share OS state with no reset between them**, so use distinct paths/state per test. Independent groups run **in parallel**, throttled by `--docker-jobs` / `--vmlab-jobs`."
+    h2 "Verify scripts"
+    p "`fn verify(facts: Value) -> bool` (or `Result[bool, string]`) runs **inside the instance after the apply runs**; `facts` is a map of the test's gather results (keyed by gather label). Verify scripts compile during validation but only execute in instances."
+    code "rust" { source = <<'SRC'
+use value
+use fs
+
+fn verify(facts: Value) -> Result[bool, string] {
+    Ok(fs::read("/var/tmp/weave-sample.txt")? == "hello")
+}
+SRC
+    }
+    h2 "Running tests"
+    code "console" { source = <<'SRC'
+config-weave test <playbook-dir>              # everything
+config-weave test <dir> core                  # one package
+config-weave test <dir> core:file_present_converges   # one test
+SRC
+    }
+    table {
+      header = ["Flag", "Meaning"]
+      rows = [
+        ["`--backend NAME`", "override every test's backend (`docker` or `vmlab`)"],
+        ["`--image IMAGE`", "run every test against this image instead of its own"],
+        ["`--keep`", "leave instances running for post-mortem debugging"],
+        ["`--binary PATH`", "static linux config-weave binary to copy into instances"],
+        ["`--binary-windows PATH`", "windows config-weave binary for windows vmlab guests"],
+        ["`--docker-jobs N`", "max docker groups running at once (default `min(cpu, 8)`)"],
+        ["`--vmlab-jobs N`", "max vmlab groups running at once (default `2` — VMs are heavy)"],
+      ]
+    }
+    p "Exit codes: **0** all passed, **1** any failed/error, **2** validation or environment problem. **docker** images must contain `sleep` and `sh` (distroless unsupported — use vmlab). **vmlab** templates must ship the QEMU guest agent; each group gets a throwaway one-VM lab."
+    h2 "Scenarios (scripted, multi-stage, over a declared vmlab lab)"
+    p <<PROSE
+Some convergence can't be expressed by the three-run protocol: a Windows DC promotion
+needs **apply → reboot → apply again**, and a member server needs a **reachable DC** (a
+second networked VM). For these, a package declares a `scenario` — a **declared vmlab
+lab** plus a wscript **driver script** that brings the lab's VMs up by name, applies
+config-weave, reboots, and asserts.
+PROSE
+    code "wcl" { source = <<'SRC'
+scenario "ad_matrix" {
+  description = "Forest, additional DC and a member join over real reboots"
+  lab    = "tests/ad-lab"          // dir holding a vmlab.wcl (vmlab only)
+  script = "tests/ad_matrix.wscript"
+}
+SRC
+    }
+    p "The script exports `fn run(lab: Lab) -> bool` (or `Result[bool, string]`) and runs **host-side** against the live lab. It compiles in stage-5 validation against the `testlab` host module (types `Lab` / `Machine`: `lab.machine(name)`, `m.exec`, `m.powershell`, `m.copy_in`, `m.reboot`, `m.apply_resource`, `m.check_resource`, `m.apply(dir)`, `m.check(dir)`). Scenarios run **sequentially** after the parallel test groups. **Windows guests must be Server 2019 / Windows 10 or newer.**"
+    h2 "Repo test suites"
+    p "`just test` (fast cargo suite, no docker) · `just test-lab` (cross-builds the static musl binary, runs the docker-gated suite) · `just test-lab-vm playbook template` (end-to-end vmlab smoke) · `just test-ad` (the full Windows DC lifecycle scenario over real reboots — heavy)."
+  }
+}
