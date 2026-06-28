@@ -1,0 +1,46 @@
+name: Deploy Site
+
+# Builds the config-weave docs/landing site (docs/main.wcl -> docs/_site) with
+# the `wcl` CLI and deploys it to Cloudflare Pages (project "config-weave",
+# configured in wrangler.toml). `wcl` lives in the sibling WCL repo, which is
+# not checked out here, so we install it from git. Runs only when docs/ (or this
+# workflow) change on main, so an ordinary code push doesn't trigger a deploy.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/deploy-site.yml'
+      - 'wrangler.toml'
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wcl CLI
+        run: cargo install --git https://github.com/wiltaylor/wcl -p wcl --locked
+
+      - name: Build docs site
+        run: wcl wdoc build docs/main.wcl --out docs/_site
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy
