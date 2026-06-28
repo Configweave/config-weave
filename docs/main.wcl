@@ -16,26 +16,22 @@ import <wdoc.wcl>
 // lists it via `included_sites(...)`.
 include "wskills" { entry = "wdoc/book/main.wcl" }
 
-// The landing site: the `webpage` template (title header + top navbar). `root = true`
-// serves it at `/`; the reference book renders under `/wskills/config-weave/`.
+// The landing site. The single `index` page selects a bespoke `landing`
+// template that emits the whole marketing page as raw HTML (its own nav,
+// hero, sections and footer), so this site needs no `menu` block. `root =
+// true` serves it at `/`; the reference book renders under
+// `/wskills/config-weave/`. `assets = ["landing"]` copies docs/landing/
+// (landing.css + the brand mark) verbatim into the output, where the
+// template links them by their root-relative path.
 site config_weave {
   default_template = :webpage
   title            = "config-weave"
   root             = true
   theme            = :nord
   accent           = :cyan
-  menu {
-    item "Home"            { page = index }
-    item "Features"        { page = features }
-    item "Getting started" { page = getting_started }
-    // The reference is its own built site (the included wskill book); link by
-    // root-relative output path.
-    item "Reference"       { href = "wskills/config-weave/" }
-    item "Source"          { href = "https://github.com/Configweave/config-weave" }
-  }
+  assets           = ["landing"]
 }
 
-// Landing pages (sites = [:config_weave]).
+// The landing page (sites = [:config_weave]); it carries the `landing`
+// template and folds in the former Features / Getting-started pages.
 import "./pages/config-weave/index.wcl"
-import "./pages/config-weave/features.wcl"
-import "./pages/config-weave/getting-started.wcl"

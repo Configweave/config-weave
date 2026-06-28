@@ -1,71 +1,203 @@
-// config-weave landing page. `start = true` makes it the page served at `/`.
-// The site header already shows "config-weave", so the page leads with the
-// motivation rather than a redundant H1.
-page index { sites = [:config_weave]  title = "Why config-weave?"  start = true
-  callout "Heavy development — not production ready" {
-    class = ["warning"]
-    body  = "config-weave is under **active development**. The playbook/package vocabulary, the host API, and the CLI can change without notice."
-  }
+// config-weave landing page.
+//
+// A single-page marketing scroll, ported from the Config Weave design system
+// (a claude.ai Design project) and fact-checked against the real tool before
+// publishing. It is rendered by a bespoke `landing` template that emits the
+// whole page as raw HTML; the styling lives in `docs/landing/landing.css`
+// (copied verbatim into the build by `assets = ["landing"]` in main.wcl) and
+// the brand mark in `docs/landing/cw-mark.svg`.
+//
+// `start = true` serves it at `/`; the wskill Reference book renders under
+// `/wskills/config-weave/`. The stdlib (`HtmlFundamental`, `TemplateCtx`,
+// `wdoc_head_stylesheet`, the `template` block) is in scope via the single
+// `import <wdoc.wcl>` in main.wcl.
 
-  h1 "Why config-weave?"
+template landing {
+  render = fn(c: TemplateCtx) -> list<HtmlFundamental>
+    flatten([
+      wdoc_head_stylesheet("landing/landing.css"),
+      [ HtmlFundamental::Raw { html: <<'CWPAGE'
+<div class="cw-page grad-on">
 
-  p "**Single-binary configuration management.** Copy the binary onto a target machine alongside a playbook folder and run it — no agent, no runtime, no package installs. A playbook describes the desired state of a system; config-weave can **check** whether the machine matches (a report-only dry run) or **apply** it (converge the machine to the playbook)."
+<div class="banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span><strong>Alpha software.</strong> config weave is under heavy active development — the playbook/package vocabulary, host API, and CLI can change without notice.</span></div>
 
-  h2 "Three languages, cleanly divided"
+<nav class="nav"><div class="wrap navinner fx ac jb">
+<div class="fx ac gap12"><a class="brand" href="#top"><img src="landing/cw-mark.svg" alt="config weave"><span class="brandtxt">config weave</span></a><span class="ver">v0.1.0</span></div>
+<div class="fx ac gap24"><div class="fx ac gap24 hidesm"><a class="navlink" href="#how">how it works</a><a class="navlink" href="#packages">packages</a><a class="navlink" href="#binary">static binary</a><a class="navlink" href="#install">install</a><a class="navlink" href="wskills/config-weave/">reference</a></div><a class="navlink ghlink" href="https://github.com/Configweave/config-weave" target="_blank"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub</a></div>
+</div></nav>
 
-  p "WCL and wscript never interact directly — the config-weave engine mediates."
+<a id="top"></a>
+<section class="section wrap" style="padding-top:96px;padding-bottom:96px">
+<div class="heroGrid">
+<div>
+<div class="pill" style="margin-bottom:24px"><span class="pdot"></span>Written in Rust · single static binary</div>
+<h1 style="font-size:52px;line-height:1.06;letter-spacing:-0.02em">Configuration that ships as <span class="grad">a single binary</span>.</h1>
+<p class="lead" style="margin-top:22px">config weave reads a typed WCL playbook and either <span style="color:var(--fg-0)">applies</span> it to converge a machine — or <span style="color:var(--fg-0)">checks</span> that the machine already matches. No agent, no interpreter, no dependencies. Copy one binary onto a Linux or Windows host alongside a playbook folder and run it.</p>
+<div class="fx ac gap16" style="margin-top:30px">
+<a class="btn btn-primary" href="https://github.com/Configweave/config-weave/releases" target="_blank">Download binaries<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></a>
+<a class="btn btn-ghost" href="#how">See how it works</a>
+</div>
+<div class="fx ac gap16 mono muted" style="margin-top:26px;font-size:12.5px"><span>Linux</span><span class="dim">·</span><span>Windows</span><span class="dim">·</span><span>statically linked</span><span class="dim">·</span><span>zero deps</span></div>
+</div>
+<div>
+<div class="term"><div class="termbar"><span class="fname">target host</span><span class="tlabel">apply</span></div><pre class="termbody"><span class="prompt">$</span> config-weave apply ./sample baseline
+<span class="dim">gathered 1 fact set(s)</span>
 
-  table {
-    header = ["Layer", "Job"]
-    rows = [
-      ["**WCL**", "Encodes playbooks and packages: plays, steps, variables, conditions, gatherer invocations, and resource/gatherer declarations. WCL never executes against the system."],
-      ["**wscript**", "Implements gatherers and resources — the scripts that inspect and mutate the machine, through a host API registered by config-weave."],
-      ["**config-weave** (Rust)", "Mediates: validates everything before anything runs, then schedules steps over a DAG with concurrency classes."],
-    ]
-  }
+apply <span class="cwt">'Sample Baseline'</span> v1.0.0 — play <span class="cwt">'baseline'</span>
+  <span class="ok">●</span> make-a              <span class="ok">configured</span>
+  <span class="ok">●</span> secondary/make-b    <span class="ok">configured</span>
+<span class="dim">summary: 2 configured · 0 already configured · 0 error  (0.1s)</span>  <span class="ok">exit 0</span></pre></div>
+<div class="term"><div class="termbar"><span class="fname">target host</span><span class="tlabel">check</span></div><pre class="termbody"><span class="prompt">$</span> config-weave check ./sample baseline
+<span class="dim">gathered 1 fact set(s)</span>
 
-  h2 "The convergence contract"
+check <span class="cwt">'Sample Baseline'</span> v1.0.0 — play <span class="cwt">'baseline'</span>
+  <span class="ok">✓</span> make-a              <span class="ok">already configured</span>
+  <span class="ok">✓</span> secondary/make-b    <span class="ok">already configured</span>
+<span class="dim">summary: 2 already configured · 0 not configured · 0 error  (0.0s)</span>  <span class="ok">exit 0</span></pre></div>
+</div>
+</div>
+</section>
 
-  p "Every resource obeys a **check → apply → re-check** lifecycle: `check` never mutates; after a successful `apply`, a re-check must return *already configured* — even in a fresh process. The [testlab](./wskills/config-weave/) proves this with a three-run protocol in disposable docker containers or vmlab VMs."
+<div class="divwrap"></div>
+<section id="how" class="section wrap">
+<div style="max-width:720px;margin-bottom:48px"><div class="eb" style="margin-bottom:14px">How it works</div><h2 style="font-size:36px;letter-spacing:-0.02em">Describe the state. <span class="grad">apply</span> it, or <span class="grad">check</span> it.</h2><p class="lead" style="margin-top:16px">A playbook is a typed WCL document — facts to gather, variables, and ordered steps that declare desired state. The same playbook drives both convergence and verification.</p></div>
+<div class="howGrid">
+<div class="term"><div class="termbar"><span class="fname">sample/playbook.wcl</span><span class="wclchip">WCL</span></div><pre class="termbody codebody"><span class="cwk">playbook</span> <span class="cwt">"Sample Baseline"</span> <span class="cwm">{</span>
+  <span class="cwa">description</span> = <span class="cws">"Create marker files in order"</span>
 
-  h2 "Reference"
+  <span class="cwk">gather</span> <span class="cwt">"os"</span> <span class="cwm">{</span> <span class="cwa">from</span> = <span class="cws">"core.os_info"</span> <span class="cwm">}</span>
 
-  p "config-weave's reference is published as a **wskill** — a self-contained WCL model projected into both the book linked below and a Claude Code skill."
+  <span class="cwk">vars</span> <span class="cwm">{</span>
+    <span class="cwa">work_root</span> = <span class="cws">"/tmp/config-weave-sample"</span>
+    <span class="cwa">is_linux</span>  = <span class="cwo">os.family == "linux"</span>
+  <span class="cwm">}</span>
 
-  // One linked entry per wskill under docs/wskills/, discovered by the `include` in
-  // main.wcl. Title / summary come from the wskill's book site.
-  wdoc_repeater { each = included_sites({ folder: "wskills", entry: "wdoc/book/main.wcl" })  as = :s
-    p $"**[${s.title}](./${s.href})**${match s.summary { none => "", su => $" — ${su}" }}"
-  }
+  <span class="cwk">play</span> <span class="cwt">"baseline"</span> <span class="cwm">{</span>
+    <span class="cwk">step</span> <span class="cwt">"make-a"</span> <span class="cwm">{</span>
+      <span class="cwa">resource</span>  = <span class="cws">"core.file_present"</span>
+      <span class="cwa">condition</span> = <span class="cwo">is_linux</span>
+      <span class="cwa">properties</span> <span class="cwm">{</span>
+        <span class="cwa">path</span>    = <span class="cws">$"${work_root}/a.txt"</span>
+        <span class="cwa">content</span> = <span class="cws">"alpha"</span>
+      <span class="cwm">}</span>
+    <span class="cwm">}</span>
+  <span class="cwm">}</span>
+<span class="cwm">}</span></pre></div>
+<div>
+<div class="step" style="border-top:none;padding-top:0"><div class="snum">1</div><div><div class="ftitle">Write a playbook</div><p class="fdesc" style="font-size:14px">Declare the facts to gather, variables, and the steps that make up desired state in a <code>playbook.wcl</code>. Each step names a resource like <code>core.file_present</code>; its properties are validated against the resource's declared params.</p></div></div>
+<div class="step"><div class="snum">2</div><div><div class="ftitle">apply to converge</div><p class="fdesc" style="font-size:14px">Runs each step idempotently, in dependency order. <code>requires</code> sequences steps; <code>condition</code> skips ones that don't apply to this host. Only steps that are out of state change.</p><div class="codepill"><span class="cwk">config-weave</span> apply ./sample baseline</div></div></div>
+<div class="step"><div class="snum">3</div><div><div class="ftitle">check to verify</div><p class="fdesc" style="font-size:14px">Re-runs the same playbook read-only and reports each step's status without touching the machine — a dry audit. After a successful apply, a re-check returns <em>already configured</em>, even in a fresh process.</p><div class="codepill"><span class="cwk">config-weave</span> check ./sample baseline</div></div></div>
+</div>
+</div>
+</section>
 
-  h2 "A taste"
+<div class="divwrap"></div>
+<section id="packages" class="section wrap">
+<div style="max-width:760px;margin-bottom:48px"><div class="eb" style="margin-bottom:14px">Packages</div><h2 style="font-size:36px;letter-spacing:-0.02em">More <span class="grad">gatherers and resources</span> — by dropping in a folder.</h2><p class="lead" style="margin-top:16px">config weave loads every package under a playbook's <code>pkgs/</code> folder. Each package is a folder with a <code>package.wcl</code> that registers what it provides — gatherers and resources, namespaced by package: <code>core.file_present</code>, <code>core.os_info</code>. Add a folder and its scripts are available to every play. No registry, no recompile — packages are discovered on the next run.</p></div>
+<div class="howGrid">
+<div><div class="term"><div class="termbar"><span class="fname">playbook layout</span></div><div class="tree">
+<div class="trow tfold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>my-playbook/</div>
+<div class="trow ind1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>playbook.wcl</div>
+<div class="trow tfold ind1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>pkgs/</div>
+<div class="trow tfold ind2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>core/</div>
+<div class="trow on ind2" style="padding-left:66px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>package.wcl<span class="tnote">1 gatherer · 1 resource</span></div>
+<div class="trow ind2" style="padding-left:66px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>gatherers/  resources/</div>
+<div class="trow tfold ind2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>your-pkg/</div>
+<div class="trow ind2" style="padding-left:66px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>package.wcl</div>
+</div></div><p class="capt">Drop a folder in <code>pkgs/</code>. No registry, no recompile — config weave discovers it on the next run.</p></div>
+<div><div class="term"><div class="termbar"><span class="fname">pkgs/core/package.wcl</span><span class="wclchip">WCL</span></div><pre class="termbody codebody"><span class="cwk">package</span> <span class="cwt">"core"</span> <span class="cwm">{</span>
+  <span class="cwa">description</span> = <span class="cws">"Core sample package"</span>
 
-  p "A playbook is a WCL document. Plays run steps; each step invokes a resource and supplies properties validated against the resource's declared params."
+  <span class="cwk">gatherer</span> <span class="cwt">"os_info"</span> <span class="cwm">{</span>
+    <span class="cwa">script</span> = <span class="cws">"gatherers/os_info.wscript"</span>
+  <span class="cwm">}</span>
 
-  code wcl {
-    source = <<'WCL'
-      playbook "Sample Baseline" {
-        description = "Create a marker file"
+  <span class="cwk">resource</span> <span class="cwt">"file_present"</span> <span class="cwm">{</span>
+    <span class="cwa">script</span>      = <span class="cws">"resources/file_present.wscript"</span>
+    <span class="cwa">concurrency</span> = <span class="cws">"parallel"</span>
 
-        gather "os" { from = "core.os_info" }   // facts → the `os` variable
+    <span class="cwk">param</span> <span class="cwt">"path"</span> <span class="cwm">{</span>
+      <span class="cwa">type</span>     = <span class="cws">"string"</span>
+      <span class="cwa">required</span> = <span class="cwo">true</span>
+    <span class="cwm">}</span>
+    <span class="cwk">param</span> <span class="cwt">"content"</span> <span class="cwm">{</span>
+      <span class="cwa">type</span>    = <span class="cws">"string"</span>
+      <span class="cwa">default</span> = <span class="cws">""</span>
+    <span class="cwm">}</span>
+  <span class="cwm">}</span>
+<span class="cwm">}</span></pre></div><p class="capt">A manifest registers gatherers and resources, each backed by a wscript. Playbooks reference them as <code>core.file_present</code>.</p></div>
+</div>
+<div class="card fx ac jb gap24" style="margin-top:28px;padding:24px 28px;flex-wrap:wrap">
+<div class="fx ac gap16" style="min-width:300px;flex:1"><div class="ficon" style="margin-bottom:0;flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 4v16"/><path d="M4 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6"/><path d="M10 4v16"/><path d="M16 4v16"/></svg></div><div><div class="ftitle" style="margin-bottom:4px">Start from a scaffold</div><p class="fdesc"><code>config-weave init</code> writes a starter playbook plus an example package — a gatherer, a resource, their wscripts, and a convergence test — ready to edit.</p></div></div>
+<div style="min-width:300px;flex:1"><div class="codepill" style="margin-top:0"><span class="cwk">config-weave</span> init my-playbook</div></div>
+</div>
+</section>
 
-        vars {
-          work_root = "/tmp/config-weave-sample"
-          is_linux  = os.family == "linux"
-        }
+<div id="binary" class="band"><section class="section wrap"><div class="proofGrid">
+<div><div class="eb" style="margin-bottom:14px">Static binary</div><h2 style="font-size:36px;letter-spacing:-0.02em">One file. <span class="grad">No runtime.</span></h2><p class="lead" style="margin-top:16px">config weave compiles to a single statically-linked executable. There's nothing to install on the target — no Python, no Ruby, no agent, no shared libraries. Copy the binary to the box, run it, done. The same playbook runs on Linux and Windows.</p>
+<div class="chips" style="margin-top:26px">
+<span class="osc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>Linux · x86_64 · musl</span>
+<span class="osc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>Windows · x86_64</span>
+</div>
+</div>
+<div class="term"><div class="termbar"><span class="fname">target host · no toolchain</span></div><pre class="termbody"><span class="prompt">$</span> file config-weave
+config-weave: <span class="ok">ELF 64-bit LSB executable, statically linked</span>
 
-        play "baseline" {
-          step "make-a" {
-            description = "Create the first marker file"
-            resource  = "core.file_present"     // package.resource
-            condition = is_linux                // false => Skipped
-            properties {
-              path    = $"${work_root}/a.txt"
-              content = "alpha"
-            }
-          }
-        }
-      }
-      WCL
-  }
+<span class="prompt">$</span> ldd config-weave
+        <span class="ok">not a dynamic executable</span>
+
+<span class="prompt">$</span> ./config-weave check ./sample baseline
+<span class="dim">summary: 2 already configured · 0 not configured · 0 error</span>  <span class="ok">exit 0</span></pre></div>
+</div></section></div>
+
+<section id="features" class="section wrap">
+<div style="max-width:720px;margin-bottom:44px"><div class="eb" style="margin-bottom:14px">Features</div><h2 style="font-size:36px;letter-spacing:-0.02em">Built for people who run other people's machines.</h2></div>
+<div class="fgrid">
+<div class="fcell"><div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg></div><div class="ftitle">Declarative WCL</div><p class="fdesc">Describe desired state in a typed config language — facts, vars, plays and steps, with real expressions and conditions.</p></div>
+<div class="fcell"><div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></div><div class="ftitle">apply &amp; check</div><p class="fdesc">One playbook, two modes: converge a machine to the declared state, or verify it matches without making any change.</p></div>
+<div class="fcell"><div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></div><div class="ftitle">Report-only dry run</div><p class="fdesc"><code>check</code> re-runs the playbook read-only and reports each step — what's already configured and what would change — without touching the box.</p></div>
+<div class="fcell"><div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></div><div class="ftitle">Static binaries</div><p class="fdesc">A single self-contained executable. No agent, no interpreter, no shared libraries to chase across distros.</p></div>
+<div class="fcell"><div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg></div><div class="ftitle">Linux &amp; Windows</div><p class="fdesc">The same playbook runs on both — one statically-linked binary per platform, cross-compiled and ready to drop onto a fresh box.</p></div>
+<div class="fcell"><div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></div><div class="ftitle">Ordered &amp; conditional</div><p class="fdesc"><code>requires</code> sequences dependent steps into a DAG; <code>condition</code> targets steps by gathered facts; containers group related steps.</p></div>
+</div>
+</section>
+
+<div id="install" class="band"><section class="section wrap"><div style="max-width:760px;margin:0 auto;text-align:center"><div class="eb" style="margin-bottom:14px">Install</div><h2 style="font-size:36px;letter-spacing:-0.02em">Up and running in three commands.</h2><p class="lead" style="margin:16px auto 0">Grab a prebuilt binary from the releases page — two binaries plus a checksums file, no installer — and put it on your <code>PATH</code>. Then point it at a playbook folder.</p><div class="fx ac jc" style="margin-top:24px"><a class="btn btn-primary" href="https://github.com/Configweave/config-weave/releases" target="_blank">Download binaries<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></a></div></div>
+<div style="max-width:640px;margin:40px auto 0">
+<div class="muted mono" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">1 · scaffold a starter playbook</div>
+<div class="cmd"><span class="cdollar">$</span><span class="ctxt">config-weave init my-playbook</span></div>
+<div class="muted mono" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin:24px 0 8px">2 · converge a machine</div>
+<div class="cmd"><span class="cdollar">$</span><span class="ctxt">config-weave apply my-playbook baseline</span></div>
+<div class="muted mono" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin:18px 0 8px">3 · verify with no changes</div>
+<div class="cmd"><span class="cdollar">$</span><span class="ctxt">config-weave check my-playbook baseline</span></div>
+<p class="fdesc" style="margin-top:14px">On Windows, download <code>config-weave.exe</code> from <a href="https://github.com/Configweave/config-weave/releases" target="_blank">releases</a> and run the same commands.</p>
+</div>
+</section></div>
+
+<section class="section wrap" style="padding-bottom:80px">
+<div class="cta"><div class="ctaglow"></div>
+<div style="position:relative"><div class="fx jc" style="margin-bottom:22px"><img src="landing/cw-mark.svg" alt="config weave" style="height:44px"></div><h2 style="font-size:34px;letter-spacing:-0.02em">Drop a binary. Converge a fleet.</h2><p class="lead" style="margin:14px auto 0;text-align:center">No control plane, no daemons, no dependency hell. Just a playbook folder and one executable that runs the same way everywhere.</p><div class="fx ac jc gap16" style="margin-top:30px"><a class="btn btn-primary" href="https://github.com/Configweave/config-weave/releases" target="_blank">Download binaries<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></a><a class="btn btn-ghost" href="https://github.com/Configweave/config-weave" target="_blank">View on GitHub</a></div></div>
+</div>
+</section>
+
+<footer class="foot"><div class="wrap"><div class="cols">
+<div><a class="brand" href="#top" style="margin-bottom:14px"><img src="landing/cw-mark.svg" alt="config weave"><span class="brandtxt">config weave</span></a><p class="fdesc" style="max-width:32ch">A Rust configuration tool that ships as a single static binary. apply or check — Linux and Windows.</p></div>
+<div class="fcol"><h6>Product</h6><a class="flink" href="#how">How it works</a><a class="flink" href="#packages">Packages</a><a class="flink" href="#binary">Static binary</a><a class="flink" href="#install">Install</a></div>
+<div class="fcol"><h6>Resources</h6><a class="flink" href="wskills/config-weave/">Reference</a><a class="flink" href="https://github.com/Configweave/config-weave/releases" target="_blank">Releases</a></div>
+<div class="fcol"><h6>Project</h6><a class="flink" href="https://github.com/Configweave/config-weave" target="_blank">GitHub</a><a class="flink" href="https://github.com/Configweave/config-weave" target="_blank">Under active development</a></div>
+</div>
+<div class="fx ac jb" style="margin-top:40px;padding-top:24px;border-top:1px solid var(--border-subtle)"><span class="muted" style="font-size:12.5px">© 2026 config weave · MIT licensed</span><span class="muted mono" style="font-size:12px">built in Rust 🦀</span></div>
+</div></footer>
+
+</div>
+CWPAGE
+      } ],
+    ])
+}
+
+page index {
+  sites    = [:config_weave]
+  title    = "config-weave — configuration that ships as a single binary"
+  start    = true
+  template = :landing
 }
