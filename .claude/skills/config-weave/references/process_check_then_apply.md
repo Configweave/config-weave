@@ -1,10 +1,21 @@
 # Check, then apply a play
 
-**Purpose:** Preview what a play would change (report-only), then converge the machine.
+## Purpose
 
-_Preconditions:_ A validated playbook., Authorization to mutate the target machine before applying.
+Preview what a play would change (report-only), then converge the machine.
 
-### 1. Dry-run with check
+## Prerequisites
+
+- A validated playbook.
+- Authorization to mutate the target machine before applying.
+
+## Flowchart
+
+![diagram](../_wdoc/process_check_then_apply-diagram-1.svg)
+
+## Steps
+
+### Step 1: Dry-run with check
 
 ```console
 $ config-weave check ./my-playbook baseline
@@ -18,7 +29,7 @@ make-b   not configured
 
 Run `config-weave check ./my-playbook <play>` to see the per-step status without changing anything. Use `--var KEY=VALUE` / `--var-file` to supply variables.
 
-### 2. Apply to converge
+### Step 2: Apply to converge
 
 ```console
 $ config-weave apply ./my-playbook baseline
@@ -28,7 +39,7 @@ make-b   configured
 
 Run `config-weave apply ./my-playbook <play>`. Each unconfigured step applies, then re-checks; `configured` means apply changed it and the re-check confirmed. A reboot-required step halts the play with exit 3.
 
-### 3. Confirm idempotence
+### Step 3: Confirm idempotence
 
 ```console
 $ config-weave apply ./my-playbook baseline
@@ -44,8 +55,12 @@ Run `apply` again: every step should report `already configured`. If a step re-a
 
 ## Related
 
-- [Playbooks](../references/concept_playbooks.md)
+- [Playbook](../references/concept_playbook.md)
 
-- [Resource & gatherer scripts](../references/concept_scripts.md)
+- [Play](../references/concept_play.md)
 
-[← All processes](../references/processes_ref.md)
+- [Step lifecycle](../references/concept_step_lifecycle.md)
+
+- [Convergence contract](../references/concept_convergence_contract.md)
+
+[← Back to SKILL.md](../SKILL.md)

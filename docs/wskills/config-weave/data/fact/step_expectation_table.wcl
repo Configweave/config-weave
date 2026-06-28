@@ -1,0 +1,18 @@
+fact step_expectation_table {
+  title    = "Step expectation table"
+  related  = [three_run_protocol, test_block_fields]
+  audience = :both
+  body {
+    p "`expect = converge | already_configured | error | skip | reboot_required` (— = unasserted):"
+    table {
+      header = ["expect", "run 1: check", "run 2: apply", "run 3: apply again"]
+      rows = [
+        ["`converge` (default)", "not_configured", "configured", "already_configured"],
+        ["`already_configured`", "already_configured", "already_configured", "already_configured"],
+        ["`error`", "—", "error", "—"],
+        ["`skip`", "skipped", "skipped", "skipped"],
+        ["`reboot_required`", "—", "reboot_required", "—"],
+      ]
+    }
+  }
+}

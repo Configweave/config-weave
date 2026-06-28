@@ -1,0 +1,17 @@
+concept resource {
+  name     = "Resource"
+  summary  = "A declared unit of desired state, implemented by a wscript check()/apply() script."
+  related  = [package, step, convergence_contract, host_api, entry_point_signatures, concurrency_classes]
+  audience = :both
+  body {
+    p <<PROSE
+A resource is a declared unit of desired state in a package, implemented by a
+[wscript](entity_wscript_lang) script that exports `check()` and `apply()`
+([signatures](fact_entry_point_signatures)). It is referenced from steps as
+`pkg.resource`. The resource declares its inputs as `param` blocks and a
+[concurrency class](concept_concurrency_classes); its script obeys the
+[check → apply → re-check contract](concept_convergence_contract).
+PROSE
+    p "Resource, gatherer and verify scripts are single-file wscript programs compiled against the [config-weave host API](concept_host_api). Import host modules with `use <module>`; registered types (`Value`, `CheckResult`, `ApplyResult`, `CmdOutput`, `HttpResponse`, `ComObject`) are ambient — no `use` needed."
+  }
+}

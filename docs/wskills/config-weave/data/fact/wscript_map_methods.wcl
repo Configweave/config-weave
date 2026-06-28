@@ -1,0 +1,10 @@
+fact wscript_map_methods {
+  title    = "wscript map methods"
+  related  = [wscript_containers]
+  audience = :both
+  body {
+    p "Map keys may be `int|bool|char|string`."
+    p "`len is_empty insert remove get contains_key keys values clear clone`"
+    p "`m[k]` faults on a missing key (reads); `m[k] = v` inserts or overwrites."
+  }
+}

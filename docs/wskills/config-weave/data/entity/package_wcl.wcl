@@ -1,0 +1,19 @@
+entity package_wcl {
+  name     = "package.wcl"
+  kind     = "file type"
+  summary  = "The WCL document under pkgs/<name>/ declaring resources, gatherers and tests."
+  related  = [package, playbook_wcl, package_blocks]
+  audience = :both
+  body {
+    p "`package.wcl` is the WCL document under `pkgs/<name>/` inside a playbook directory. It declares the `package` block: `resource`s, `gatherer`s and `test`s. The engine appends the system import `<weave/package.wcl>` automatically."
+    table {
+      header = ["Field", "Value"]
+      rows = [
+        ["Location",     "<playbook>/pkgs/<name>/package.wcl"],
+        ["System import","<weave/package.wcl> (appended by the engine)"],
+        ["Top block",    "package \"name\" { … }"],
+        ["Reference",    "Package block reference (fact)"],
+      ]
+    }
+  }
+}

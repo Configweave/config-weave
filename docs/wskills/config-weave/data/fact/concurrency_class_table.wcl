@@ -1,0 +1,16 @@
+fact concurrency_class_table {
+  title    = "Concurrency classes"
+  related  = [concurrency_classes, dag_scheduling]
+  audience = :both
+  body {
+    p "Declared on the resource; a step may *tighten* its resource's class but never loosen it."
+    table {
+      header = ["Class", "Meaning"]
+      rows = [
+        ["`parallel` (default)", "no restriction"],
+        ["`exclusive`", "at most one step using this resource type at a time (the apt/MSI lock case)"],
+        ["`global`", "step runs completely alone: scheduler drains in-flight steps, runs solo, resumes"],
+      ]
+    }
+  }
+}

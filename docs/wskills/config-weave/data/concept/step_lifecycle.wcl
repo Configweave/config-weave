@@ -1,0 +1,20 @@
+concept step_lifecycle {
+  name     = "Step lifecycle"
+  summary  = "Per-step check → apply → re-check, with the status transitions and halt rules."
+  related  = [convergence_contract, step, result_enums, check_then_apply]
+  audience = :both
+  body {
+    p "Each step runs a check → apply → re-check lifecycle. The status values come from the [result enums](fact_result_enums)."
+    p <<PROSE
+1. **Check** — `AlreadyConfigured` → report *Already Configured*, continue.
+   `RebootRequired` → in apply mode report *Reboot Required* and halt the play
+   (exit 3); in check mode it is an ordinary report status (check is report-only).
+   `NotConfigured` → proceed to apply (check mode just reports *Not Configured*).
+   Error → halt unless `--continue-on-error`.
+2. **Apply** — `Success` → re-check. `RebootRequired` → report and halt.
+3. **Re-check** — must return `AlreadyConfigured`, which reports *Configured*;
+   anything else reports *Error* ("apply claimed success but check disagrees").
+PROSE
+    p "An `Err` (or a VM fault) maps to the step's **Error** status. Logging and output during a step go through the [log module](entity_log_module)."
+  }
+}

@@ -1,0 +1,29 @@
+concept gatherer {
+  name     = "Gatherer"
+  summary  = "A package fact collector exporting gather(params) -> Value, bound into a playbook variable."
+  related  = [package, variables, host_api, entry_point_signatures, value_type]
+  audience = :both
+  body {
+    p <<PROSE
+A gatherer is a package-declared fact collector, implemented by a
+[wscript](entity_wscript_lang) script that exports `gather(params: Value) ->
+Value`. A playbook `gather "label" { from = "pkg.gatherer" }` block invokes one
+and binds its result to the variable named by the **label** (e.g. `os.family`).
+PROSE
+    h2 "Example"
+    code "rust" { source = <<'SRC'
+use value
+use sys
+
+fn gather(params: Value) -> Value {
+    Value::Map(#{
+        "family": Value::String(sys::family()),
+        "name": Value::String(sys::os_name()),
+        "cpus": Value::Int(sys::cpu_count())
+    })
+}
+SRC
+    }
+    p "Gatherer invocations all run concurrently and are deduplicated by `(gatherer, canonicalized params)`; any gatherer failure aborts the run before step execution. See [Variables](concept_variables) for how results enter scope."
+  }
+}

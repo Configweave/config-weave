@@ -1,0 +1,10 @@
+concept wscript_option_result {
+  name     = "wscript: Option, Result and ?"
+  summary  = "Option[T]/Result[T,E] are always available; ? early-returns and composes across the host boundary."
+  related  = [wscript_pattern_matching, wscript_option_result_methods, host_api]
+  audience = :both
+  body {
+    p "`Option[T]` and `Result[T, E]` are always available. `?` early-returns the `None`/`Err` and composes across the host boundary — host errors arrive as `Err`."
+    p "The method surfaces are in [Option / Result methods](fact_wscript_option_result_methods)."
+  }
+}

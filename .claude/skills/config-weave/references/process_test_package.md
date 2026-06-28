@@ -1,10 +1,21 @@
 # Test a package for idempotence
 
-**Purpose:** Prove a package's resources converge and stay converged using the testlab's three-run protocol in a disposable instance.
+## Purpose
 
-_Preconditions:_ A package with at least one test block., docker (or podman) available for the default backend.
+Prove a package's resources converge and stay converged using the testlab's three-run protocol in a disposable instance.
 
-### 1. Declare a test
+## Prerequisites
+
+- A package with at least one test block.
+- docker (or podman) available for the default backend.
+
+## Flowchart
+
+![diagram](../_wdoc/process_test_package-diagram-1.svg)
+
+## Steps
+
+### Step 1: Declare a test
 
 ```wcl
 test "file_present_converges" {
@@ -20,7 +31,7 @@ test "file_present_converges" {
 
 Add a `test` block to `package.wcl` with a required `image` and one or more `step`s. All test values must be **static** — no variable references. Unqualified `resource`/`from` refs resolve to the declaring package.
 
-### 2. Run the test
+### Step 2: Run the test
 
 ```console
 $ config-weave test ./my-playbook core:file_present_converges
@@ -29,7 +40,7 @@ core:file_present_converges … passed
 
 Run `config-weave test ./my-playbook [pkg[:test]]`. config-weave provisions a disposable instance and runs check → apply → apply. Run 3 catches state that only exists in-process (it would re-apply and surface as `configured`, failing the test).
 
-### 3. Debug a failure with --keep
+### Step 3: Debug a failure with --keep
 
 ```console
 $ config-weave test ./my-playbook core --keep
@@ -44,8 +55,12 @@ On failure, re-run with `--keep` to leave the instance up (its handle is reporte
 
 ## Related
 
-- [Testing & the testlab](../references/concept_testing.md)
+- [Testlab](../references/concept_testlab.md)
 
-- [Packages](../references/concept_packages.md)
+- [Three-run protocol](../references/concept_three_run_protocol.md)
 
-[← All processes](../references/processes_ref.md)
+- [Test block reference](../references/fact_test_block_fields.md)
+
+- [docker backend](../references/entity_docker_backend.md)
+
+[← Back to SKILL.md](../SKILL.md)

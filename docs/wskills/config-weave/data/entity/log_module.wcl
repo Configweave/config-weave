@@ -1,0 +1,19 @@
+entity log_module {
+  name     = "log"
+  kind     = "host module"
+  summary  = "Structured logging with step context attached — debug/info/warn/error."
+  related  = [host_api, step_lifecycle]
+  audience = :both
+  body {
+    p "`use log` — structured logging; messages carry step context into the terminal output and the NDJSON file log. Raw `print`/`println` are redirected into `log::info` (stdout stays clean for `--json`); `shell::run_streaming` pipes a long command's output through `log` live."
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`debug`", "`(string)`"],
+        ["`info`",  "`(string)`"],
+        ["`warn`",  "`(string)`"],
+        ["`error`", "`(string)`"],
+      ]
+    }
+  }
+}

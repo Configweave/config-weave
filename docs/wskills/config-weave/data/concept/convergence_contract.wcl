@@ -1,0 +1,17 @@
+concept convergence_contract {
+  name     = "Convergence contract"
+  summary  = "check never mutates; after a successful apply a re-check must return AlreadyConfigured."
+  related  = [step_lifecycle, idempotence, resource, three_run_protocol]
+  audience = :both
+  body {
+    p <<PROSE
+The convergence contract is the core rule every resource script obeys:
+
+- **`check` must never mutate.** It only reports status.
+- **`apply` must converge** so that a re-check returns `AlreadyConfigured` — and
+  it must converge **across processes** too, not just within the running one.
+PROSE
+    callout "Cross-process idempotence" { class = ["warning"]  body = "`apply` must converge so the re-check passes even in a fresh process. The testlab's third run catches state that only exists in-process — see [Cross-process idempotence](concept_idempotence)." }
+    p "How the contract plays out per step is the [step lifecycle](concept_step_lifecycle); how the testlab proves it is the [three-run protocol](concept_three_run_protocol)."
+  }
+}

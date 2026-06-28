@@ -1,0 +1,5 @@
+// process — one import per entry.
+import "./scaffold_validate.wcl"
+import "./add_resource.wcl"
+import "./test_package.wcl"
+import "./check_then_apply.wcl"

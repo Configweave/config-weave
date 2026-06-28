@@ -1,0 +1,18 @@
+concept testlab {
+  name     = "Testlab"
+  summary  = "config-weave test — runs package tests in disposable docker containers or vmlab VMs."
+  related  = [three_run_protocol, test_grouping, scenarios, docker_backend, vmlab_backend, test_block_fields, test_package]
+  audience = :both
+  body {
+    p <<PROSE
+The testlab (`config-weave test`, `src/testlab/`) proves package convergence in
+**disposable instances**. Packages declare `test` blocks in `package.wcl`; each
+test runs in a fresh backend instance — a [docker container](entity_docker_backend)
+(linux) or a [vmlab VM](entity_vmlab_backend) (linux or windows) — and is proven
+with the [three-run protocol](concept_three_run_protocol).
+PROSE
+    p "The `test` block's fields are in [Test block reference](fact_test_block_fields). Several tests can share one instance via [grouping](concept_test_grouping); convergence the protocol can't express uses [scenarios](concept_scenarios)."
+    h2 "Repo test suites"
+    p "`just test` (fast cargo suite, no docker) · `just test-lab` (cross-builds the static musl binary, runs the docker-gated suite) · `just test-lab-vm playbook template` (end-to-end vmlab smoke) · `just test-ad` (the full Windows DC lifecycle scenario over real reboots — heavy)."
+  }
+}

@@ -1,10 +1,20 @@
 # Scaffold and validate a playbook
 
-**Purpose:** Start a new playbook from the built-in skeleton and confirm it validates before running anything.
+## Purpose
 
-_Preconditions:_ The config-weave binary is on PATH.
+Start a new playbook from the built-in skeleton and confirm it validates before running anything.
 
-### 1. Scaffold a skeleton
+## Prerequisites
+
+- The config-weave binary is on PATH.
+
+## Flowchart
+
+![diagram](../_wdoc/process_scaffold_validate-diagram-1.svg)
+
+## Steps
+
+### Step 1: Scaffold a skeleton
 
 ```console
 $ config-weave init ./my-playbook
@@ -13,7 +23,7 @@ created ./my-playbook (playbook.wcl, pkgs/core/…)
 
 Run `config-weave init ./my-playbook`. It writes a skeleton playbook with an example package, resource and gatherer — a working starting point.
 
-### 2. Validate the whole pipeline
+### Step 2: Validate the whole pipeline
 
 ```console
 $ config-weave validate ./my-playbook
@@ -26,7 +36,7 @@ ok
 
 Run `config-weave validate ./my-playbook`. Nothing executes; fix any reported syntax, schema, ref, DAG or script-compilation error before moving on.
 
-### 3. List the plays
+### Step 3: List the plays
 
 ```console
 $ config-weave list ./my-playbook
@@ -41,8 +51,10 @@ Run `config-weave list ./my-playbook` to see the plays you can `check` or `apply
 
 ## Related
 
-- [Playbooks](../references/concept_playbooks.md)
+- [Playbook](../references/concept_playbook.md)
 
-- [Packages](../references/concept_packages.md)
+- [Package](../references/concept_package.md)
 
-[← All processes](../references/processes_ref.md)
+- [config-weave](../references/entity_config_weave.md)
+
+[← Back to SKILL.md](../SKILL.md)

@@ -1,0 +1,30 @@
+entity com_module {
+  name     = "com"
+  kind     = "host module (Windows)"
+  summary  = "Late-bound COM via IDispatch and WMI; returns ComObject handles; STA initialised by the engine."
+  related  = [host_api, registry_module, value_type]
+  audience = :both
+  body {
+    p "`use com` — late-bound COM via IDispatch. Registered everywhere; off Windows its calls return runtime errors."
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`create`", "`(progid) -> Result[ComObject, string]`", "e.g. `\"WScript.Shell\"`"],
+        ["`get_object`", "`(name) -> Result[ComObject, string]`", "moniker or running object"],
+        ["`wmi_query`", "`(query) -> Result[Value, string]`", "runs against `root\\cimv2`; returns a **list of property maps**"],
+      ]
+    }
+    h3 "ComObject"
+    p "`ComObject` is an opaque handle with methods `get` / `get_object` / `set` / `call(name, args: List[Value])` / `call_object` / `items()`. VT_DISPATCH results must come through `get_object`/`call_object`/`items()` because the dynamic `Value` cannot hold an object handle."
+    code "rust" { source = <<'SRC'
+use com
+use value
+
+fn gather(params: Value) -> Result[Value, string] {
+    com::wmi_query("SELECT Name, State FROM Win32_Service WHERE StartMode='Auto'")
+}
+SRC
+    }
+    p "Worker threads are COM (STA) initialised by the engine — scripts never deal with COM lifetime or apartment setup."
+  }
+}

@@ -1,0 +1,15 @@
+concept idempotence {
+  name     = "Cross-process idempotence"
+  summary  = "apply must converge across processes, not just within the running one — why test run 3 matters."
+  related  = [convergence_contract, three_run_protocol, testlab]
+  audience = :both
+  body {
+    p <<PROSE
+Idempotence in config-weave is **cross-process**: applying a converged playbook a
+second time, in a *fresh* process, must report every step `already configured`.
+A `check` that only passes against in-process state (a cache, an open handle, a
+process-local variable) silently breaks the contract.
+PROSE
+    p "The [three-run protocol](concept_three_run_protocol)'s third run exists precisely to catch this: it re-applies in a new process, so state that only existed in-process re-applies, surfaces as `configured`, and fails the test."
+  }
+}

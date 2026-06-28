@@ -1,0 +1,16 @@
+concept wscript_loops {
+  name     = "wscript: loops"
+  summary  = "for over ranges/collections, while, and loop; ranges exist only in for headers."
+  related  = [wscript_containers, wscript_excluded_v1]
+  audience = :both
+  body {
+    code "rust" { source = <<'SRC'
+for i in 0..10 { }       // exclusive; 0..=10 inclusive (ranges only in for headers)
+for x in [1, 2, 3] { }   // list elements; maps iterate keys; strings iterate chars
+while cond { }
+loop { if done { break } }   // break / continue
+SRC
+    }
+    p "Ranges are usable **only** in `for` headers, never as standalone values."
+  }
+}

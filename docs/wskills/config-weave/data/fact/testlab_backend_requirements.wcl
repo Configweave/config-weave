@@ -1,0 +1,15 @@
+fact testlab_backend_requirements {
+  title    = "Testlab backend requirements"
+  related  = [docker_backend, vmlab_backend, scenarios]
+  audience = :both
+  body {
+    table {
+      header = ["Backend", "Requirement"]
+      rows = [
+        ["docker", "images must contain `sleep` and `sh` (distroless unsupported — use vmlab)"],
+        ["vmlab", "templates must ship the QEMU guest agent; each group gets a throwaway one-VM lab"],
+        ["vmlab (Windows scenarios)", "guests must be Server 2019 / Windows 10 or newer"],
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+concept wscript_values_types {
+  name     = "wscript: values and types"
+  summary  = "Value (primitive) types vs reference types; let inference and annotations; string building with fmt."
+  related  = [wscript_overview, wscript_reference_semantics, wscript_containers]
+  audience = :both
+  body {
+    p "Primitives (value types): `int` (64-bit signed, wrapping), `float`, `bool`, `char`, `unit` (`()`). Everything else is a **reference type**: `string`, structs, enums, `List[T]`, `Map[K, V]`, function values, `weak[T]`."
+    code "rust" { source = <<'SRC'
+let x = 5                  // inferred; annotations optional on lets
+let name: string = "wil"
+let log = "hp: " + str(99) // + concatenates strings; str() converts
+let msg = fmt("{} of {}", 3, 10)   // NO string interpolation — use fmt()
+SRC
+    }
+    p "Value vs reference behaviour is covered in [reference semantics](concept_wscript_reference_semantics)."
+  }
+}

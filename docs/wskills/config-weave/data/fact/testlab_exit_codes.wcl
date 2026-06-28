@@ -1,0 +1,15 @@
+fact testlab_exit_codes {
+  title    = "config-weave test exit codes"
+  related  = [testlab, testlab_flags]
+  audience = :both
+  body {
+    table {
+      header = ["Exit code", "Meaning"]
+      rows = [
+        ["0", "all passed"],
+        ["1", "any failed / error"],
+        ["2", "validation or environment problem"],
+      ]
+    }
+  }
+}

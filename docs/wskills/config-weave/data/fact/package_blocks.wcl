@@ -1,0 +1,17 @@
+fact package_blocks {
+  title    = "Package block reference"
+  related  = [package, package_wcl, resource, gatherer]
+  audience = :both
+  body {
+    table {
+      header = ["Block", "Fields", "Notes"]
+      rows = [
+        ["`package \"name\"`", "`description` (required), `gatherer*`, `resource*`, `test*`", "name qualifies playbook refs: `core.file_present`"],
+        ["`gatherer \"name\"`", "`description`, `script`, `param*`", "script exports `gather(params: Value) -> Value`"],
+        ["`resource \"name\"`", "`description`, `script`, `concurrency` (default `\"parallel\"`), `param*`", "script exports `check()` + `apply()`"],
+        ["`param \"name\"`", "`description`, `type`, `required` (default `false`), `default?`", "types: `string|int|float|bool|list|map`"],
+        ["`test \"name\"`", "see the Test block reference", "run by `config-weave test` in disposable instances"],
+      ]
+    }
+  }
+}

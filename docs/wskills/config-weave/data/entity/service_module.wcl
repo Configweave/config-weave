@@ -1,0 +1,19 @@
+entity service_module {
+  name     = "service"
+  kind     = "host module (Windows)"
+  summary  = "Windows service management (SCM); Linux services use shell::run(\"systemctl …\")."
+  related  = [host_api, registry_module, shell_module]
+  audience = :both
+  body {
+    p "`use service` — Windows service management (SCM). Windows-only in v1 — manage Linux services with `shell::run(\"systemctl …\", Value::Null)`. Registered everywhere; off Windows its calls return runtime errors."
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`status`", "`(name) -> Result[string, string]`", "`running | stopped | start_pending | stop_pending | paused | …`"],
+        ["`start` / `stop`", "`(name) -> Result[unit, string]`", "no-op when already in the target state"],
+        ["`set_startup`", "`(name, mode) -> Result[unit, string]`", "mode: `automatic | manual | disabled`"],
+        ["`startup`", "`(name) -> Result[string, string]`", "returns the startup type"],
+      ]
+    }
+  }
+}

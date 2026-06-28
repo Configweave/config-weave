@@ -1,0 +1,15 @@
+concept wscript_functions {
+  name     = "wscript: functions and closures"
+  summary  = "fn definitions, function values as parameters, and closures that capture by reference."
+  related  = [wscript_overview, wscript_structs_enums]
+  audience = :both
+  body {
+    code "rust" { source = <<'SRC'
+fn area(w: int, h: int) -> int { w * h }
+fn apply(f: fn(int) -> int, x: int) -> int { f(x) }
+let double = |x| x * 2          // closures capture by reference
+SRC
+    }
+    p "Functions are first-class: a `fn(int) -> int` type annotates a function parameter, and closures (`|x| …`) capture their environment by reference."
+  }
+}

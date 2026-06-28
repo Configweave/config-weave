@@ -1,0 +1,10 @@
+// Aggregates every data file. Per-type folders each expose a main.wcl;
+// reference units (glossary terms, the CLI) are imported directly.
+// Imported by ../wskill.wcl.
+import "./concept/main.wcl"
+import "./entity/main.wcl"
+import "./fact/main.wcl"
+import "./reference/glossary.wcl"      // terms
+import "./reference/cli.wcl"           // cli typed-data (opt-in cli module)
+import "./process/main.wcl"
+import "./indexes.wcl"                  // curated navigation (index blocks)

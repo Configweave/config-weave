@@ -1,0 +1,25 @@
+entity value_type {
+  name     = "Value"
+  kind     = "registered type"
+  summary  = "The single dynamic escape hatch — gatherer results, step params, json/toml documents."
+  related  = [gatherer, json_module, toml_module, wscript_containers]
+  audience = :both
+  body {
+    p "`Value` is the single dynamic escape hatch in config-weave scripts — gatherer results, step params, and json/toml documents are all `Value`. It is ambient (no `use` needed); `use value` brings in its accessor methods."
+    code "rust" { source = <<'SRC'
+enum Value {
+    Null, Bool(bool), Int(int), Float(float), String(string),
+    List(List[Value]), Map(Map[string, Value]),
+}
+SRC
+    }
+    p <<PROSE
+Match on it like any enum, or use accessors: `get(key: string) -> Option[Value]` ·
+`at(idx: int) -> Option[Value]` · `keys() -> List[string]` · `len() -> int` ·
+`is_null() -> bool` · `as_bool / as_int / as_float / as_string / as_list / as_map
+-> Option[…]` (`as_float` also accepts `Int`). Construct with variant syntax:
+`Value::Map(#{ "family": Value::String(sys::family()) })`.
+PROSE
+    p "`params` in a resource/gatherer is a `Value::Map` with declared defaults already applied and types validated."
+  }
+}

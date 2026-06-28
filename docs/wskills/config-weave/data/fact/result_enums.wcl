@@ -1,0 +1,14 @@
+fact result_enums {
+  title    = "CheckResult and ApplyResult"
+  related  = [step_lifecycle, entry_point_signatures]
+  audience = :both
+  body {
+    p "The ambient result enums a resource's `check()` and `apply()` return (no `use` needed):"
+    code "rust" { source = <<'SRC'
+enum CheckResult { AlreadyConfigured, NotConfigured, RebootRequired }
+enum ApplyResult { Success, RebootRequired }
+SRC
+    }
+    p "How each variant drives the step is in the [step lifecycle](concept_step_lifecycle)."
+  }
+}

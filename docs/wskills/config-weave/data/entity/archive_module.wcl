@@ -1,0 +1,18 @@
+entity archive_module {
+  name     = "archive"
+  kind     = "host module"
+  summary  = "Extraction with no external tar/unzip needed — zip and tar.gz."
+  related  = [host_api, http_module, fs_module]
+  audience = :both
+  body {
+    p "`use archive` — extraction (no external tar/unzip needed). All return `Result[int, string]` returning the entry count."
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`extract_zip`", "`(archive, dest) -> Result[int, string]`"],
+        ["`extract_tar_gz`", "`(archive, dest) -> Result[int, string]`"],
+        ["`extract`", "`(archive, dest) -> Result[int, string]` — auto by extension (.zip, .tar.gz, .tgz)"],
+      ]
+    }
+  }
+}

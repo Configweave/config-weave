@@ -1,0 +1,23 @@
+concept host_api {
+  name     = "Host API"
+  summary  = "The wscript module surface config-weave registers for scripts — registered everywhere, foreign-platform functions error off their platform."
+  related  = [resource, gatherer, weave_wscripti, editor_support, fs_module, registry_module]
+  audience = :both
+  body {
+    p <<PROSE
+The host API is the wscript module surface config-weave registers for all scripts
+(resources, gatherers, verify). It is **identical on every platform**:
+foreign-platform functions exist everywhere and return runtime errors off their
+platform, so playbooks compile and validate the same on Linux and Windows. Guard
+platform-specific calls with a condition (`os.family == "windows"`) or
+`sys::family()`.
+PROSE
+    p <<PROSE
+Import a module with `use <module>`. All fallible functions return `Result[…,
+string]` and compose with `?`. The authoritative surface is whatever
+[`config-weave wscripti`](entity_weave_wscripti) emits, generated from
+`src/hostapi/*.rs`.
+PROSE
+    p "Cross-platform modules: [log](entity_log_module), [fs](entity_fs_module), [path](entity_path_module), [shell](entity_shell_module), [http](entity_http_module), [hash](entity_hash_module), [archive](entity_archive_module), [env](entity_env_module), [sys](entity_sys_module), [data](entity_data_module), [template](entity_template_module). Windows-only modules: [registry](entity_registry_module), [service](entity_service_module), [com](entity_com_module)."
+  }
+}

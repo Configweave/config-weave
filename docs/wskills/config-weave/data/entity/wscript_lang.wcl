@@ -1,0 +1,20 @@
+entity wscript_lang {
+  name     = "wscript"
+  kind     = "language"
+  summary  = "The statically typed, Rust-flavored scripting language resources, gatherers and verify scripts are written in."
+  related  = [wscript_overview, resource, gatherer, host_api]
+  audience = :both
+  body {
+    p "wscript is the scripting language config-weave embeds for resources, gatherers and verify scripts. Single-file in v1, compiled against the config-weave host API. Its features are documented as the `wscript:` concepts."
+    table {
+      header = ["Field", "Value"]
+      rows = [
+        ["Flavour",   "Rust minus borrow checker, lifetimes, generics"],
+        ["Typing",    "Static, compile-time checked"],
+        ["Scripts",   "Single file (no script-to-script imports in v1)"],
+        ["Compiled against", "the config-weave host API (weave.wscripti)"],
+        ["Tour",      "~/dev/wscript/docs/tour.md"],
+      ]
+    }
+  }
+}

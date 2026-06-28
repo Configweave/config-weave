@@ -1,0 +1,21 @@
+concept dag_scheduling {
+  name     = "DAG scheduling"
+  summary  = "How requires edges and concurrency classes drive step dispatch; requires is ordering, not a success demand."
+  related  = [play, step, concurrency_classes]
+  audience = :both
+  body {
+    p <<PROSE
+In a `parallel` play the DAG scheduler dispatches steps as their dependencies
+complete, subject to each resource's [concurrency class](concept_concurrency_classes).
+Ordering comes from each step's `requires` (a list of sibling step names).
+PROSE
+    p <<PROSE
+- `requires` is **ordering, not a success demand**: a *skipped* dependency does
+  not block a dependent; an *errored* or *not-run* dependency blocks dependents
+  (they report `not run`) in apply mode.
+- Steps left undispatched when a run halts report **not run**.
+- A `global`-class step runs completely alone: the scheduler drains in-flight
+  steps, runs it solo, then resumes.
+PROSE
+  }
+}

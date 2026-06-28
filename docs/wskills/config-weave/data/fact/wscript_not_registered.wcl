@@ -1,0 +1,9 @@
+fact wscript_not_registered {
+  title    = "Not registered in config-weave scripts"
+  related  = [host_api, shell_module, fs_module]
+  audience = :both
+  body {
+    callout "Not available" { class = ["warning"]  body = "wscript-std's `math`, `process`, `xml`, and standalone `fs` modules are **not registered** in config-weave scripts." }
+    p "config-weave provides its own richer [fs](entity_fs_module), and [shell](entity_shell_module) replaces `process`. There is no `math` module — use plain operators. JSON/TOML live in the [json](entity_json_module)/[toml](entity_toml_module) modules; INI in the host [data](entity_data_module) module."
+  }
+}

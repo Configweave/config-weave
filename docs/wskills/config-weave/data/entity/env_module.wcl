@@ -1,0 +1,24 @@
+entity env_module {
+  name     = "env"
+  kind     = "host module"
+  summary  = "Process environment and host identity — get/set vars, hostname, current user, elevation."
+  related  = [host_api, sys_module]
+  audience = :both
+  body {
+    p "`use env` — process environment and host identity."
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`get`", "`(name) -> Option[string]`"],
+        ["`set`", "`(name, value)`"],
+        ["`unset`", "`(name)`"],
+        ["`path_split`", "`(value) -> List[string]`"],
+        ["`path_join`", "`(parts) -> Result[string, string]`"],
+        ["`hostname`", "`() -> string`"],
+        ["`current_user`", "`() -> string`"],
+        ["`home_dir`", "`() -> string`"],
+        ["`is_elevated`", "`() -> bool` (root/Administrator)"],
+      ]
+    }
+  }
+}

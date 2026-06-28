@@ -1,0 +1,49 @@
+procedure scaffold_validate {
+  title    = "Scaffold and validate a playbook"
+  purpose  = "Start a new playbook from the built-in skeleton and confirm it validates before running anything."
+  preconditions = ["The config-weave binary is on PATH."]
+  related  = [playbook, package, config_weave]
+  audience = :both
+
+  step scaffold { n = 1
+    title = "Scaffold a skeleton"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave init ./my-playbook
+created ./my-playbook (playbook.wcl, pkgs/core/…)
+SH
+      }
+    }
+    body steps { p "Run `config-weave init ./my-playbook`. It writes a skeleton playbook with an example package, resource and gatherer — a working starting point." }
+  }
+
+  step validate { n = 2
+    title = "Validate the whole pipeline"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave validate ./my-playbook
+ok
+SH
+      }
+      callout "What validate covers" { class = ["info"]  body = "WCL syntax, schema, ref resolution, the step DAG, and **wscript compilation of every script** — host-API misuse is caught here, before any execution." }
+    }
+    body steps { p "Run `config-weave validate ./my-playbook`. Nothing executes; fix any reported syntax, schema, ref, DAG or script-compilation error before moving on." }
+  }
+
+  step list_plays { n = 3
+    title = "List the plays"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave list ./my-playbook
+baseline
+SH
+      }
+    }
+    body steps { p "Run `config-weave list ./my-playbook` to see the plays you can `check` or `apply`." }
+  }
+
+  scaffold -> validate
+  validate -> list_plays
+
+  verification = "`config-weave validate` exits 0 and `list` prints the expected play names."
+}

@@ -1,0 +1,16 @@
+concept wscript_containers {
+  name     = "wscript: containers and strings"
+  summary  = "Lists and maps with indexing vs .get; immutable, char-indexed strings."
+  related  = [wscript_values_types, wscript_list_methods, wscript_map_methods, wscript_string_methods]
+  audience = :both
+  body {
+    code "rust" { source = <<'SRC'
+let xs = [1, 2, 3]                  // List[int]; xs[0] faults OOB, xs.get(0) is Option
+let ages = #{ "alice": 30 }         // Map[string, int]; keys: int|bool|char|string
+ages["bob"] = 25                    // insert or overwrite; ages["nope"] faults — use .get
+xs.map(|x| x * 2).filter(|x| x > 2).fold(0, |a, x| a + x)
+SRC
+    }
+    p "Strings are immutable; operations are methods returning new strings, indexed in **characters** (not bytes). The method lists live in [list](fact_wscript_list_methods) / [map](fact_wscript_map_methods) / [string](fact_wscript_string_methods) methods."
+  }
+}

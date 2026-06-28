@@ -1,0 +1,10 @@
+concept wscript_reference_semantics {
+  name     = "wscript: reference semantics"
+  summary  = "Reference types copy the reference, not the data; same() tests identity; deep copy is explicit via Clone."
+  related  = [wscript_values_types, wscript_memory_faults, wscript_structs_enums]
+  audience = :both
+  body {
+    p "**Reference semantics**: assignment, passing and returning a reference type copies the **reference**, never the data. `same(a, b)` tests reference identity; deep copy is explicit via `#[derive(Clone)]` + `.clone()`."
+    p "`self` (on methods) is implicit and always by reference — there is no `&` in wscript."
+  }
+}

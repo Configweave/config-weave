@@ -1,0 +1,55 @@
+procedure test_package {
+  title    = "Test a package for idempotence"
+  purpose  = "Prove a package's resources converge and stay converged using the testlab's three-run protocol in a disposable instance."
+  preconditions = ["A package with at least one test block.", "docker (or podman) available for the default backend."]
+  related  = [testlab, three_run_protocol, test_block_fields, docker_backend]
+  audience = :both
+
+  step declare { n = 1
+    title = "Declare a test"
+    body screen {
+      code "wcl" { source = <<'SRC'
+test "file_present_converges" {
+  description = "file_present creates the file and is idempotent"
+  image = "debian:12"
+  step "create" {
+    description = "Create a marker file"
+    resource = "file_present"
+    properties { path = "/var/tmp/weave.txt"  content = "hello" }
+  }
+}
+SRC
+      }
+    }
+    body steps { p "Add a `test` block to `package.wcl` with a required `image` and one or more `step`s. All test values must be **static** — no variable references. Unqualified `resource`/`from` refs resolve to the declaring package." }
+  }
+
+  step run { n = 2
+    title = "Run the test"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave test ./my-playbook core:file_present_converges
+core:file_present_converges … passed
+SH
+      }
+    }
+    body steps { p "Run `config-weave test ./my-playbook [pkg[:test]]`. config-weave provisions a disposable instance and runs check → apply → apply. Run 3 catches state that only exists in-process (it would re-apply and surface as `configured`, failing the test)." }
+  }
+
+  step debug { n = 3
+    title = "Debug a failure with --keep"
+    body screen {
+      code "console" { source = <<'SH'
+$ config-weave test ./my-playbook core --keep
+… instance kept: <handle>
+SH
+      }
+    }
+    body steps { p "On failure, re-run with `--keep` to leave the instance up (its handle is reported) and inspect state. Exit codes: 0 all passed, 1 any failed, 2 validation/environment problem." }
+  }
+
+  declare -> run
+  run -> debug
+
+  verification = "`config-weave test` reports the test(s) passed and exits 0."
+}

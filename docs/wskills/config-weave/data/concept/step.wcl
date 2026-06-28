@@ -1,0 +1,22 @@
+concept step {
+  name     = "Step"
+  summary  = "One unit of work in a play — names a resource and supplies its properties."
+  related  = [play, resource, step_lifecycle, concurrency_classes, dag_scheduling]
+  audience = :both
+  body {
+    p <<PROSE
+A step is one unit of work in a play. It names a `resource` (qualified as
+`pkg.resource`) and supplies a `properties` block validated against that
+resource's declared params. A step also carries optional modifiers:
+PROSE
+    p <<PROSE
+- `condition` — a bool expression; when `false` the step reports **Skipped** and
+  does not run.
+- `requires` — a list of sibling step **names**: ordering edges in the DAG (see
+  [DAG scheduling](concept_dag_scheduling)).
+- `concurrency` — may **tighten** the resource's [concurrency class](concept_concurrency_classes),
+  never loosen it.
+PROSE
+    p "At run time each step executes the [check → apply → re-check lifecycle](concept_step_lifecycle)."
+  }
+}

@@ -1,0 +1,9 @@
+fact wscript_list_methods {
+  title    = "wscript list methods"
+  related  = [wscript_containers]
+  audience = :both
+  body {
+    p "`len is_empty push pop get set insert remove clear contains index_of reverse sort join map filter fold first last slice concat clone`"
+    p "`xs[i]` faults out of bounds; `xs.get(i) -> Option[T]` never does."
+  }
+}

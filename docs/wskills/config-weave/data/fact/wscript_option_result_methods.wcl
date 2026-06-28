@@ -1,0 +1,10 @@
+fact wscript_option_result_methods {
+  title    = "Option / Result methods"
+  related  = [wscript_option_result]
+  audience = :both
+  body {
+    p "`Option`: `is_some is_none unwrap unwrap_or expect`"
+    p "`Result`: `is_ok is_err unwrap unwrap_or unwrap_err expect`"
+    p "plus the `?` operator, which early-returns the `None`/`Err` and composes across the host boundary."
+  }
+}

@@ -1,0 +1,83 @@
+// Curated navigation — every unit pinned into a topic-meaningful tree via `index`
+// blocks. In the book each index is a heading in the sidebar whose children are
+// the units it lists in `related`; a nested `index` adds a sub-branch. The skill's
+// SKILL.md inlines the `:ai`/`:both` indexes, linking each pinned note directly.
+
+index foundations {
+  audience = :both
+  name    = "Foundations"
+  summary = "What config-weave is and the convergence model every resource obeys."
+  related = [config_weave, convergence_contract, step_lifecycle, idempotence, concurrency_classes, result_enums]
+}
+
+index authoring {
+  audience = :both
+  name    = "Authoring playbooks & packages"
+  summary = "The WCL building blocks: plays of steps, packages of resources and gatherers."
+  related = [playbook, play, step, container, package, resource, gatherer, variables, dag_scheduling, playbook_wcl, package_wcl]
+
+  index authoring_reference {
+    audience = :both
+    name    = "Block reference"
+    summary = "The playbook / package block tables and the variable rules."
+    related = [playbook_blocks, package_blocks, concurrency_class_table, variable_precedence]
+  }
+}
+
+index wscript {
+  audience = :both
+  name    = "The wscript language"
+  summary = "The statically typed, Rust-flavored language resources and gatherers are written in."
+  related = [wscript_lang, wscript_overview, wscript_values_types, wscript_reference_semantics, wscript_functions, wscript_structs_enums, wscript_pattern_matching, wscript_option_result, wscript_containers, wscript_loops, wscript_traits_operators, wscript_memory_faults]
+
+  index wscript_stdlib {
+    audience = :both
+    name    = "Built-ins & standard library"
+    summary = "The prelude, container/string/Option/Result methods, the Value type, and json/toml."
+    related = [wscript_prelude, wscript_string_methods, wscript_list_methods, wscript_map_methods, wscript_option_result_methods, value_type, json_module, toml_module, wscript_not_registered, wscript_excluded_v1]
+  }
+}
+
+index host_api_index {
+  audience = :both
+  name    = "Host API"
+  summary = "The wscript module surface config-weave registers for scripts."
+  related = [host_api, editor_support, weave_wscripti, entry_point_signatures]
+
+  index host_api_cross {
+    audience = :both
+    name    = "Cross-platform modules"
+    summary = "Registered on every platform."
+    related = [log_module, fs_module, path_module, shell_module, http_module, hash_module, archive_module, env_module, sys_module, data_module, template_module]
+  }
+
+  index host_api_windows {
+    audience = :both
+    name    = "Windows modules"
+    summary = "Registered everywhere; runtime-error off Windows."
+    related = [registry_module, service_module, com_module]
+  }
+}
+
+index testing {
+  audience = :both
+  name    = "Testing & the testlab"
+  summary = "Proving package convergence in disposable docker containers or vmlab VMs."
+  related = [testlab, three_run_protocol, test_grouping, scenarios, docker_backend, vmlab_backend, testlab_module]
+
+  index testing_reference {
+    audience = :both
+    name    = "Test reference"
+    summary = "The test block, the expectation table, flags, exit codes and backend requirements."
+    related = [test_block_fields, step_expectation_table, testlab_flags, testlab_exit_codes, testlab_backend_requirements]
+  }
+}
+
+// Skill-only navigation — the runbooks an agent reaches for. `:ai` keeps it out of
+// the book, whose nav already lists these processes under the Reference graph.
+index skill_tasks {
+  audience = :ai
+  name     = "Task runbooks"
+  summary  = "Step-by-step runbooks for authoring, testing and applying playbooks."
+  related  = [scaffold_validate, add_resource, test_package, check_then_apply]
+}

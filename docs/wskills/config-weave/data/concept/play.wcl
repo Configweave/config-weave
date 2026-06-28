@@ -1,0 +1,16 @@
+concept play {
+  name     = "Play"
+  summary  = "A named group of steps inside a playbook; the unit check/apply targets."
+  related  = [playbook, step, container, dag_scheduling, concurrency_classes]
+  audience = :both
+  body {
+    p <<PROSE
+A play is a named group of steps inside a playbook. `config-weave check` and
+`config-weave apply` each target **one** play by name. A play declares
+`parallel = true` by default: its steps run concurrently, dispatched over a DAG as
+their dependencies complete (see [DAG scheduling](concept_dag_scheduling)). Set
+`parallel = false` to force strict declaration order instead.
+PROSE
+    p "Steps can be grouped for organisation with a [container](concept_container), and ordered with `requires` edges. The scheduler is also bounded by each resource's [concurrency class](concept_concurrency_classes)."
+  }
+}

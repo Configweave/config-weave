@@ -1,0 +1,25 @@
+fact testlab_flags {
+  title    = "config-weave test flags"
+  related  = [testlab, test_grouping, docker_backend, vmlab_backend]
+  audience = :both
+  body {
+    code "console" { source = <<'SRC'
+config-weave test <playbook-dir>              # everything
+config-weave test <dir> core                  # one package
+config-weave test <dir> core:file_present_converges   # one test
+SRC
+    }
+    table {
+      header = ["Flag", "Meaning"]
+      rows = [
+        ["`--backend NAME`", "override every test's backend (`docker` or `vmlab`)"],
+        ["`--image IMAGE`", "run every test against this image instead of its own"],
+        ["`--keep`", "leave instances running for post-mortem debugging"],
+        ["`--binary PATH`", "static linux config-weave binary to copy into instances"],
+        ["`--binary-windows PATH`", "windows config-weave binary for windows vmlab guests"],
+        ["`--docker-jobs N`", "max docker groups running at once (default `min(cpu, 8)`)"],
+        ["`--vmlab-jobs N`", "max vmlab groups running at once (default `2` — VMs are heavy)"],
+      ]
+    }
+  }
+}

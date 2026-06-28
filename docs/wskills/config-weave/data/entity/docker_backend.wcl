@@ -1,0 +1,19 @@
+entity docker_backend {
+  name     = "docker backend"
+  kind     = "test backend"
+  summary  = "The default testlab backend — disposable Linux containers from an image."
+  related  = [testlab, vmlab_backend, testlab_backend_requirements, testlab_flags]
+  audience = :both
+  body {
+    p "The `docker` backend is the testlab's default. Each test (or test group) gets a disposable container from the test's `image`. It is Linux-only."
+    table {
+      header = ["Field", "Value"]
+      rows = [
+        ["backend value", "\"docker\" (default)"],
+        ["image",         "a docker image ref, e.g. \"debian:12\""],
+        ["requires",      "image must contain `sleep` and `sh` (distroless unsupported)"],
+        ["parallelism",   "--docker-jobs N (default min(cpu, 8))"],
+      ]
+    }
+  }
+}

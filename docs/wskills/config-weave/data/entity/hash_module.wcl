@@ -1,0 +1,17 @@
+entity hash_module {
+  name     = "hash"
+  kind     = "host module"
+  summary  = "Digests with hex output — sha256 / sha512 / md5, for strings and files."
+  related  = [host_api, fs_module]
+  audience = :both
+  body {
+    p "`use hash` — digests (hex output). MD5 is legacy-interop only."
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`sha256` / `sha512` / `md5`", "`(string) -> string`"],
+        ["`sha256_file` / `sha512_file` / `md5_file`", "`(path) -> Result[string, string]`"],
+      ]
+    }
+  }
+}

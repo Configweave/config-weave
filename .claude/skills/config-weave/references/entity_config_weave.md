@@ -1,0 +1,32 @@
+# config-weave
+
+_tool_
+
+The single static binary you copy onto a target and run — no agent, no runtime, no package installs.
+
+config-weave is a single-binary configuration management tool. You copy the binary
+onto a target machine alongside a **playbook** folder and run it. A Rust engine
+mediates: it validates everything before anything runs, then schedules steps over
+a DAG with concurrency classes. Three languages divide the work — WCL encodes
+playbooks and packages, wscript implements resources and gatherers, and the
+config-weave engine runs them.
+
+
+| Field | Value |
+| --- | --- |
+| Kind | Single static binary (no agent / runtime) |
+| Modes | validate · check · apply · test · docs · wscripti · init |
+| Driven by | a playbook directory (playbook.wcl + pkgs/) |
+| CLI | see the CLI reference |
+
+## Related
+
+- [Playbook](../references/concept_playbook.md)
+
+- [Package](../references/concept_package.md)
+
+- [weave.wscripti](../references/entity_weave_wscripti.md)
+
+- [Testlab](../references/concept_testlab.md)
+
+[← Back to SKILL.md](../SKILL.md)

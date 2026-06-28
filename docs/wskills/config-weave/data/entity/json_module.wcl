@@ -1,0 +1,18 @@
+entity json_module {
+  name     = "json"
+  kind     = "wscript stdlib module"
+  summary  = "JSON parse / serialize over the Value type; deterministic (sorted keys) output."
+  related  = [value_type, toml_module, data_module]
+  audience = :both
+  body {
+    p "`use json` — JSON over the [Value](entity_value_type) type. Available in config-weave scripts (unlike wscript-std's math/process/xml)."
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`parse`", "`(string) -> Result[Value, string]`"],
+        ["`to_string`", "`(Value) -> string` (keys sorted — deterministic)"],
+        ["`to_string_pretty`", "`(Value) -> string`"],
+      ]
+    }
+  }
+}

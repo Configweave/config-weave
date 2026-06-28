@@ -1,0 +1,21 @@
+entity path_module {
+  name     = "path"
+  kind     = "host module"
+  summary  = "Pure path-string manipulation — no IO."
+  related  = [host_api, fs_module]
+  audience = :both
+  body {
+    p "`use path` — pure path-string manipulation, no IO."
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`join`", "`(a, b) -> string`", ""],
+        ["`parent`", "`(p) -> string`", "empty at root"],
+        ["`filename`", "`(p) -> string`", ""],
+        ["`extension`", "`(p) -> string`", "no dot"],
+        ["`normalize`", "`(p) -> string`", "lexical `.`/`..`"],
+        ["`absolutize`", "`(p) -> Result[string, string]`", "against cwd, then normalize"],
+      ]
+    }
+  }
+}

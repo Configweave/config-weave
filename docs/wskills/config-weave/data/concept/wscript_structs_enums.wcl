@@ -1,0 +1,18 @@
+concept wscript_structs_enums {
+  name     = "wscript: structs, enums, methods"
+  summary  = "struct/enum declarations, impl blocks, and the implicit by-reference self."
+  related  = [wscript_pattern_matching, wscript_traits_operators, wscript_reference_semantics]
+  audience = :both
+  body {
+    code "rust" { source = <<'SRC'
+struct Player { name: string, hp: int }
+enum Event { Quit, Key(char), Click { x: int, y: int } }
+
+impl Player {
+    fn heal(self, amount: int) { self.hp = self.hp + amount }
+}
+SRC
+    }
+    p "Enums carry data (unit, tuple, or struct variants). Methods live in `impl` blocks; `self` is implicit and always by reference (there is no `&`). Match on enums with [pattern matching](concept_wscript_pattern_matching)."
+  }
+}

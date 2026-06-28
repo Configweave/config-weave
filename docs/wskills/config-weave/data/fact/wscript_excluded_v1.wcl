@@ -1,0 +1,9 @@
+fact wscript_excluded_v1 {
+  title    = "Excluded from wscript v1"
+  related  = [wscript_overview, wscript_loops, wscript_traits_operators]
+  audience = :both
+  body {
+    p "Deliberately absent in wscript v1:"
+    p "Borrow checker, `&`/`&mut`, lifetimes, user-defined generics, exceptions, async, threads, implicit conversions, truthiness, string interpolation (use `fmt`), compound assignment (`+=`), bitwise operators, range values outside `for` headers, and script-to-script imports."
+  }
+}

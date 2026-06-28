@@ -1,10 +1,20 @@
 # Add a package resource
 
-**Purpose:** Declare a new resource in a package and implement its check/apply wscript script against the host API.
+## Purpose
 
-_Preconditions:_ A playbook with a pkgs/<name>/package.wcl already exists.
+Declare a new resource in a package and implement its check/apply wscript script against the host API.
 
-### 1. Declare the resource and its params
+## Prerequisites
+
+- A playbook with a pkgs/<name>/package.wcl already exists.
+
+## Flowchart
+
+![diagram](../_wdoc/process_add_resource-diagram-1.svg)
+
+## Steps
+
+### Step 1: Declare the resource and its params
 
 ```wcl
 resource "file_present" {
@@ -18,7 +28,7 @@ resource "file_present" {
 
 Add a `resource` block to `package.wcl` with `script` (a path relative to the package dir) and a `param` per input. Params are validated against playbook properties at validation time.
 
-### 2. Implement check() and apply()
+### Step 2: Implement check() and apply()
 
 ```rust
 use value
@@ -47,7 +57,7 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
 
 Write the script under `resources/`. Export `check(params)` and `apply(params)`; import host modules with `use`. Run `config-weave wscripti` next to the scripts so the wscript LSP type-checks against the exact host surface.
 
-### 3. Validate the script compiles
+### Step 3: Validate the script compiles
 
 ```console
 $ config-weave validate ./my-playbook
@@ -62,10 +72,12 @@ Run `config-weave validate` — its final stage compiles every wscript script ag
 
 ## Related
 
-- [Packages](../references/concept_packages.md)
+- [Package](../references/concept_package.md)
 
-- [Resource & gatherer scripts](../references/concept_scripts.md)
+- [Resource](../references/concept_resource.md)
 
-- [Host API — cross-platform](../references/concept_hostapi.md)
+- [Host API](../references/concept_host_api.md)
 
-[← All processes](../references/processes_ref.md)
+- [Convergence contract](../references/concept_convergence_contract.md)
+
+[← Back to SKILL.md](../SKILL.md)

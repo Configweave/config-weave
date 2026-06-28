@@ -1,0 +1,14 @@
+concept concurrency_classes {
+  name     = "Concurrency classes"
+  summary  = "A resource's scheduling restriction: parallel, exclusive, or global; a step may tighten but never loosen it."
+  related  = [resource, step, dag_scheduling, concurrency_class_table]
+  audience = :both
+  body {
+    p <<PROSE
+A concurrency class is a scheduling restriction declared on a resource and
+honoured by the DAG scheduler. The three classes — `parallel`, `exclusive`,
+`global` — are defined in the [concurrency class table](fact_concurrency_class_table).
+PROSE
+    p "A step may **tighten** its resource's class (e.g. mark a normally-parallel resource `exclusive` for one step) but never **loosen** it. Tightening lets a playbook serialise a step that would otherwise race, without changing the resource definition."
+  }
+}

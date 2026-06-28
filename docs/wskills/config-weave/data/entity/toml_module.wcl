@@ -1,0 +1,19 @@
+entity toml_module {
+  name     = "toml"
+  kind     = "wscript stdlib module"
+  summary  = "TOML parse / serialize over the Value type; fails on Null or non-map top levels."
+  related  = [value_type, json_module, data_module]
+  audience = :both
+  body {
+    p "`use toml` — TOML over the [Value](entity_value_type) type."
+    table {
+      header = ["function", "signature"]
+      rows = [
+        ["`parse`", "`(string) -> Result[Value, string]` (datetimes become strings)"],
+        ["`to_string`", "`(Value) -> Result[string, string]`"],
+        ["`to_string_pretty`", "`(Value) -> Result[string, string]`"],
+      ]
+    }
+    p "TOML serialization fails on `Null` anywhere and on non-map top levels. INI lives in the host [data](entity_data_module) module."
+  }
+}

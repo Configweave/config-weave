@@ -1,0 +1,22 @@
+entity testlab_module {
+  name     = "testlab"
+  kind     = "host module (scenario driver)"
+  summary  = "The host-side module a scenario driver runs against a live vmlab lab — Lab and Machine."
+  related  = [scenarios, vmlab_backend, host_api]
+  audience = :both
+  body {
+    p <<PROSE
+The `testlab` host module is available to scenario **driver scripts**, which run
+**host-side** against a live vmlab lab (not inside an instance). The driver
+exports `fn run(lab: Lab) -> bool` (or `Result[bool, string]`) and compiles in
+stage-5 validation against this module.
+PROSE
+    table {
+      header = ["type", "members"]
+      rows = [
+        ["`Lab`",     "`lab.machine(name) -> Machine`"],
+        ["`Machine`", "`m.exec`, `m.powershell`, `m.copy_in`, `m.reboot`, `m.apply_resource`, `m.check_resource`, `m.apply(dir)`, `m.check(dir)`"],
+      ]
+    }
+  }
+}

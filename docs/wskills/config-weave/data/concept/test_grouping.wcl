@@ -1,0 +1,19 @@
+concept test_grouping {
+  name     = "Grouping tests into one instance"
+  summary  = "Same-group tests share one disposable instance; independent groups run in parallel."
+  related  = [testlab, test_block_fields, testlab_flags]
+  audience = :both
+  body {
+    p <<PROSE
+By default each test provisions its own instance. Give several tests the **same
+non-empty `group`** (within a package) to run them sequentially inside **one**
+shared instance — amortizing container start, and especially VM boot.
+PROSE
+    p <<PROSE
+Grouped tests must agree on `backend` and `image`, and they **share OS state with
+no reset between them**, so use distinct paths/state per test. Independent groups
+run **in parallel**, throttled by `--docker-jobs` / `--vmlab-jobs` (see
+[testlab flags](fact_testlab_flags)).
+PROSE
+  }
+}

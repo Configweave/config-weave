@@ -11,11 +11,9 @@ import "./schema/extensions.wcl"
 import "./schema/language.wcl"          // CodeExample, reused by the cli module
 import "./schema/cli.wcl"               // opt-in: map the config-weave CLI as data
 
-// Data — reference concepts, the CLI, glossary, and processes.
-import "./data/reference/concepts.wcl"
-import "./data/reference/cli.wcl"
-import "./data/reference/glossary.wcl"
-import "./data/processes/processes.wcl"
+// Data — atomic concept/entity/fact/process notes, the CLI, glossary, and the
+// curated navigation indexes (see data/main.wcl).
+import "./data/main.wcl"
 
 schema_version = "1.1.0"
 
@@ -40,6 +38,7 @@ then scheduling steps over a DAG with concurrency classes.
 END
   tags = ["config-weave", "configuration-management", "wcl", "wscript", "devops", "idempotence"]
   created    = "2026-06-22"
+  updated    = "2026-06-27"
   maintainer = "ai@wiltaylor.dev"
 }
 

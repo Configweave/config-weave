@@ -1,0 +1,16 @@
+concept variables {
+  name     = "Variables"
+  summary  = "Playbook vars, gatherer results and CLI overrides — scope, lazy evaluation, and the shadowing pitfall."
+  related  = [playbook, gatherer, variable_precedence]
+  audience = :both
+  body {
+    p <<PROSE
+A playbook's `vars` block holds free-form `name = expr` bindings. Expressions may
+reference gatherer results and other vars. Conditions and properties evaluate
+**lazily at run time** against the full scope; gather params evaluate **before**
+variables resolve. The full precedence and override rules are in
+[Variable precedence](fact_variable_precedence).
+PROSE
+    callout "Shadowing pitfall" { class = ["warning"]  body = "Property/params block fields **shadow** outer variables: `url = url` inside a `properties` block is a self-reference cycle error. Use distinct names (`tool_url = ...` then `url = tool_url`)." }
+  }
+}

@@ -1,0 +1,20 @@
+concept wscript_pattern_matching {
+  name     = "wscript: pattern matching"
+  summary  = "match is an expression, exhaustiveness-checked at compile time; guards, or-patterns, if-let and let-else."
+  related  = [wscript_structs_enums, wscript_option_result]
+  audience = :both
+  body {
+    p "`match` is an expression, **exhaustiveness-checked at compile time**:"
+    code "rust" { source = <<'SRC'
+match e {
+    Event::Quit => false,
+    Event::Key(c) if c == 'q' => false,          // guards (don't count for exhaustiveness)
+    Event::Key('h') | Event::Key('?') => help(), // or-patterns (no bindings inside, v1)
+    Event::Key(_) => true,
+    Event::Click { x, y } => x >= 0 && y >= 0,
+}
+SRC
+    }
+    p "`if let Some(x) = opt { … }` and `let Some(n) = expr else { return Err(\"…\") }` work as in Rust (the let-else block must diverge)."
+  }
+}

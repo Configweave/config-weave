@@ -1,0 +1,19 @@
+entity weave_wscripti {
+  name     = "weave.wscripti"
+  kind     = "generated file"
+  summary  = "The full host interface config-weave wscripti emits — the authoritative host surface for editors and the LSP."
+  related  = [host_api, editor_support, config_weave]
+  audience = :both
+  body {
+    p "`weave.wscripti` is the wscript interface file emitted by `config-weave wscripti [outdir]`, generated from `src/hostapi/*.rs`. It is the **authoritative** host API surface: with it (plus a starter `wscript.toml`) next to your scripts, `wscript check` and the wscript LSP type-check against the exact config-weave surface."
+    table {
+      header = ["Field", "Value"]
+      rows = [
+        ["Emitted by", "config-weave wscripti [outdir]"],
+        ["Generated from", "src/hostapi/*.rs"],
+        ["Also emits", "a starter wscript.toml"],
+        ["Used by", "wscript check / the wscript LSP / config-weave validate"],
+      ]
+    }
+  }
+}

@@ -1,0 +1,22 @@
+entity sys_module {
+  name     = "sys"
+  kind     = "host module"
+  summary  = "OS and hardware facts — gatherer fodder: family, os_name, arch, cpu_count, memory."
+  related  = [host_api, gatherer, env_module]
+  audience = :both
+  body {
+    p "`use sys` — OS and hardware facts (gatherer fodder)."
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`family`", "`() -> string`", "linux/windows/macos"],
+        ["`os_name`", "`() -> string`", "distro on Linux"],
+        ["`os_version`", "`() -> string`", ""],
+        ["`kernel_version`", "`() -> string`", ""],
+        ["`arch`", "`() -> string`", ""],
+        ["`cpu_count`", "`() -> int`", ""],
+        ["`total_memory` / `available_memory`", "`() -> int`", "bytes"],
+      ]
+    }
+  }
+}

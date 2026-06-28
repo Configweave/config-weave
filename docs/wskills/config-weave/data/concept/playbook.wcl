@@ -1,0 +1,68 @@
+concept playbook {
+  name     = "Playbook"
+  summary  = "A directory of plays of steps — the unit config-weave checks or applies."
+  related  = [play, package, gatherer, variables, dag_scheduling, playbook_wcl, playbook_blocks]
+  audience = :both
+  body {
+    p <<PROSE
+A playbook is a directory containing `playbook.wcl`, an optional `lib/` of shared
+wscript code, and `pkgs/<name>/` packages (see [Packages](concept_package)). It
+describes the desired state of a system: a set of **plays**, each a group of
+**steps**, where every step invokes a **resource** with properties. The engine
+appends the system import `<weave/playbook.wcl>` automatically — **never write
+import lines**.
+PROSE
+    h2 "Full example"
+    code "wcl" { source = <<'SRC'
+playbook "Sample Baseline" {
+  description = "Exercises the model loader, validation and execution"
+  version = "1.0.0"                      // optional, default "0.0.0"
+
+  gather "os" {                          // label = the variable the result lands in
+    description = "Operating system facts"
+    from = "core.os_info"                // package.gatherer
+    params {                             // optional, validated against gatherer's params
+      depth = 2
+    }
+  }
+
+  vars {
+    work_root = "/tmp/config-weave-sample"
+    is_linux = os.family == "linux"      // may reference gatherer results
+    marker_a = $"${work_root}/a.txt"     // WCL string interpolation: $"...${expr}..."
+  }
+
+  play "baseline" {
+    description = "Create marker files in order"
+    // parallel = true is the default; false runs steps in declaration order
+
+    step "make-a" {
+      description = "Create the first marker file"
+      resource = "core.file_present"     // package.resource
+      condition = is_linux               // optional bool expr; false => Skipped
+      properties {                       // validated against the resource's declared params
+        path = marker_a
+        content = "alpha"
+      }
+    }
+
+    container "secondary" {              // grouping for organisation/docs; nestable
+      description = "Files that depend on the first"
+
+      step "make-b" {
+        description = "Create the second marker file"
+        resource = "core.file_present"
+        requires = ["make-a"]            // ordering edges by step name
+        properties {
+          path = $"${work_root}/b.txt"
+          content = "beta"
+        }
+      }
+    }
+  }
+}
+SRC
+    }
+    p "`description` is mandatory wherever shown as required — the loader enforces it. The block-by-block field reference is in [Playbook block reference](fact_playbook_blocks)."
+  }
+}

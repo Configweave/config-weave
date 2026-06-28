@@ -1,0 +1,17 @@
+entity data_module {
+  name     = "data"
+  kind     = "host module"
+  summary  = "INI parse/serialize. (JSON/TOML live in the wscript json/toml modules.)"
+  related  = [host_api, json_module, toml_module, value_type]
+  audience = :both
+  body {
+    p "`use data` — INI. (JSON/TOML live in the wscript [json](entity_json_module)/[toml](entity_toml_module) modules.)"
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`ini_parse`", "`(text) -> Result[Value, string]`", "map of sections; global keys under `\"\"`"],
+        ["`ini_serialize`", "`(map) -> Result[string, string]`", ""],
+      ]
+    }
+  }
+}

@@ -1,0 +1,21 @@
+entity vmlab_backend {
+  name     = "vmlab backend"
+  kind     = "test backend"
+  summary  = "QEMU/KVM VM testlab backend — Linux or Windows guests, shelling out to the sibling vmlab CLI."
+  related  = [testlab, docker_backend, scenarios, testlab_module, testlab_backend_requirements]
+  audience = :both
+  body {
+    p "The `vmlab` backend runs tests in disposable QEMU/KVM VMs by shelling out to the sibling `../vmlab` CLI. It supports both Linux and Windows guests and is the only backend that can run [scenarios](concept_scenarios)."
+    table {
+      header = ["Field", "Value"]
+      rows = [
+        ["backend value", "\"vmlab\""],
+        ["image",         "a vmlab template ref, e.g. \"x86_64/linux-modern\""],
+        ["requires",      "templates must ship the QEMU guest agent"],
+        ["instance",      "each group gets a throwaway one-VM lab"],
+        ["parallelism",   "--vmlab-jobs N (default 2 — VMs are heavy)"],
+        ["Windows guests","Server 2019 / Windows 10 or newer"],
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+fact wscript_prelude {
+  title    = "wscript prelude"
+  related  = [wscript_overview, wscript_values_types]
+  audience = :both
+  body {
+    p "Always available, no import:"
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`print` / `println`", "`(any)` / `(any?)`", "redirected into `log::info`"],
+        ["`str`", "`(any) -> string`", "uses `Display` impls"],
+        ["`fmt`", "`(string, any…) -> string`", "`{}` placeholders; `{{`/`}}` escape; count compile-checked"],
+        ["`same`", "`(T, T) -> bool`", "reference identity"],
+        ["`weak`", "`(T) -> weak[T]`", "reference types only"],
+        ["`int`", "`(int|float|char) -> int`", "float truncates; char gives code point"],
+        ["`float`", "`(int|float) -> float`", ""],
+      ]
+    }
+  }
+}

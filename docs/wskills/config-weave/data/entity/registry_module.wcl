@@ -1,0 +1,21 @@
+entity registry_module {
+  name     = "registry"
+  kind     = "host module (Windows)"
+  summary  = "Windows registry — hive-prefixed keys; registered everywhere, runtime-errors off Windows."
+  related  = [host_api, service_module, com_module, value_type]
+  audience = :both
+  body {
+    p "`use registry` — Windows registry. **Registered on every platform** so playbooks compile and validate identically everywhere; off Windows its calls return runtime errors. Guard with a condition (`os.family == \"windows\"`) or `sys::family()`. Keys are hive-prefixed paths: `HKLM\\Software\\Vendor\\App`. Constants: `registry::HKLM HKCU HKCR HKU HKCC`."
+    table {
+      header = ["function", "signature", "notes"]
+      rows = [
+        ["`read`", "`(key, name) -> Result[Option[Value], string]`", "`None` when absent; typed values (SZ, DWORD, QWORD, EXPAND_SZ, MULTI_SZ)"],
+        ["`write`", "`(key, name, value: Value, kind: string) -> Result[unit, string]`", "kind: `sz | dword | qword | expand_sz | multi_sz`"],
+        ["`delete_value`", "`(key, name) -> Result[unit, string]`", ""],
+        ["`create_key`", "`(key) -> Result[unit, string]`", "creates parents"],
+        ["`delete_key`", "`(key) -> Result[unit, string]`", "deletes the subtree"],
+        ["`key_exists`", "`(key) -> Result[bool, string]`", ""],
+      ]
+    }
+  }
+}

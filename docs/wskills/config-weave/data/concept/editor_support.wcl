@@ -1,0 +1,15 @@
+concept editor_support {
+  name     = "Editor support (wscripti / LSP)"
+  summary  = "config-weave wscripti emits the exact host interface so the wscript LSP type-checks scripts against it."
+  related  = [host_api, weave_wscripti, resource]
+  audience = :both
+  body {
+    p <<PROSE
+`config-weave wscripti [outdir]` emits [`weave.wscripti`](entity_weave_wscripti)
+— the full host interface — plus a starter `wscript.toml`. With those next to
+your scripts, `wscript check` and the wscript LSP type-check scripts against the
+**exact** config-weave host surface: host-API misuse becomes a compile-time error,
+also caught by `config-weave validate`.
+PROSE
+  }
+}
