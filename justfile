@@ -84,9 +84,11 @@ serve-pkgs-docs: build
     wcl wdoc serve ../config-weave-pkgs/docs/_weave_docs.wcl
 
 # Serve config-weave's own documentation site (landing at /, the config-weave
-# reference book under /wskills/config-weave/) with live reload. Needs `wcl` on PATH.
+# reference book under /wskills/config-weave/) with live reload and comment mode
+# (click a rendered block to leave a review note in a comments.wcl sidecar; list
+# them with `wcl wdoc comments`). Needs `wcl` on PATH.
 docs-serve *ARGS:
-    wcl wdoc serve docs/main.wcl {{ARGS}}
+    wcl wdoc serve docs/main.wcl --comment {{ARGS}}
 
 # Build config-weave's documentation site into docs/_site/ (gitignored). Needs `wcl`.
 docs-build *ARGS:
