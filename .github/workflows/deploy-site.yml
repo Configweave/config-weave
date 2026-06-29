@@ -3,8 +3,10 @@ name: Deploy Site
 # Builds the config-weave docs/landing site (docs/main.wcl -> docs/_site) with
 # the `wcl` CLI and deploys it to Cloudflare Pages (project "config-weave",
 # configured in wrangler.toml). `wcl` lives in the sibling WCL repo, which is
-# not checked out here, so we install it from git. Runs only when docs/ (or this
-# workflow) change on main, so an ordinary code push doesn't trigger a deploy.
+# not checked out here, so we fetch a prebuilt release binary via the WCL
+# project's install script (https://wcl.dev/install.sh). Runs only when docs/
+# (or this workflow) change on main, so an ordinary code push doesn't trigger a
+# deploy.
 
 on:
   push:
@@ -15,9 +17,6 @@ on:
       - 'wrangler.toml'
   workflow_dispatch: {}
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -27,13 +26,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
       - name: Install wcl CLI
-        run: cargo install --git https://github.com/wiltaylor/wcl -p wcl --locked
+        # WCL is pre-release-only for now, so --pre. install.sh drops the
+        # binary in ~/.local/bin, which isn't on PATH by default — export it.
+        run: |
+          curl -fsSL https://wcl.dev/install.sh | sh -s -- --pre
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build docs site
         run: wcl wdoc build docs/main.wcl --out docs/_site
