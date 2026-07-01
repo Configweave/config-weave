@@ -39,7 +39,7 @@ impl BinaryResolver {
             GuestOs::Linux => 0,
             GuestOs::Windows => 1,
         };
-        if let Some(p) = &self.cache.lock().unwrap()[slot] {
+        if let Some(p) = &self.cache.lock().expect("binary resolver cache poisoned")[slot] {
             return Ok(p.clone());
         }
         let explicit = match os {
@@ -47,7 +47,7 @@ impl BinaryResolver {
             GuestOs::Windows => self.explicit_windows.as_deref(),
         };
         let p = locate_binary(explicit, os)?;
-        self.cache.lock().unwrap()[slot] = Some(p.clone());
+        self.cache.lock().expect("binary resolver cache poisoned")[slot] = Some(p.clone());
         Ok(p)
     }
 }
@@ -286,7 +286,9 @@ pub fn synthesize_resource(
         "playbook \"weave-scenario\" {{\n  description = {}\n  version = \"0.0.0\"\n\n",
         wcl_str(&format!("Synthesized for {key}"))
     ));
-    out.push_str(&format!("  play \"{PLAY}\" {{\n    description = \"scenario step\"\n"));
+    out.push_str(&format!(
+        "  play \"{PLAY}\" {{\n    description = \"scenario step\"\n"
+    ));
     out.push_str(&format!(
         "\n    step \"{step}\" {{\n      description = \"apply {key}\"\n      resource = \"{key}\"\n"
     ));

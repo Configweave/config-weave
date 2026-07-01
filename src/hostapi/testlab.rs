@@ -262,7 +262,9 @@ fn apply_resource(
     mkdir_guest(ms.instance.as_ref(), os, &dir)?;
     ms.instance.copy_in(synthd.dir.path(), &pb_path)?;
     let report = run_in_guest(ms.instance.as_ref(), bin, mode, &pb_path, Some(synth::PLAY))?;
-    Ok(step_result(report.steps.iter().find(|s| s.name == step_name)))
+    Ok(step_result(
+        report.steps.iter().find(|s| s.name == step_name),
+    ))
 }
 
 /// Apply or check a whole authored playbook directory (relative to the
@@ -407,25 +409,34 @@ pub fn module() -> Module {
                 apply_resource(&mut st, &m.name, &key, &props, "check").map_err(ds)
             },
         )
-        .method("apply", |m: &Machine, dir: &str| -> Result<RunReport, String> {
-            let mut st = m.state.borrow_mut();
-            apply_playbook(&mut st, &m.name, dir, "apply").map_err(ds)
-        })
-        .method("check", |m: &Machine, dir: &str| -> Result<RunReport, String> {
-            let mut st = m.state.borrow_mut();
-            apply_playbook(&mut st, &m.name, dir, "check").map_err(ds)
-        });
+        .method(
+            "apply",
+            |m: &Machine, dir: &str| -> Result<RunReport, String> {
+                let mut st = m.state.borrow_mut();
+                apply_playbook(&mut st, &m.name, dir, "apply").map_err(ds)
+            },
+        )
+        .method(
+            "check",
+            |m: &Machine, dir: &str| -> Result<RunReport, String> {
+                let mut st = m.state.borrow_mut();
+                apply_playbook(&mut st, &m.name, dir, "check").map_err(ds)
+            },
+        );
 
     // -- RunReport -----------------------------------------------------------
     m.ty::<RunReport>()
         .method("ok", |r: &RunReport| r.ok)
-        .method("step", |r: &RunReport, name: &str| -> Result<StepResult, String> {
-            r.steps
-                .iter()
-                .find(|(n, _)| n == name)
-                .map(|(_, s)| s.clone())
-                .ok_or_else(|| format!("no step '{name}' in the run report"))
-        });
+        .method(
+            "step",
+            |r: &RunReport, name: &str| -> Result<StepResult, String> {
+                r.steps
+                    .iter()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, s)| s.clone())
+                    .ok_or_else(|| format!("no step '{name}' in the run report"))
+            },
+        );
 
     m
 }

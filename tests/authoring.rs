@@ -48,7 +48,10 @@ fn wscripti_emits_full_host_api() {
         "mod service",
         "mod com",
     ] {
-        assert!(wscripti.contains(module), "missing `{module}` in weave.wscripti");
+        assert!(
+            wscripti.contains(module),
+            "missing `{module}` in weave.wscripti"
+        );
     }
     for ty in [
         "enum CheckResult",

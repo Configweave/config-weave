@@ -691,7 +691,8 @@ fn lab_converge_test_passes() {
     write_fixture(dir.path());
 
     let (code, stdout, stderr) = run_lab(dir.path(), &binary, &[]);
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
     assert_eq!(code, 0, "{stdout}{stderr}");
     assert_eq!(v["mode"], "test");
     let t = &v["tests"][0];
@@ -796,7 +797,8 @@ fn verify(facts: Value) -> Result[bool, string] {
     .unwrap();
 
     let (code, stdout, stderr) = run_lab(dir.path(), &binary, &[]);
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
     assert_eq!(code, 0, "{stdout}{stderr}");
     let tests = v["tests"].as_array().unwrap();
     assert_eq!(tests.len(), 2, "{stdout}");
@@ -839,7 +841,8 @@ fn lab_expected_error_test_passes() {
     });
 
     let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:rejects_bad_path"]);
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
     assert_eq!(code, 0, "{stdout}{stderr}");
     assert_eq!(v["tests"][0]["outcome"], "passed", "{stdout}");
     assert_eq!(v["tests"][0]["steps"][0]["apply"], "error", "{stdout}");
@@ -902,7 +905,8 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
     .unwrap();
 
     let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:amnesiac_is_caught"]);
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
     assert_eq!(code, 1, "{stdout}{stderr}");
     let t = &v["tests"][0];
     assert_eq!(t["outcome"], "failed", "{stdout}");
@@ -945,7 +949,8 @@ fn lab_setup_preconfigures_state() {
     });
 
     let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:preconfigured"]);
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
     assert_eq!(code, 0, "{stdout}{stderr}");
     assert_eq!(v["tests"][0]["outcome"], "passed", "{stdout}");
 }
@@ -961,7 +966,8 @@ fn lab_keep_leaves_a_container() {
     write_fixture(dir.path());
 
     let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:converges", "--keep"]);
-    let v: serde_json::Value = serde_json::from_str(&stdout).expect(&format!("{stdout}{stderr}"));
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
     assert_eq!(code, 0, "{stdout}{stderr}");
     let kept = v["tests"][0]["kept"].as_str().expect(&stdout);
     // "container <id> (image debian:12)"

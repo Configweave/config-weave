@@ -1,0 +1,64 @@
+name: CI
+
+# Lint and test gate for the Rust crate. The crate has path dependencies on
+# the sibling WCL and wscript repos (../WCL, ../wscript), which are public,
+# so we check everything out side by side under the workspace root: this
+# repo into config-weave/, wiltaylor/wcl into WCL/ and Configweave/wscript
+# into wscript/ — the same layout as a local dev checkout. Docker- and
+# vmlab-backed testlab tests are #[ignore]-gated, so `cargo test` runs only
+# the host-independent suite here.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'testdata/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'justfile'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: config-weave
+
+      - name: Check out sibling path dependencies
+        uses: actions/checkout@v4
+        with:
+          repository: wiltaylor/wcl
+          path: WCL
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Configweave/wscript
+          path: wscript
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: config-weave
+
+      - name: Format check
+        working-directory: config-weave
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: config-weave
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: config-weave
+        run: cargo test

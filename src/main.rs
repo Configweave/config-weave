@@ -21,12 +21,11 @@ use clap::{Parser, Subcommand};
 
 use diag::Diag;
 
-/// Exit codes per PRD §9.
+/// Exit codes per PRD §9. Exit 3 (reboot required) is produced by
+/// `RunReport::exit_code()` in `engine/status.rs`.
 const EXIT_OK: u8 = 0;
 const EXIT_STEP_ERROR: u8 = 1;
 const EXIT_VALIDATION: u8 = 2;
-#[allow(dead_code)]
-const EXIT_REBOOT_REQUIRED: u8 = 3;
 
 #[derive(Parser)]
 #[command(
@@ -197,7 +196,10 @@ fn main() -> ExitCode {
             let dir = outdir.clone().unwrap_or_else(|| PathBuf::from("."));
             match scaffold::wscripti(&dir) {
                 Ok(()) => {
-                    println!("wrote {} and wscript.toml", dir.join("weave.wscripti").display());
+                    println!(
+                        "wrote {} and wscript.toml",
+                        dir.join("weave.wscripti").display()
+                    );
                     EXIT_OK
                 }
                 Err(d) => {
@@ -481,7 +483,10 @@ fn cmd_test(
             .packages
             .values()
             .flat_map(|p| {
-                let tests = p.tests.iter().map(move |t| format!("{}:{}", p.name, t.name));
+                let tests = p
+                    .tests
+                    .iter()
+                    .map(move |t| format!("{}:{}", p.name, t.name));
                 let scens = p
                     .scenarios
                     .iter()

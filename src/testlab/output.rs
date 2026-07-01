@@ -56,3 +56,51 @@ pub fn output_tail(s: &str, fallback: &str) -> String {
         tail.join(" / ")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tail_lines_of_empty_input_is_empty() {
+        assert!(tail_lines("", 3).is_empty());
+        assert!(tail_lines("  \n\n  ", 3).is_empty());
+    }
+
+    #[test]
+    fn tail_lines_keeps_source_order() {
+        assert_eq!(tail_lines("a\nb\nc\nd", 3), vec!["b", "c", "d"]);
+    }
+
+    #[test]
+    fn tail_lines_shorter_than_max_returns_all() {
+        assert_eq!(tail_lines("a\nb", 5), vec!["a", "b"]);
+        assert_eq!(tail_lines("a\nb\nc", 3), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn tail_lines_ignores_surrounding_blank_lines() {
+        assert_eq!(tail_lines("\n\na\nb\n\n", 3), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn output_tail_joins_lines_and_falls_back() {
+        assert_eq!(output_tail("x\ny", "(none)"), "x / y");
+        assert_eq!(output_tail("\n \n", "(none)"), "(none)");
+    }
+
+    #[test]
+    fn rand_suffix_is_identifier_safe_and_unique() {
+        let a = rand_suffix();
+        let b = rand_suffix();
+        assert_ne!(a, b);
+        for s in [&a, &b] {
+            assert!(!s.is_empty());
+            assert!(
+                s.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+                "unexpected char in {s:?}"
+            );
+        }
+    }
+}

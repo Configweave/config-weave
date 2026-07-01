@@ -76,9 +76,11 @@ mod win {
         ChangeServiceConfigW, CloseServiceHandle, ControlService, ENUM_SERVICE_TYPE,
         OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW, QueryServiceConfigW,
         QueryServiceStatus, SC_HANDLE, SC_MANAGER_CONNECT, SERVICE_AUTO_START,
-        SERVICE_CHANGE_CONFIG, SERVICE_CONTROL_STOP, SERVICE_DEMAND_START, SERVICE_DISABLED,
-        SERVICE_ERROR, SERVICE_NO_CHANGE, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
-        SERVICE_START, SERVICE_START_TYPE, SERVICE_STATUS, SERVICE_STOP, StartServiceW,
+        SERVICE_CHANGE_CONFIG, SERVICE_CONTINUE_PENDING, SERVICE_CONTROL_STOP,
+        SERVICE_DEMAND_START, SERVICE_DISABLED, SERVICE_ERROR, SERVICE_NO_CHANGE,
+        SERVICE_PAUSE_PENDING, SERVICE_PAUSED, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
+        SERVICE_RUNNING, SERVICE_START, SERVICE_START_PENDING, SERVICE_START_TYPE, SERVICE_STATUS,
+        SERVICE_STOP, SERVICE_STOP_PENDING, SERVICE_STOPPED, StartServiceW,
     };
     use windows::core::{HSTRING, PCWSTR};
 
@@ -109,14 +111,14 @@ mod win {
         unsafe {
             QueryServiceStatus(svc.0, &mut st).map_err(|e| format!("querying '{name}': {e}"))?;
         }
-        Ok(match st.dwCurrentState.0 {
-            1 => "stopped",
-            2 => "start_pending",
-            3 => "stop_pending",
-            4 => "running",
-            5 => "continue_pending",
-            6 => "pause_pending",
-            7 => "paused",
+        Ok(match st.dwCurrentState {
+            SERVICE_STOPPED => "stopped",
+            SERVICE_START_PENDING => "start_pending",
+            SERVICE_STOP_PENDING => "stop_pending",
+            SERVICE_RUNNING => "running",
+            SERVICE_CONTINUE_PENDING => "continue_pending",
+            SERVICE_PAUSE_PENDING => "pause_pending",
+            SERVICE_PAUSED => "paused",
             _ => "unknown",
         }
         .to_string())

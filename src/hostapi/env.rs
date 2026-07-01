@@ -25,12 +25,16 @@ pub fn module() -> Module {
     });
     m.doc_next("Set an environment variable for this process and its children");
     m.fn_("set", |name: &str, value: &str| {
-        // Safety: scripts run one per worker thread but env mutation is
-        // process-global; this mirrors what shell-based config tools do.
+        // Safety: set_var requires that no other thread reads or writes the
+        // environment concurrently. Worker threads can race here (and with
+        // getenv in libc/std), so a torn read is theoretically possible;
+        // accepted because env mutation is a rare, script-authored action and
+        // this mirrors what shell-based config tools do.
         unsafe { std::env::set_var(name, value) };
     });
     m.doc_next("Remove an environment variable from this process");
     m.fn_("unset", |name: &str| {
+        // Safety: same precondition and rationale as `set` above.
         unsafe { std::env::remove_var(name) };
     });
     m.doc_next("Split a PATH-style list on the platform separator");

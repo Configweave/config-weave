@@ -95,8 +95,11 @@ mod tests {
 
     #[test]
     fn substitutes_a_scalar() {
-        let out = render("hello {{ name }}", &map(&[("name", DynValue::String("world".into()))]))
-            .unwrap();
+        let out = render(
+            "hello {{ name }}",
+            &map(&[("name", DynValue::String("world".into()))]),
+        )
+        .unwrap();
         assert_eq!(out, "hello world");
     }
 

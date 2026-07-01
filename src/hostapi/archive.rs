@@ -8,10 +8,11 @@ use wscript::Module;
 
 fn extract_zip(archive: &str, dest: &str) -> Result<i64, String> {
     let file = std::fs::File::open(archive).map_err(|e| format!("cannot open {archive}: {e}"))?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("cannot read {archive}: {e}"))?;
+    std::fs::create_dir_all(dest).map_err(|e| format!("cannot create {dest}: {e}"))?;
     // extract() guards against path traversal internally.
-    zip.extract(Path::new(dest)).map_err(|e| e.to_string())?;
+    zip.extract(Path::new(dest))
+        .map_err(|e| format!("extracting {archive} to {dest}: {e}"))?;
     Ok(zip.len() as i64)
 }
 
@@ -19,12 +20,17 @@ fn extract_tar_gz(archive: &str, dest: &str) -> Result<i64, String> {
     let file = std::fs::File::open(archive).map_err(|e| format!("cannot open {archive}: {e}"))?;
     let gz = flate2::read::GzDecoder::new(file);
     let mut tar = tar::Archive::new(gz);
-    std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(dest).map_err(|e| format!("cannot create {dest}: {e}"))?;
     let mut count = 0i64;
     // unpack_in guards each entry against escaping dest.
-    for entry in tar.entries().map_err(|e| e.to_string())? {
-        let mut entry = entry.map_err(|e| e.to_string())?;
-        entry.unpack_in(dest).map_err(|e| e.to_string())?;
+    for entry in tar
+        .entries()
+        .map_err(|e| format!("cannot read {archive}: {e}"))?
+    {
+        let mut entry = entry.map_err(|e| format!("cannot read {archive}: {e}"))?;
+        entry
+            .unpack_in(dest)
+            .map_err(|e| format!("extracting {archive} to {dest}: {e}"))?;
         count += 1;
     }
     Ok(count)

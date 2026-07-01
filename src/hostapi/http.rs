@@ -77,6 +77,7 @@ fn to_response(res: ureq::http::Response<ureq::Body>) -> Result<HttpResponse, St
     let status = res.status().as_u16() as i64;
     let mut headers = HashMap::new();
     for (name, value) in res.headers() {
+        // Header values are ASCII in practice; a non-UTF-8 value maps to "".
         headers.insert(
             name.as_str().to_string(),
             value.to_str().unwrap_or_default().to_string(),

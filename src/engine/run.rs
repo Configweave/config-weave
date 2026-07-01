@@ -437,6 +437,9 @@ fn schedule(
             // that never completed — defensive guard against deadlock.
             let any_ready = (0..n).any(|i| !dispatched[i] && deps_satisfied(i, &completed));
             if !any_ready {
+                tracing::warn!(
+                    "scheduler: pending steps with no satisfiable dependencies; marking them not-run"
+                );
                 for i in 0..n {
                     if !dispatched[i] {
                         dispatched[i] = true;
@@ -493,10 +496,24 @@ fn schedule(
 
     drop(job_txs);
     for handle in worker_handles {
-        let _ = handle.join();
+        if handle.join().is_err() {
+            tracing::error!("worker thread panicked");
+        }
     }
 
-    reports.into_iter().map(|r| r.unwrap()).collect()
+    reports
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| {
+            r.unwrap_or_else(|| {
+                quick_report(
+                    steps[i],
+                    StepStatus::Error,
+                    Some("internal scheduler error: step never reported".into()),
+                )
+            })
+        })
+        .collect()
 }
 
 fn quick_report(step: &Step, status: StepStatus, message: Option<String>) -> StepReport {

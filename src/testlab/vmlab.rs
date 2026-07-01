@@ -174,7 +174,10 @@ impl TestBackend for VmlabBackend {
 
         let wcl_path = dir.path().join("vmlab.wcl");
         let wcl = std::fs::read_to_string(&wcl_path).map_err(|e| {
-            Diag::bare(format!("lab dir {} has no readable vmlab.wcl: {e}", lab_dir.display()))
+            Diag::bare(format!(
+                "lab dir {} has no readable vmlab.wcl: {e}",
+                lab_dir.display()
+            ))
         })?;
         let suffix = super::output::rand_suffix();
         let (new_wcl, lab_name) = rewrite_lab_name(&wcl, &suffix)
@@ -364,7 +367,13 @@ impl TestInstance for VmlabInstance {
     }
 
     fn exec(&self, argv: &[&str]) -> Result<ExecOutput, Diag> {
-        let mut args = vec!["exec", "--timeout", EXEC_TIMEOUT_SECS, self.vm.as_str(), "--"];
+        let mut args = vec![
+            "exec",
+            "--timeout",
+            EXEC_TIMEOUT_SECS,
+            self.vm.as_str(),
+            "--",
+        ];
         args.extend_from_slice(argv);
         let out = self.run(&args)?;
         Ok(ExecOutput {

@@ -131,8 +131,14 @@ fn run_captured(program: &str, args: &[String], opts: &Opts) -> Result<CmdOutput
     feed_stdin(&mut child, opts);
 
     // Drain pipes on threads so big output can't deadlock the child.
-    let mut stdout_pipe = child.stdout.take().unwrap();
-    let mut stderr_pipe = child.stderr.take().unwrap();
+    let mut stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("cannot capture stdout of '{program}'"))?;
+    let mut stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("cannot capture stderr of '{program}'"))?;
     let out_thread = std::thread::spawn(move || {
         let mut buf = String::new();
         let _ = stdout_pipe.read_to_string(&mut buf);
@@ -163,8 +169,14 @@ fn run_streaming_impl(program: &str, args: &[String], opts: &Opts) -> Result<Cmd
         .map_err(|e| format!("cannot start '{program}': {e}"))?;
     feed_stdin(&mut child, opts);
 
-    let stdout_pipe = child.stdout.take().unwrap();
-    let stderr_pipe = child.stderr.take().unwrap();
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("cannot capture stdout of '{program}'"))?;
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("cannot capture stderr of '{program}'"))?;
     // log sinks are thread-local, so stream from this thread; drain
     // stderr on a helper thread into a buffer, logging after.
     let err_thread = std::thread::spawn(move || {

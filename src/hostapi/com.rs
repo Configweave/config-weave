@@ -13,6 +13,7 @@ use wscript_std::DynValue;
 #[cfg(windows)]
 use crate::comdispatch::{self, ComValue};
 
+#[cfg(not(windows))]
 const NOT_WINDOWS: &str = "the 'com' module is only available on Windows";
 
 /// A late-bound COM object handle. Opaque: scripts only see its methods.

@@ -45,3 +45,46 @@ pub fn with_import(source: &str, import: &str, vars: bool) -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_import_leaves_the_source_prefix_untouched() {
+        // Spans in user files stay valid because the source is an
+        // unchanged prefix of the augmented text.
+        let src = "play \"demo\" {\n}\n";
+        let out = with_import(src, PLAYBOOK_IMPORT, false);
+        assert!(out.starts_with(src));
+        assert_eq!(out, format!("{src}import <{PLAYBOOK_IMPORT}>\n"));
+    }
+
+    #[test]
+    fn with_import_terminates_an_unterminated_source() {
+        let out = with_import("play \"demo\" {}", PACKAGE_IMPORT, false);
+        assert_eq!(
+            out,
+            format!("play \"demo\" {{}}\nimport <{PACKAGE_IMPORT}>\n")
+        );
+    }
+
+    #[test]
+    fn with_import_appends_the_vars_import_when_asked() {
+        let out = with_import("x\n", PLAYBOOK_IMPORT, true);
+        assert!(out.ends_with(&format!(
+            "import <{PLAYBOOK_IMPORT}>\nimport <{VARS_IMPORT}>\n"
+        )));
+    }
+
+    #[test]
+    fn loader_serves_the_embedded_vocab_and_optional_vars() {
+        let sys = |name: &str| std::path::Path::new(wcl_lang::SYSTEM_IMPORT_ROOT).join(name);
+        let l = loader(Some("let x = 1\n".into()));
+        assert_eq!(l(&sys(PLAYBOOK_IMPORT)).unwrap(), PLAYBOOK_VOCAB);
+        assert_eq!(l(&sys(PACKAGE_IMPORT)).unwrap(), PACKAGE_VOCAB);
+        assert_eq!(l(&sys(VARS_IMPORT)).unwrap(), "let x = 1\n");
+        let no_vars = loader(None);
+        assert!(no_vars(&sys(VARS_IMPORT)).is_err());
+    }
+}

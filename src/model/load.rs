@@ -756,7 +756,10 @@ fn load_package(
                     continue;
                 }
                 if !seen_scenarios.insert(sname.clone()) {
-                    ctx.err(format!("duplicate scenario '{sname}'"), wcl_span(block.span()));
+                    ctx.err(
+                        format!("duplicate scenario '{sname}'"),
+                        wcl_span(block.span()),
+                    );
                 }
                 scenarios.push(ScenarioDecl {
                     name: sname,

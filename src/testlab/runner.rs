@@ -751,10 +751,10 @@ fn run_one_scenario(
 
     if keep {
         report.kept = Some(rc.borrow().handle());
-    } else if let Err(d) = rc.borrow_mut().teardown() {
-        if !quiet {
-            eprintln!("⚠ scenario {} teardown: {}", report.name, d.message);
-        }
+    } else if let Err(d) = rc.borrow_mut().teardown()
+        && !quiet
+    {
+        eprintln!("⚠ scenario {} teardown: {}", report.name, d.message);
     }
     report.duration = t0.elapsed();
     report
