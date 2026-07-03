@@ -1,6 +1,6 @@
 # Value
 
-_registered type_
+_value type_
 
 The single dynamic escape hatch — gatherer results, step params, json/toml documents.
 

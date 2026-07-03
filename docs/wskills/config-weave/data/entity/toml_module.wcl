@@ -1,6 +1,6 @@
 entity toml_module {
   name     = "toml"
-  kind     = "wscript stdlib module"
+  kind     = :library
   summary  = "TOML parse / serialize over the Value type; fails on Null or non-map top levels."
   related  = [value_type, json_module, data_module]
   audience = :both

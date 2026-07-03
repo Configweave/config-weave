@@ -1,6 +1,6 @@
 entity testlab_module {
   name     = "testlab"
-  kind     = "host module (scenario driver)"
+  kind     = :host_module
   summary  = "The host-side module a scenario driver runs against a live vmlab lab — Lab and Machine."
   related  = [scenarios, vmlab_backend, host_api]
   audience = :both

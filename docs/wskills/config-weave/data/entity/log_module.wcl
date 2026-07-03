@@ -1,6 +1,6 @@
 entity log_module {
   name     = "log"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "Structured logging with step context attached — debug/info/warn/error."
   related  = [host_api, step_lifecycle]
   audience = :both

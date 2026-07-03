@@ -1,0 +1,233 @@
+// The training view's course — "First playbook → packages → testlab"
+// (schema/training.wcl). Ordered lessons with hands-on exercises; `related`
+// links each lesson back to the reference units it teaches. Commands and
+// expected output mirror the runbooks (data/process/) — keep them in sync.
+
+lesson install_and_scaffold {
+  n       = 1
+  title   = "Install and scaffold a playbook"
+  summary = "Put the binary on PATH, scaffold a skeleton playbook, and validate it before running anything."
+  objectives = [
+    "Install the config-weave binary (one file, no runtime)",
+    "Scaffold a skeleton playbook with `config-weave init`",
+    "Validate the whole pipeline and list the plays",
+  ]
+  related = [config_weave, playbook, scaffold_validate]
+  body {
+    p "config-weave ships as a single statically-linked executable per platform — download it from the releases page, put it on your `PATH`, done. There is nothing else to install on any machine it runs on."
+    p "`config-weave init` writes a working starting point: a `playbook.wcl` with one play, plus an example package under `pkgs/core/` with a gatherer, a resource, and their wscript scripts. `validate` then runs the full pipeline — WCL syntax, schema, ref resolution, the step DAG, and wscript compilation of every script — without executing anything."
+  }
+  exercise scaffold {
+    title     = "Scaffold and validate"
+    task      = "Create a skeleton playbook, validate it, and list its plays."
+    code_lang = "bash"
+    code      = <<'SH'
+config-weave init ./my-playbook
+config-weave validate ./my-playbook
+config-weave list ./my-playbook
+SH
+    expected = "`validate` prints `ok` and exits 0; `list` prints the scaffold's play, `baseline`."
+    hint     = "If `validate` reports a script-compilation error, the binary and the scaffold disagree — re-download the matching release."
+  }
+}
+
+lesson first_convergence {
+  n       = 2
+  title   = "Your first convergence"
+  summary = "Run the check → apply → re-check loop and watch idempotence do its thing."
+  objectives = [
+    "Preview a play's status with `check` (report-only)",
+    "Converge the machine with `apply`",
+    "Prove idempotence with a second run",
+  ]
+  prerequisites = [install_and_scaffold]
+  related = [check_then_apply, convergence_contract, idempotence]
+  body {
+    p "The same playbook drives both modes. `check` runs every step's `check()` read-only and reports its status — nothing on the machine changes. `apply` runs `apply()` for each unconfigured step, then **re-checks it in the same run**: convergence is proven, not assumed."
+    p "Idempotence is the contract's payoff: after a successful apply, every later run — check or apply, even in a fresh process — must report `already configured` and change nothing."
+  }
+  exercise converge {
+    title     = "check, apply, re-check"
+    task      = "Dry-run the scaffolded play, converge it, then prove a second apply is a no-op."
+    code_lang = "bash"
+    code      = <<'SH'
+config-weave check ./my-playbook baseline    # reports: not configured
+config-weave apply ./my-playbook baseline    # converges: configured
+config-weave apply ./my-playbook baseline    # proves:    already configured
+SH
+    expected = "The first `check` reports the steps not configured; the first `apply` reports them `configured`; the second `apply` reports every step `already configured` and exits 0."
+    hint     = "A step that flips back to `not configured` on the re-run has a broken resource script — its `apply()` doesn't produce the state its `check()` looks for."
+  }
+}
+
+lesson facts_vars_ordering {
+  n       = 3
+  title   = "Facts, variables, and ordering"
+  summary = "Gather host facts into variables, target steps with conditions, and sequence them with requires."
+  objectives = [
+    "Gather facts with a `gather` block and use them in expressions",
+    "Skip steps per host with `condition`",
+    "Order dependent steps with `requires`",
+  ]
+  prerequisites = [first_convergence]
+  related = [gatherer, variables, dag_scheduling, playbook_blocks, variable_precedence]
+  body {
+    p "A `gather` block runs a gatherer before any step and binds its result to a name — `gather \"os\" { from = \"core.os_info\" }` makes `os.family` available to every expression. `vars` declares your own values (evaluated lazily, so they can reference gathered facts); `--var KEY=VALUE` overrides either from the CLI."
+    p "Steps run in dependency order, not file order: `requires` draws the edges of a DAG and independent steps may run in parallel. `requires` is ordering only — it is not a success demand. `condition` gates a step on an expression; a false condition skips it rather than failing it."
+  }
+  exercise target_a_step {
+    title     = "Gate a step on a gathered fact"
+    task      = "In the scaffolded playbook, add a variable derived from the os gatherer and a second step that only runs on Linux and requires the first."
+    code_lang = "wcl"
+    code      = <<'WCL'
+gather "os" { from = "core.os_info" }
+
+vars {
+  is_linux = os.family == "linux"
+}
+
+play "baseline" {
+  step "make-a" {
+    resource   = "core.file_present"
+    properties { path = "/var/tmp/weave-a.txt"  content = "alpha" }
+  }
+  step "make-b" {
+    resource   = "core.file_present"
+    condition  = is_linux
+    requires   = ["make-a"]
+    properties { path = "/var/tmp/weave-b.txt"  content = "beta" }
+  }
+}
+WCL
+    expected = "`validate` stays green; on a Linux host `apply` configures make-a before make-b, and `check` shows both. With `condition = !is_linux` the second step reports skipped instead."
+    hint     = "Variables are lazy — a var referencing `os.…` only evaluates after gathering, so `validate` won't run the gatherer."
+  }
+}
+
+lesson write_a_package {
+  n       = 4
+  title   = "Write your own package"
+  summary = "Declare a resource in a package manifest and implement its check/apply wscript."
+  objectives = [
+    "Register a resource with typed params in `package.wcl`",
+    "Implement the `check()` / `apply()` entry points in wscript",
+    "Validate that the script compiles against the host API",
+  ]
+  prerequisites = [facts_vars_ordering]
+  related = [package, resource, add_resource, entry_point_signatures, package_blocks]
+  body {
+    p "A package is a folder under `pkgs/` with a `package.wcl` that registers what it provides. Drop the folder in and it's discovered on the next run — no registry, no recompile. Each `resource` names its wscript and declares a `param` per input; playbook properties are validated against those params before anything executes."
+    p "The script exports `check(params) -> Result[CheckResult, string]` and `apply(params) -> Result[ApplyResult, string]`. `check` must never mutate; `apply` must converge so a re-check returns `AlreadyConfigured` — even in a fresh process. That is the whole contract, and the testlab (next lessons) exists to prove you honoured it."
+  }
+  exercise marker_resource {
+    title     = "A marker-file resource"
+    task      = "Create `pkgs/mypkg/` with a `dir_present` resource that ensures a directory exists, then validate."
+    code_lang = "wcl"
+    code      = <<'WCL'
+// pkgs/mypkg/package.wcl
+package "mypkg" {
+  description = "My first package"
+  resource "dir_present" {
+    description = "Ensure a directory exists"
+    script      = "resources/dir_present.wscript"
+    concurrency = "parallel"
+    param "path" { description = "Absolute path"  type = "string"  required = true }
+  }
+}
+WCL
+    expected = "`config-weave validate ./my-playbook` compiles the new script and exits 0; a step with `resource = \"mypkg.dir_present\"` converges and stays converged."
+    hint     = "In the script: `fs::is_dir(p)` decides `check`; `fs::mkdir(p)` (creates missing parents) is the whole `apply`."
+  }
+  exercise wire_the_editor {
+    title     = "Type-check scripts in your editor"
+    task      = "Emit the host API interface next to your scripts so the wscript LSP checks them against the exact host surface."
+    code_lang = "bash"
+    code      = <<'SH'
+cd ./my-playbook && config-weave wscripti
+SH
+    expected = "`weave.wscripti` and a starter `wscript.toml` appear; the editor now flags a misspelled host function before `validate` does."
+  }
+}
+
+lesson host_api {
+  n       = 5
+  title   = "Speak the host API"
+  summary = "The module surface scripts import with `use` — and the traps around Results and unregistered modules."
+  objectives = [
+    "Import host modules and handle their `Result` returns with `?`",
+    "Know which wscript-std modules are NOT registered",
+    "Find the authoritative surface in weave.wscripti",
+  ]
+  prerequisites = [write_a_package]
+  related = [host_api, fs_module, shell_module, template_module, wscript_option_result, wscript_not_registered, weave_wscripti]
+  body {
+    p "Everything a script may touch comes from host modules — `use fs`, `use shell`, `use template`, `use path`, `use log`, and the rest. All fallible functions return `Result[…, string]`; propagate with `?` and let the engine report the error against the step rather than swallowing it. Modules are registered on both platforms — a foreign-platform call (say `registry` on Linux) errors at runtime rather than silently no-opping."
+    p "Two traps: config-weave's `fs` **replaces** wscript-std's standalone fs (which is not registered — same for math, process and xml), and the surface is exactly what `config-weave wscripti` emits. If a function isn't in `weave.wscripti`, it does not exist, whatever the wscript-std docs say."
+  }
+  exercise template_a_file {
+    title     = "Render a config from a template"
+    task      = "Extend your resource (or add one) to render a file with `template::render` from a params-supplied string, using `shell::run` to verify the result out-of-band."
+    code_lang = "rust"
+    code      = <<'SRC'
+use value
+use fs
+use template
+use shell
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    let out = template::render(params.get("tpl")?.as_string()?, params)?
+    fs::write(params.get("path")?.as_string()?, out)?
+    let r = shell::run("cat " + params.get("path")?.as_string()?)?
+    if r.code != 0 { return Err("verify failed") }
+    Ok(ApplyResult::Success)
+}
+SRC
+    expected = "`validate` compiles the script; `apply` writes the rendered file and the step converges on re-check."
+    hint     = "Check `weave.wscripti` for `template::render`'s exact signature before guessing — inventing host functions is the classic failure."
+  }
+}
+
+lesson prove_it_in_the_testlab {
+  n       = 6
+  title   = "Prove it in the testlab"
+  summary = "Declare a test block and let the three-run protocol prove convergence in a disposable instance."
+  objectives = [
+    "Declare a `test` block with an image and static steps",
+    "Run the three-run protocol in a docker instance",
+    "Debug a failing test with --keep",
+  ]
+  prerequisites = [write_a_package]
+  related = [testlab, three_run_protocol, test_package, test_block_fields, docker_backend, testlab_flags]
+  body {
+    p "A `test` block in `package.wcl` names an `image` and one or more static steps (no variable references). `config-weave test` boots a disposable instance — a docker container by default, a vmlab VM when the test needs a real machine — copies the binary and a synthesized playbook in, and runs the three-run protocol: **check** (must report not configured), **apply** (must converge), **apply again in a fresh process** (must change nothing)."
+    p "Run 2 catches resources that don't converge; run 3 catches the subtler bug — state that only looks converged to the process that created it. Filter with `pkg` or `pkg:test`, and keep a failing instance alive with `--keep` to shell in and inspect."
+  }
+  exercise converge_in_docker {
+    title     = "Test your package end-to-end"
+    task      = "Add a test for your `dir_present` resource and run it in a docker instance."
+    code_lang = "wcl"
+    code      = <<'WCL'
+// in pkgs/mypkg/package.wcl
+test "dir_present_converges" {
+  description = "dir_present creates the directory and is idempotent"
+  image = "debian:12"
+  step "make-dir" {
+    description = "Create a work directory"
+    resource   = "dir_present"
+    properties { path = "/var/tmp/weave-test" }
+  }
+}
+WCL
+    expected = "`config-weave test ./my-playbook mypkg` (docker running, static linux binary via `--binary` if your dev build is dynamic) reports the test passed and exits 0."
+    hint     = "Unqualified `resource` refs in a test resolve to the declaring package — `dir_present`, not `mypkg.dir_present`."
+  }
+  exercise break_it {
+    title     = "Watch the protocol catch a bug"
+    task      = "Make `apply()` create the state somewhere `check()` doesn't look (e.g. append a suffix to the path), re-run the test, and read which run fails."
+    code_lang = "bash"
+    code      = <<'SH'
+config-weave test ./my-playbook mypkg:dir_present_converges --keep
+SH
+    expected = "The test fails on run 2's re-check (or run 3) with the step still `not configured`; `--keep` leaves the container up so you can inspect what apply actually wrote. Revert the sabotage and the test passes again."
+  }
+}

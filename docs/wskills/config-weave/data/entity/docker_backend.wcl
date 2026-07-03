@@ -1,6 +1,6 @@
 entity docker_backend {
   name     = "docker backend"
-  kind     = "test backend"
+  kind     = :test_backend
   summary  = "The default testlab backend — disposable Linux containers from an image."
   related  = [testlab, vmlab_backend, testlab_backend_requirements, testlab_flags]
   audience = :both

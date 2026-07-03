@@ -1,6 +1,6 @@
 entity json_module {
   name     = "json"
-  kind     = "wscript stdlib module"
+  kind     = :library
   summary  = "JSON parse / serialize over the Value type; deterministic (sorted keys) output."
   related  = [value_type, toml_module, data_module]
   audience = :both

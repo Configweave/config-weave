@@ -1,6 +1,6 @@
 # package.wcl
 
-_file type_
+_file format_
 
 The WCL document under pkgs/<name>/ declaring resources, gatherers and tests.
 

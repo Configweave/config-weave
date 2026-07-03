@@ -1,6 +1,6 @@
 entity weave_wscripti {
   name     = "weave.wscripti"
-  kind     = "generated file"
+  kind     = :file_format
   summary  = "The full host interface config-weave wscripti emits — the authoritative host surface for editors and the LSP."
   related  = [host_api, editor_support, config_weave]
   audience = :both

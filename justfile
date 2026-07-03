@@ -95,8 +95,10 @@ docs-build *ARGS:
     wcl wdoc build docs/main.wcl --out docs/_site {{ARGS}}
 
 # Regenerate the committed Claude Code skill (.claude/skills/config-weave/) from the
-# config-weave wskill (docs/wskills/config-weave/). Overwrites the generated skill.
+# config-weave wskill (docs/wskills/config-weave/). Cleans first — `wcl wdoc skill`
+# only writes the pages it generates, so stale pages would otherwise linger.
 skill-build *ARGS:
+    rm -rf .claude/skills/config-weave
     wcl wdoc skill docs/wskills/config-weave/wdoc/skill/main.wcl --out .claude/skills/config-weave {{ARGS}}
 
 # Release artifacts for both PRD targets plus a checksums file.

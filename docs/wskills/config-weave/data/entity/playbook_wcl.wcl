@@ -1,6 +1,6 @@
 entity playbook_wcl {
   name     = "playbook.wcl"
-  kind     = "file type"
+  kind     = :file_format
   summary  = "The WCL document at a playbook directory's root — declares plays, gathers and vars."
   related  = [playbook, package_wcl, playbook_blocks]
   audience = :both

@@ -1,7 +1,7 @@
 ---
 name: config-weave
 description: "Expertise skill for config-weave: authoring WCL playbooks and packages, writing wscript resource/gatherer/verify scripts, the host API surface, running and testing playbooks. Single-binary configuration management driven by WCL playbooks and wscript resource scripts, with a check → apply → re-check convergence contract and a disposable-instance testlab. Auto-activated when working with playbook.wcl, package.wcl, .wscript scripts, the config-weave CLI, or the testlab."
-wskill_schema_version: 1.1.0
+wskill_schema_version: 1.0.0
 allowed-tools:
   - Read
   - Write
@@ -256,8 +256,18 @@ _Step-by-step runbooks for authoring, testing and applying playbooks._
 
 - [Check, then apply a play](references/process_check_then_apply.md)
 
-## More reference
+- [CLI reference](references/cli_ref.md) — every `config-weave` subcommand, its arguments and switches
 
-- [CLI reference](references/cli_ref.md) — every `config-weave` subcommand, its arguments and switches.
+- [Glossary](references/glossary_ref.md) — config-weave vocabulary
 
-- [Glossary](references/glossary_ref.md) — config-weave vocabulary.
+## Views
+
+Beyond this skill, the wskill ships these views — build them with `just render` in the wskill folder:
+
+- **Reference book** — The comprehensive human reference — every layer of config-weave, curated into chapters. (`wdoc/book/main.wcl`)
+
+- **Claude Code skill** — The Claude Code expertise skill (committed at .claude/skills/config-weave). (`wdoc/skill/main.wcl`)
+
+- **Overview deck** — An introduction to config-weave as an overview deck — the model, packages, and the testlab. (`wdoc/presentation/main.wcl`)
+
+- **Training course** — First playbook → packages → testlab: a hands-on lesson series with verifiable exercises. (`wdoc/training/main.wcl`)

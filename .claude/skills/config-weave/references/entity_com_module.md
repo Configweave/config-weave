@@ -1,6 +1,6 @@
 # com
 
-_host module (Windows)_
+_host module_
 
 Late-bound COM via IDispatch and WMI; returns ComObject handles; STA initialised by the engine.
 

@@ -1,0 +1,128 @@
+// The presentation view's deck — config-weave's introduction as slides
+// (schema/presentation.wcl). Slides feature existing units where possible
+// (`unit = <id>` pulls the headline + summary); detail stays in the book.
+presentation intro {
+  summary = "Single-binary configuration management: describe the state in a WCL playbook, apply it to converge a machine, or check that it already matches."
+
+  pres_section what_and_why {
+    title = "What & why"
+    pres_slide what {
+      unit = config_weave
+      body {
+        p "Copy the binary + a playbook folder onto a Linux or Windows host. Run it."
+        p "No agent, no interpreter, no dependency hell."
+      }
+      speaker_notes = "The pitch in one line: a statically-linked binary and a folder. Everything else in the deck explains what's in the folder."
+    }
+    pres_slide model {
+      unit = playbook
+      body {
+        p "**Plays** run **steps**; each step invokes a **resource** with typed properties."
+        p "**Gatherers** collect host facts into variables before anything runs."
+      }
+      speaker_notes = "A playbook is a typed WCL document — the schema is validated before anything touches the machine."
+    }
+    pres_slide contract {
+      unit = convergence_contract
+      body {
+        p "`check` — report-only dry run, never mutates."
+        p "`apply` — converge, idempotently: only out-of-state steps change."
+      }
+      speaker_notes = "One playbook, two modes. The contract is enforced per resource script: check, apply, re-check."
+    }
+  }
+
+  pres_section playbooks {
+    title = "Playbooks"
+    pres_slide variables {
+      unit = variables
+      body {
+        p "Gatherer results, declared `vars`, CLI overrides — real expressions, lazy evaluation."
+      }
+    }
+    pres_slide ordering {
+      unit = dag_scheduling
+      body {
+        p "`requires` sequences dependent steps into a DAG."
+        p "`condition` skips steps that don't apply to this host."
+        p "Concurrency classes let independent steps run in parallel — safely."
+      }
+      speaker_notes = "requires is ordering, not a success demand — a failed dependency doesn't cascade unless the step itself fails."
+    }
+  }
+
+  pres_section packages_and_scripts {
+    title = "Packages & scripts"
+    pres_slide packages {
+      unit = package
+      body {
+        p "Drop a folder under `pkgs/` — discovered on the next run."
+        p "`package.wcl` registers gatherers and resources, namespaced: `core.file_present`."
+      }
+      speaker_notes = "No registry, no recompile. The package manifest declares each resource's params; properties are validated against them."
+    }
+    pres_slide resources {
+      unit = resource
+      body {
+        p "A wscript script with `check()` / `apply()` entry points."
+        p "The engine re-checks after apply — convergence is proven, not assumed."
+      }
+    }
+    pres_slide wscript {
+      unit = wscript_lang
+      body {
+        p "Statically typed, Rust-flavored — `Result`/`Option`, pattern matching, no borrow checker."
+      }
+      speaker_notes = "Three languages divide the work: WCL for data, wscript for behaviour, Rust for the engine."
+    }
+    pres_slide host_api {
+      unit = host_api
+      body {
+        p "`fs`, `shell`, `template`, `service`, `registry`, `http`, … — one surface, both platforms."
+        p "`config-weave wscripti` emits the authoritative `weave.wscripti`."
+      }
+      speaker_notes = "The surface is exactly what wscripti emits — foreign-platform functions error off their platform rather than silently no-op."
+    }
+  }
+
+  pres_section testing {
+    title = "Testing"
+    pres_slide testlab {
+      unit = testlab
+      body {
+        p "`test` blocks in `package.wcl`; disposable instances per test."
+      }
+    }
+    pres_slide protocol {
+      unit = three_run_protocol
+      body {
+        p "1 · `check` — must report not configured"
+        p "2 · `apply` — must converge"
+        p "3 · `apply` again, fresh process — must change nothing"
+      }
+      speaker_notes = "Run 2 proves in-process convergence; run 3 proves cross-process idempotence. Most convergence bugs die here."
+    }
+    pres_slide backends {
+      title = "Disposable instances"
+      unit  = docker_backend
+      body {
+        p "**docker** — fast Linux containers for the everyday loop."
+        p "**vmlab** — real VMs when you need Windows or systemd."
+      }
+      speaker_notes = "Same tests, two backends. Scenarios script multi-VM stories the three-run protocol can't express."
+    }
+  }
+
+  pres_section getting_started {
+    title = "Getting started"
+    pres_slide start {
+      title = "Three commands"
+      body {
+        p "`config-weave init my-playbook`"
+        p "`config-weave apply my-playbook baseline`"
+        p "`config-weave check my-playbook baseline`"
+      }
+      speaker_notes = "Point people at the training course for the guided path, and the reference book for everything else."
+    }
+  }
+}

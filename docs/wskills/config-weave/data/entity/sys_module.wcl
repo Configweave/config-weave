@@ -1,6 +1,6 @@
 entity sys_module {
   name     = "sys"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "OS and hardware facts — gatherer fodder: family, os_name, arch, cpu_count, memory."
   related  = [host_api, gatherer, env_module]
   audience = :both

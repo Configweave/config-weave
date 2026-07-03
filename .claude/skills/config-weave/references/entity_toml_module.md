@@ -1,6 +1,6 @@
 # toml
 
-_wscript stdlib module_
+_library_
 
 TOML parse / serialize over the Value type; fails on Null or non-map top levels.
 

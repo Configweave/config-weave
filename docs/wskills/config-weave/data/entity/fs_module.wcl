@@ -1,6 +1,6 @@
 entity fs_module {
   name     = "fs"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "File IO — richer than wscript-std's standalone fs, which it replaces."
   related  = [host_api, path_module, hash_module]
   audience = :both

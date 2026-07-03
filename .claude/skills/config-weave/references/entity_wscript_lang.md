@@ -1,6 +1,6 @@
 # wscript
 
-_language_
+_software_
 
 The statically typed, Rust-flavored scripting language resources, gatherers and verify scripts are written in.
 

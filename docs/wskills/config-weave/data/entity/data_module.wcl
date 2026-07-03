@@ -1,6 +1,6 @@
 entity data_module {
   name     = "data"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "INI parse/serialize. (JSON/TOML live in the wscript json/toml modules.)"
   related  = [host_api, json_module, toml_module, value_type]
   audience = :both

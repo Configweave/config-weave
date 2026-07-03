@@ -1,6 +1,6 @@
 entity config_weave {
   name     = "config-weave"
-  kind     = "tool"
+  kind     = :tool
   summary  = "The single static binary you copy onto a target and run — no agent, no runtime, no package installs."
   related  = [playbook, package, weave_wscripti, testlab]
   audience = :both

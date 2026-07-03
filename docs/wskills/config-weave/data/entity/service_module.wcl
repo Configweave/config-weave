@@ -1,6 +1,6 @@
 entity service_module {
   name     = "service"
-  kind     = "host module (Windows)"
+  kind     = :host_module
   summary  = "Windows service management (SCM); Linux services use shell::run(\"systemctl …\")."
   related  = [host_api, registry_module, shell_module]
   audience = :both

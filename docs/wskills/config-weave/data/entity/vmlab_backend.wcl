@@ -1,6 +1,6 @@
 entity vmlab_backend {
   name     = "vmlab backend"
-  kind     = "test backend"
+  kind     = :test_backend
   summary  = "QEMU/KVM VM testlab backend — Linux or Windows guests, shelling out to the sibling vmlab CLI."
   related  = [testlab, docker_backend, scenarios, testlab_module, testlab_backend_requirements]
   audience = :both

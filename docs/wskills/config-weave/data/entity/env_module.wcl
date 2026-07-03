@@ -1,6 +1,6 @@
 entity env_module {
   name     = "env"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "Process environment and host identity — get/set vars, hostname, current user, elevation."
   related  = [host_api, sys_module]
   audience = :both

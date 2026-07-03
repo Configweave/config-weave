@@ -1,6 +1,6 @@
 entity path_module {
   name     = "path"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "Pure path-string manipulation — no IO."
   related  = [host_api, fs_module]
   audience = :both

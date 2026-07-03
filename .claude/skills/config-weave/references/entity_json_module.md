@@ -1,6 +1,6 @@
 # json
 
-_wscript stdlib module_
+_library_
 
 JSON parse / serialize over the Value type; deterministic (sorted keys) output.
 

@@ -1,6 +1,6 @@
 entity hash_module {
   name     = "hash"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "Digests with hex output — sha256 / sha512 / md5, for strings and files."
   related  = [host_api, fs_module]
   audience = :both

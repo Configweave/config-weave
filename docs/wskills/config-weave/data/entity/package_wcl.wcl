@@ -1,6 +1,6 @@
 entity package_wcl {
   name     = "package.wcl"
-  kind     = "file type"
+  kind     = :file_format
   summary  = "The WCL document under pkgs/<name>/ declaring resources, gatherers and tests."
   related  = [package, playbook_wcl, package_blocks]
   audience = :both

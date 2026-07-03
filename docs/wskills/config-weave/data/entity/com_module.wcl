@@ -1,6 +1,6 @@
 entity com_module {
   name     = "com"
-  kind     = "host module (Windows)"
+  kind     = :host_module
   summary  = "Late-bound COM via IDispatch and WMI; returns ComObject handles; STA initialised by the engine."
   related  = [host_api, registry_module, value_type]
   audience = :both

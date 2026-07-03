@@ -1,6 +1,6 @@
 entity registry_module {
   name     = "registry"
-  kind     = "host module (Windows)"
+  kind     = :host_module
   summary  = "Windows registry — hive-prefixed keys; registered everywhere, runtime-errors off Windows."
   related  = [host_api, service_module, com_module, value_type]
   audience = :both

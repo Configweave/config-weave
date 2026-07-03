@@ -10,12 +10,16 @@ import "./schema/base.wcl"
 import "./schema/extensions.wcl"
 import "./schema/language.wcl"          // CodeExample, reused by the cli module
 import "./schema/cli.wcl"               // opt-in: map the config-weave CLI as data
+import "./schema/presentation.wcl"      // the overview-deck view (data/presentation/)
+import "./schema/training.wcl"          // the tutorial-series view (data/training/)
 
 // Data — atomic concept/entity/fact/process notes, the CLI, glossary, and the
 // curated navigation indexes (see data/main.wcl).
 import "./data/main.wcl"
+import "./data/presentation/main.wcl"
+import "./data/training/main.wcl"
 
-schema_version = "1.1.0"
+schema_version = "1.0.0"
 
 topic config_weave {
   name    = "config-weave"
@@ -40,6 +44,38 @@ END
   created    = "2026-06-22"
   updated    = "2026-06-27"
   maintainer = "ai@wiltaylor.dev"
+}
+
+// The views this wskill ships — first-class data the book overview and any
+// registry landing enumerate. Declaring one documents that `entry` exists and
+// renders to `output`; the docs site / just recipes build them.
+artifact book {
+  kind    = :book
+  name    = "Reference book"
+  entry   = "wdoc/book/main.wcl"
+  output  = "out/book"
+  summary = "The comprehensive human reference — every layer of config-weave, curated into chapters."
+}
+artifact ai_skill {
+  kind    = :ai_skill
+  name    = "Claude Code skill"
+  entry   = "wdoc/skill/main.wcl"
+  output  = "out/skill"
+  summary = "The Claude Code expertise skill (committed at .claude/skills/config-weave)."
+}
+artifact slides {
+  kind    = :presentation
+  name    = "Overview deck"
+  entry   = "wdoc/presentation/main.wcl"
+  output  = "out/presentation"
+  summary = "An introduction to config-weave as an overview deck — the model, packages, and the testlab."
+}
+artifact training {
+  kind    = :training
+  name    = "Training course"
+  entry   = "wdoc/training/main.wcl"
+  output  = "out/training"
+  summary = "First playbook → packages → testlab: a hands-on lesson series with verifiable exercises."
 }
 
 // Skill-projection config (→ SKILL.md frontmatter). Auto-activation and the agent

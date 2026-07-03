@@ -7,7 +7,7 @@
 // `:ai`/`:both` indexes, linking each pinned note's page directly, so there are no
 // per-kind reference pages. config-weave additions over the base template are the
 // opt-in `cli` module (references/cli_ref.md) and the `term` glossary
-// (references/glossary_ref.md), linked from SKILL.md beneath the curated indexes.
+// (references/glossary_ref.md), linked from SKILL.md via `extra_refs`.
 
 import <wdoc.wcl>
 import "../../wskill.wcl"
@@ -25,6 +25,13 @@ let skill = head(skills)
 
 let skill_scripts = skill.skill_scripts
 let skill_assets  = skill.skill_assets
+
+// Bundled artifacts → an extra SKILL.md reference link + the assets_ref page
+// below (which also physically ships each file via a `file` block).
+let bundle_refs = match len(skill_scripts) + len(skill_assets) {
+  0 => [],
+  _ => [{ label: "Bundled files", href: "assets_ref", summary: "The scripts and data files shipped with this skill, and how to run them." }],
+}
 
 // Audience filter — keep the skill lean (drop book-only blocks).
 let in_skill   = fn(a: Audience) -> bool { match a { :book => false, _ => true } }
@@ -45,6 +52,14 @@ let all_units = flatten([
   map(procedures, fn(p: Procedure) -> UnitRef { { id: p.id, name: p.title, href: $"process_${p.id}", related: p.related } }),
 ])
 
+// Non-unit content pages linked from SKILL.md's Reference section — the
+// config-weave CLI reference and the glossary, plus any bundled files.
+let extra_refs = flatten([
+  match len(clis)  { 0 => [], _ => [{ label: "CLI reference", href: "cli_ref",      summary: "every `config-weave` subcommand, its arguments and switches" }] },
+  match len(terms) { 0 => [], _ => [{ label: "Glossary",      href: "glossary_ref", summary: "config-weave vocabulary" }] },
+  bundle_refs,
+])
+
 site skill {
   default_template = :ai_skill
   skill {
@@ -62,13 +77,7 @@ page index { sites = [:skill]  start = true
     "disallowed-tools"         = skill.disallowed_tools
     "disable-model-invocation" = skill.disable_model_invocation
   }
-  skill_md_body { topic = topic  skill = skill  indexes = indexes  concepts = concepts  entities = entities  facts = facts  procedures = procedures  extra_refs = [] }
-  // config-weave additions: the CLI reference and the glossary (not unit pages).
-  h2 "More reference"
-  wdoc_repeater { each = match len(clis) { 0 => [], _ => [true] }  as = :_cl
-    p "- [CLI reference](cli_ref) — every `config-weave` subcommand, its arguments and switches."
-  }
-  p "- [Glossary](glossary_ref) — config-weave vocabulary."
+  skill_md_body { topic = topic  skill = skill  indexes = indexes  concepts = concepts  entities = entities  facts = facts  procedures = procedures  extra_refs = extra_refs  artifacts = artifacts }
 }
 
 // One page per concept; `related` ids resolve to links to the matching unit's page.
@@ -135,5 +144,35 @@ page glossary_ref { sites = [:skill]  title = $"${topic.name} — glossary"
       header = ["Term", "Definition", "Aliases"]
       rows = map(terms, fn(t: Term) -> list<utf8> { [t.term, t.definition, join(t.aliases, ", ")] })
     }
+  }
+}
+
+// --- references/assets_ref.md + the shipped scripts/assets -------------------
+// Present only when the skill bundles artifacts; the `file` blocks ship each
+// source into the emitted skill's scripts/ and assets/ folders.
+
+wdoc_repeater { each = match len(skill_scripts) + len(skill_assets) { 0 => [], _ => [true] }  as = :_bundle
+  page assets_ref { sites = [:skill]  title = $"${topic.name} — bundled files"
+    h1 $"${topic.name} — bundled files"
+    wdoc_repeater { each = match len(skill_scripts) { 0 => [], _ => [true] }  as = :_s
+      h2 "Scripts"
+      p  "Runnable scripts shipped under the skill's `scripts/` directory."
+    }
+    wdoc_repeater { each = skill_scripts  as = :s
+      h3 $"${s.name}"
+      p  $"${s.description}"
+      p  $"**Run:** `${s.usage}` — shipped to `scripts/${s.name}`."
+      file $"../../${s.source}" { dir = "scripts" }
+    }
+    wdoc_repeater { each = match len(skill_assets) { 0 => [], _ => [true] }  as = :_a
+      h2 "Data files"
+      p  "Static data shipped under `assets/`."
+    }
+    wdoc_repeater { each = skill_assets  as = :a
+      h3 $"${a.name}"
+      p  $"${a.description} — shipped to `assets/${a.name}`."
+      file $"../../${a.source}" { dir = "assets" }
+    }
+    p "[← Back to SKILL.md](index)"
   }
 }

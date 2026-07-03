@@ -1,6 +1,6 @@
 # service
 
-_host module (Windows)_
+_host module_
 
 Windows service management (SCM); Linux services use shell::run("systemctl …").
 

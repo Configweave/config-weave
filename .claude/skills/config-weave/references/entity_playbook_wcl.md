@@ -1,6 +1,6 @@
 # playbook.wcl
 
-_file type_
+_file format_
 
 The WCL document at a playbook directory's root — declares plays, gathers and vars.
 

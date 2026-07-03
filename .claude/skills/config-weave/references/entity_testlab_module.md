@@ -1,6 +1,6 @@
 # testlab
 
-_host module (scenario driver)_
+_host module_
 
 The host-side module a scenario driver runs against a live vmlab lab — Lab and Machine.
 

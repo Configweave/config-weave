@@ -1,6 +1,6 @@
 entity wscript_lang {
   name     = "wscript"
-  kind     = "language"
+  kind     = :software
   summary  = "The statically typed, Rust-flavored scripting language resources, gatherers and verify scripts are written in."
   related  = [wscript_overview, resource, gatherer, host_api]
   audience = :both

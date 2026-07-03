@@ -1,6 +1,6 @@
 # weave.wscripti
 
-_generated file_
+_file format_
 
 The full host interface config-weave wscripti emits — the authoritative host surface for editors and the LSP.
 

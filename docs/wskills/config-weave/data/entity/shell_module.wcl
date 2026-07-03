@@ -1,6 +1,6 @@
 entity shell_module {
   name     = "shell"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "Run external commands; opts is required; returns CmdOutput. Replaces wscript-std's process module."
   related  = [host_api, value_type, log_module]
   audience = :both

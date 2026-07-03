@@ -1,6 +1,6 @@
 entity archive_module {
   name     = "archive"
-  kind     = "host module"
+  kind     = :host_module
   summary  = "Extraction with no external tar/unzip needed — zip and tar.gz."
   related  = [host_api, http_module, fs_module]
   audience = :both

@@ -1,6 +1,6 @@
 # registry
 
-_host module (Windows)_
+_host module_
 
 Windows registry — hive-prefixed keys; registered everywhere, runtime-errors off Windows.
 
