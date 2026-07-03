@@ -2,36 +2,48 @@
 //
 //   wcl wdoc serve docs/main.wcl                 # / = landing, /wskills/config-weave/ = reference
 //   wcl wdoc build docs/main.wcl --out docs/_site
-//     → docs/_site/index.html             config-weave landing (webpage template)
-//       docs/_site/wskills/config-weave/  the config-weave reference book
+//     → docs/_site/index.html                    config-weave landing (website template)
+//       docs/_site/wskills/config-weave/         the config-weave reference book
+//       docs/_site/decks/config-weave/           the overview deck
+//       docs/_site/training/config-weave/        the training course
 //
 // The reference content lives in a wskill — a self-contained WCL model under
-// docs/wskills/config-weave/ — projected into a book (included here) and a Claude
-// Code skill (`just skill-build`). The single `import <wdoc.wcl>` pulls in the
-// embedded wdoc standard library so every stdlib block is in scope here and in every
-// imported page.
+// docs/wskills/config-weave/ — projected into a book, a deck and a training
+// course (included here) and a Claude Code skill (`just skill-build`). The
+// single `import <wdoc.wcl>` pulls in the embedded wdoc standard library so
+// every stdlib block is in scope here and in every imported page.
 import <wdoc.wcl>
 
-// Build the wskill's book under docs/_site/wskills/config-weave/; the landing page
-// lists it via `included_sites(...)`.
+// Build the wskill's views; the landing page lists them via
+// `included_sites(...)`. The optional views build under their `prefix`.
 include "wskills" { entry = "wdoc/book/main.wcl" }
+include "wskills" { entry = "wdoc/presentation/main.wcl"  prefix = "decks" }
+include "wskills" { entry = "wdoc/training/main.wcl"      prefix = "training" }
 
-// The landing site. The single `index` page selects a bespoke `landing`
-// template that emits the whole marketing page as raw HTML (its own nav,
-// hero, sections and footer), so this site needs no `menu` block. `root =
-// true` serves it at `/`; the reference book renders under
-// `/wskills/config-weave/`. `assets = ["landing"]` copies docs/landing/
-// (landing.css + the brand mark) verbatim into the output, where the
-// template links them by their root-relative path.
+// The landing site: the `website` template (sticky header + regions), its
+// content authored from the landing components in
+// pages/config-weave/landing-parts.wcl. `root = true` serves it at `/`; the
+// reference book renders under `/wskills/config-weave/`. Nord theme, cyan
+// accent — the components paint from the theme variables, so the standard
+// theme toggle just works.
 site config_weave {
-  default_template = :webpage
+  default_template = :website
   title            = "config-weave"
   root             = true
   theme            = :nord
   accent           = :cyan
-  assets           = ["landing"]
+  theme_toggle     = true
+  // Flat anchor menu (the single landing page carries every section);
+  // dropdown menus are a `webpage`-template feature, so keep it flat.
+  menu {
+    item "How it works" { href = "#how" }
+    item "Packages"     { href = "#packages" }
+    item "Reference"    { href = "#reference" }
+    item "Install"      { href = "#install" }
+    item "GitHub"       { href = "https://github.com/Configweave/config-weave" }
+  }
 }
 
-// The landing page (sites = [:config_weave]); it carries the `landing`
-// template and folds in the former Features / Getting-started pages.
+// The landing page (sites = [:config_weave]), built from the components.
+import "./pages/config-weave/landing-parts.wcl"
 import "./pages/config-weave/index.wcl"
