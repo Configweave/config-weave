@@ -239,6 +239,52 @@ pub async fn doc_save(
     doc_save_at(&state, &dir, body).await
 }
 
+/// POST /api/runbooks/{rb}/packages/{name}/import — copy an installed
+/// package into the repository: the rescue path for packages that only
+/// exist inside a runbook.
+pub async fn import_to_repo(
+    Extension(state): Extension<SharedState>,
+    UrlPath((rb, name)): UrlPath<(String, String)>,
+    _claims: RequireClaims,
+) -> Response {
+    let Some(packages_dir) = state.packages_dir.clone() else {
+        return err(StatusCode::NOT_FOUND, "package repository not configured");
+    };
+    let Some(rb_dir) = runbook_dir(&state, &rb) else {
+        return err(StatusCode::NOT_FOUND, "no such runbook");
+    };
+    if !valid_name(&name) {
+        return err(StatusCode::BAD_REQUEST, "invalid package name");
+    }
+    let rb_dir = rb_dir.canonicalize().unwrap_or(rb_dir);
+    let src = match resolve_in(&rb_dir, &format!("pkgs/{name}"), true) {
+        Ok(s) => s,
+        Err(_) => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "package not installed in this runbook",
+            );
+        }
+    };
+    if !src.join("package.wcl").is_file() {
+        return err(
+            StatusCode::NOT_FOUND,
+            "package not installed in this runbook",
+        );
+    }
+    let dest = packages_dir.join(&name);
+    if dest.exists() {
+        return err(StatusCode::CONFLICT, "package already in the repository");
+    }
+    match crate::transport::copy_dir_filtered(&src, &dest) {
+        Ok(()) => ok(json!({ "imported": name })),
+        Err(e) => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot import: {e}"),
+        ),
+    }
+}
+
 /// DELETE /api/runbooks/{rb}/packages/{name} — remove an installed
 /// package copy (the inverse of add-to-runbook).
 pub async fn remove_from_runbook(

@@ -410,3 +410,8 @@ export const removePackageFromRunbook = (rb: string, name: string) =>
     "DELETE",
     `/api/runbooks/${encodeURIComponent(rb)}/packages/${encodeURIComponent(name)}`,
   );
+export const importPackageToRepo = (rb: string, name: string) =>
+  api.request<{ imported: string }>(
+    "POST",
+    `/api/runbooks/${encodeURIComponent(rb)}/packages/${encodeURIComponent(name)}/import`,
+  );

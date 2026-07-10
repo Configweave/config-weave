@@ -367,7 +367,12 @@ weave-server).
   self-invalidates on the manifest mtime), and runbook copies ride the
   existing runbook endpoints re-rooted at `pkgs/<name>`
   (`prefixedScope` — no extra server surface). The Packages section is
-  always visible; unconfigured just means a hint instead of a list.
+  always visible; unconfigured just means a hint instead of a list. The
+  runbook's installed-packages card is the sync point: an add picker
+  over repo packages not yet installed, and a "not in repository" badge
+  with `POST /api/runbooks/{rb}/packages/{name}/import` (copy into the
+  packages dir, 409 when present) for packages that only exist inside a
+  runbook.
 - **Graphical editors (DocJson).** playbook.wcl / package.wcl get a
   Visual mode: `__wcl-inspect` extracts a structural doc from the
   `parse_for_edit` AST (every leaf `{lit}` or `{expr: "source"}`;

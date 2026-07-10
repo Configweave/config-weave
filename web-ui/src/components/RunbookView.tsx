@@ -4,10 +4,13 @@
 // launch runs.
 
 import { For, Show, createResource, createSignal } from "solid-js";
-import { Alert, Badge, Button, Card, Checkbox, Empty, PageHead, toast } from "@forge/ui";
-import { Pencil, Play, Trash2 } from "lucide-solid";
+import { Alert, Badge, Button, Card, Checkbox, Empty, PageHead, Select, toast } from "@forge/ui";
+import { Download, Pencil, Play, Plus, Trash2 } from "lucide-solid";
 import type { ValidateResult } from "../api";
 import {
+  addPackageToRunbook,
+  importPackageToRepo,
+  listPackages,
   removePackageFromRunbook,
   runbookInventory,
   runbookScope,
@@ -60,6 +63,55 @@ export default function RunbookView(props: { name: string }) {
     }
   };
 
+  // The repository, for the add-picker and the not-in-repo detection.
+  // null = unconfigured (both affordances hidden).
+  const [repo, { refetch: refetchRepo }] = createResource(() =>
+    listPackages().catch((e: any) => {
+      if (e?.status === 404) return null;
+      throw e;
+    }),
+  );
+  const [pickerChoice, setPickerChoice] = createSignal("");
+  const [pkgBusy, setPkgBusy] = createSignal(false);
+
+  const installedNames = () => (inventory()?.packages ?? []).map((p) => p.name);
+  const addable = () =>
+    (repo()?.packages ?? [])
+      .map((p) => p.name)
+      .filter((n) => !installedNames().includes(n));
+  const inRepo = (name: string) =>
+    (repo()?.packages ?? []).some((p) => p.name === name);
+
+  const addPackage = async () => {
+    const name = pickerChoice();
+    if (!name) return;
+    setPkgBusy(true);
+    try {
+      await addPackageToRunbook(name, props.name);
+      toast(`added ${name}`, { tone: "success" });
+      setPickerChoice("");
+      void refetchInventory();
+      setPkgReload((n) => n + 1);
+    } catch (e: any) {
+      toast(e?.message ?? "add failed", { tone: "danger" });
+    } finally {
+      setPkgBusy(false);
+    }
+  };
+
+  const importPackage = async (name: string) => {
+    setPkgBusy(true);
+    try {
+      await importPackageToRepo(props.name, name);
+      toast(`imported ${name} into the repository`, { tone: "success" });
+      void refetchRepo();
+    } catch (e: any) {
+      toast(e?.message ?? "import failed", { tone: "danger" });
+    } finally {
+      setPkgBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHead
@@ -94,12 +146,34 @@ export default function RunbookView(props: { name: string }) {
         reloadKey={pkgReload()}
       />
 
-      <Card title="Installed packages">
+      <Card
+        title="Installed packages"
+        action={
+          <Show when={repo() !== null}>
+            <div class="pkg-add-row">
+              <Select
+                placeholder={addable().length ? "add from repository…" : "repository in sync"}
+                options={addable().map((n) => ({ value: n, label: n }))}
+                value={pickerChoice()}
+                onChange={setPickerChoice}
+              />
+              <Button
+                size="sm"
+                icon={Plus}
+                disabled={!pickerChoice() || pkgBusy()}
+                onClick={addPackage}
+              >
+                Add
+              </Button>
+            </div>
+          </Show>
+        }
+      >
         <Show
           when={(inventory()?.packages ?? []).length > 0}
           fallback={
             <Empty title="No packages installed">
-              <span class="sub">Add one from the Packages section.</span>
+              <span class="sub">Pick one from the repository above.</span>
             </Empty>
           }
         >
@@ -108,7 +182,22 @@ export default function RunbookView(props: { name: string }) {
               <div class="pkg-row">
                 <span class="mono">{pkg.name}</span>
                 <span class="sub">{pkg.description}</span>
+                <Show when={repo() !== null && repo() !== undefined && !inRepo(pkg.name)}>
+                  <Badge tone="warning">not in repository</Badge>
+                </Show>
                 <span class="ve-spacer" />
+                <Show when={repo() !== null && repo() !== undefined && !inRepo(pkg.name)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={Download}
+                    disabled={pkgBusy()}
+                    title="Copy this package into the repository"
+                    onClick={() => importPackage(pkg.name)}
+                  >
+                    Import to repo
+                  </Button>
+                </Show>
                 <Button
                   size="sm"
                   variant="ghost"

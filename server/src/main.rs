@@ -305,6 +305,10 @@ async fn main() -> ExitCode {
             "/api/runbooks/{rb}/packages/{name}",
             axum::routing::delete(packages::remove_from_runbook),
         )
+        .route(
+            "/api/runbooks/{rb}/packages/{name}/import",
+            post(packages::import_to_repo),
+        )
         .route("/api/runs", get(runs::list).post(runs::create))
         .route("/api/runs/{id}", get(runs::get))
         .route("/api/runs/{id}/cancel", post(runs::cancel))
