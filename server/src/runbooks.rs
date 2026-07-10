@@ -164,6 +164,16 @@ pub struct FileWrite {
     pub content: String,
 }
 
+/// Atomic write via tmp + rename.
+fn write_atomic(file: &Path, content: &str) -> Result<(), String> {
+    let tmp = file.with_extension("weave-tmp");
+    std::fs::write(&tmp, content).map_err(|e| format!("cannot write: {e}"))?;
+    std::fs::rename(&tmp, file).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("cannot write: {e}")
+    })
+}
+
 /// PUT /api/runbooks/{rb}/file?path=… — body `{content}`; atomic write.
 pub async fn file_put(
     Extension(state): Extension<SharedState>,
@@ -180,21 +190,10 @@ pub async fn file_put(
         Ok(f) => f,
         Err(e) => return err(StatusCode::BAD_REQUEST, e),
     };
-    let tmp = file.with_extension("weave-tmp");
-    if let Err(e) = std::fs::write(&tmp, &body.content) {
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("cannot write: {e}"),
-        );
+    match write_atomic(&file, &body.content) {
+        Ok(()) => ok(json!({ "path": q.path })),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
-    if let Err(e) = std::fs::rename(&tmp, &file) {
-        let _ = std::fs::remove_file(&tmp);
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("cannot write: {e}"),
-        );
-    }
-    ok(json!({ "path": q.path }))
 }
 
 /// Shell out to the config-weave CLI with `--json` and hand back its
@@ -239,6 +238,201 @@ pub async fn inventory(
         return err(StatusCode::NOT_FOUND, "no such runbook");
     };
     match cli_json(&state, &["list", &dir.to_string_lossy(), "--json"]).await {
+        Ok(v) => ok(v),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+// ------------------------------------------------- graphical editors
+
+/// Shell out to a hidden DocJson subcommand: one JSON object in on
+/// stdin, one out on stdout (errors ride in-band as `ok:false`).
+async fn cli_stdin_json(state: &SharedState, arg: &str, input: &Value) -> Result<Value, String> {
+    use tokio::io::AsyncWriteExt as _;
+    let mut child = tokio::process::Command::new(&state.config_weave)
+        .arg(arg)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot run {}: {e}", state.config_weave))?;
+    let payload = serde_json::to_vec(input).map_err(|e| e.to_string())?;
+    let mut stdin = child.stdin.take().expect("stdin piped");
+    stdin.write_all(&payload).await.map_err(|e| e.to_string())?;
+    drop(stdin);
+    let out = child
+        .wait_with_output()
+        .await
+        .map_err(|e| format!("{arg}: {e}"))?;
+    serde_json::from_slice(&out.stdout).map_err(|_| {
+        format!(
+            "{arg} produced no JSON: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+    })
+}
+
+/// Which DocJson kind a file path edits, if any.
+fn doc_kind(path: &str) -> Option<&'static str> {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    match base {
+        "playbook.wcl" => Some("playbook"),
+        "package.wcl" => Some("package"),
+        _ => None,
+    }
+}
+
+/// Deterministic content hash for the concurrent-edit guard (FNV-1a).
+fn content_hash(content: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in content.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+/// Resolve + read the file a doc request names.
+fn doc_target(
+    state: &SharedState,
+    rb: &str,
+    path: &str,
+) -> Result<(PathBuf, String, &'static str), Response> {
+    let Some(kind) = doc_kind(path) else {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "only playbook.wcl and package.wcl files have a visual editor",
+        ));
+    };
+    let Some(dir) = runbook_dir(state, rb) else {
+        return Err(err(StatusCode::NOT_FOUND, "no such runbook"));
+    };
+    let dir = dir.canonicalize().unwrap_or(dir);
+    let file = match resolve_in(&dir, path, false) {
+        Ok(f) => f,
+        Err(e) => return Err(err(StatusCode::BAD_REQUEST, e)),
+    };
+    let on_disk = std::fs::read_to_string(&file).unwrap_or_default();
+    Ok((file, on_disk, kind))
+}
+
+#[derive(Deserialize)]
+pub struct DocParse {
+    pub path: String,
+    /// Unsaved buffer content; None = read the file.
+    pub content: Option<String>,
+}
+
+/// POST /api/runbooks/{rb}/doc/parse — source → DocJson (+ the on-disk
+/// content hash the eventual save must present).
+pub async fn doc_parse(
+    Extension(state): Extension<SharedState>,
+    UrlPath(rb): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<DocParse>,
+) -> Response {
+    let (_, on_disk, kind) = match doc_target(&state, &rb, &body.path) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    let source = body.content.unwrap_or_else(|| on_disk.clone());
+    let input = json!({ "kind": kind, "source": source });
+    match cli_stdin_json(&state, "__wcl-inspect", &input).await {
+        Ok(mut v) => {
+            if let Some(map) = v.as_object_mut() {
+                map.insert("base_hash".into(), content_hash(&on_disk).into());
+            }
+            ok(v)
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct DocRender {
+    pub path: String,
+    pub doc: Value,
+    /// Sync base; None = the on-disk file (dry-run preview, no write).
+    pub base_content: Option<String>,
+}
+
+/// POST /api/runbooks/{rb}/doc/render — DocJson → canonical WCL,
+/// without writing (mode switches and previews).
+pub async fn doc_render(
+    Extension(state): Extension<SharedState>,
+    UrlPath(rb): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<DocRender>,
+) -> Response {
+    let (_, on_disk, kind) = match doc_target(&state, &rb, &body.path) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    let base = body.base_content.unwrap_or(on_disk);
+    let input = json!({ "kind": kind, "base_source": base, "doc": body.doc });
+    match cli_stdin_json(&state, "__wcl-render", &input).await {
+        Ok(v) => ok(v),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct DocSave {
+    pub path: String,
+    pub doc: Value,
+    /// Hash from doc/parse; a mismatch means someone else changed the
+    /// file since — 409 instead of a blind merge.
+    pub base_hash: Option<String>,
+}
+
+/// PUT /api/runbooks/{rb}/doc — render against the on-disk file and
+/// write atomically; returns the canonical content so the editor can
+/// sync its text buffer.
+pub async fn doc_save(
+    Extension(state): Extension<SharedState>,
+    UrlPath(rb): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<DocSave>,
+) -> Response {
+    let (file, on_disk, kind) = match doc_target(&state, &rb, &body.path) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    if let Some(expected) = &body.base_hash
+        && *expected != content_hash(&on_disk)
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "the file changed on disk since it was opened — reload before saving",
+        );
+    }
+    let input = json!({ "kind": kind, "base_source": on_disk, "doc": body.doc });
+    let result = match cli_stdin_json(&state, "__wcl-render", &input).await {
+        Ok(v) => v,
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    };
+    if result["ok"].as_bool() != Some(true) {
+        // Render diagnostics are the caller's to display.
+        return ok(result);
+    }
+    let content = result["source"].as_str().unwrap_or_default().to_string();
+    match write_atomic(&file, &content) {
+        Ok(()) => ok(json!({
+            "ok": true,
+            "path": body.path,
+            "content": content,
+            "base_hash": content_hash(&content),
+        })),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+/// GET /api/templates — scaffold sources for "new script" actions.
+pub async fn templates(
+    Extension(state): Extension<SharedState>,
+    _claims: RequireClaims,
+) -> Response {
+    match cli_json(&state, &["__templates"]).await {
         Ok(v) => ok(v),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
     }

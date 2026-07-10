@@ -244,6 +244,13 @@ async fn main() -> ExitCode {
         )
         .route("/api/runbooks/{rb}/validate", post(runbooks::validate))
         .route("/api/runbooks/{rb}/inventory", get(runbooks::inventory))
+        .route("/api/runbooks/{rb}/doc/parse", post(runbooks::doc_parse))
+        .route("/api/runbooks/{rb}/doc/render", post(runbooks::doc_render))
+        .route(
+            "/api/runbooks/{rb}/doc",
+            axum::routing::put(runbooks::doc_save),
+        )
+        .route("/api/templates", get(runbooks::templates))
         .route("/api/systems", get(systems::list).post(systems::create))
         .route(
             "/api/systems/{name}",
