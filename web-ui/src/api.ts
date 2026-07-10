@@ -97,6 +97,67 @@ export const validateRunbook = (rb: string) =>
 export const runbookInventory = (rb: string) =>
   api.request<Inventory>("GET", `/api/runbooks/${encodeURIComponent(rb)}/inventory`);
 
+// --- systems ---------------------------------------------------------------
+
+export interface TransportConfig {
+  kind: "ssh" | "winrm";
+  host: string;
+  port: number | null;
+  user: string;
+  password: string | null;
+  private_key: string | null;
+  use_tls: boolean;
+}
+
+export interface SystemDef {
+  name: string;
+  description: string | null;
+  playbook: string;
+  play: string;
+  kind: "direct" | "remote";
+  os: "linux" | "windows";
+  arch: string;
+  transport: TransportConfig;
+}
+
+export interface SysRunSummary {
+  id: string;
+  system: string;
+  action: "check" | "apply";
+  status: string;
+  phase: string;
+  exit_code: number | null;
+}
+
+export interface SysRunSnapshot extends SysRunSummary {
+  kind: "direct" | "remote";
+  keep: boolean;
+  playbook: string;
+  play: string;
+  events: any[];
+  dropped_events: number;
+  report: any | null;
+}
+
+export const listSystems = () => api.request<SystemDef[]>("GET", "/api/systems");
+export const createSystem = (def: SystemDef) =>
+  api.request<SystemDef>("POST", "/api/systems", def);
+export const updateSystem = (name: string, def: SystemDef) =>
+  api.request<SystemDef>("PUT", `/api/systems/${encodeURIComponent(name)}`, def);
+export const deleteSystem = (name: string) =>
+  api.request<{ deleted: string }>("DELETE", `/api/systems/${encodeURIComponent(name)}`);
+
+export const startSystemRun = (name: string, req: { action: "check" | "apply"; keep?: boolean }) =>
+  api.request<{ id: string }>("POST", `/api/systems/${encodeURIComponent(name)}/runs`, req);
+export const listSystemRuns = () => api.request<SysRunSummary[]>("GET", "/api/system-runs");
+export const getSystemRun = (id: string) =>
+  api.request<SysRunSnapshot>("GET", `/api/system-runs/${encodeURIComponent(id)}`);
+export const cancelSystemRun = (id: string) =>
+  api.request<{ id: string; status: string }>(
+    "POST",
+    `/api/system-runs/${encodeURIComponent(id)}/cancel`,
+  );
+
 export const startRun = (req: {
   runbook: string;
   filter?: string;

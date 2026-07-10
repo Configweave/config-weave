@@ -8,7 +8,9 @@ import { api } from "./api";
 export type View =
   | { kind: "runbooks" }
   | { kind: "runbook"; name: string }
-  | { kind: "run"; id: string; runbook: string };
+  | { kind: "run"; id: string; runbook: string }
+  | { kind: "systems" }
+  | { kind: "sysrun"; id: string; system: string; action: string };
 
 export const [view, setView] = createSignal<View>({ kind: "runbooks" });
 export const [ready, setReady] = createSignal(false);

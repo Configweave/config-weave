@@ -11,6 +11,23 @@ export default function Topbar() {
         runbooks
       </a>,
     ];
+    if (v.kind === "systems") {
+      items.length = 0;
+      items.push(<span>systems</span>);
+    }
+    if (v.kind === "sysrun") {
+      items.length = 0;
+      items.push(
+        <a class="crumb-link" onClick={() => setView({ kind: "systems" })}>
+          systems
+        </a>,
+      );
+      items.push(
+        <span>
+          {v.system} · {v.action}
+        </span>,
+      );
+    }
     if (v.kind === "runbook") items.push(<span>{v.name}</span>);
     if (v.kind === "run") {
       items.push(

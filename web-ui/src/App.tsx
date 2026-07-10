@@ -15,6 +15,8 @@ import Sidebar from "./components/Sidebar";
 import RunbooksView from "./components/RunbooksView";
 import RunbookView from "./components/RunbookView";
 import RunView from "./components/RunView";
+import SystemsView from "./components/SystemsView";
+import SystemRunView from "./components/SystemRunView";
 
 export default function App() {
   onMount(init);
@@ -30,6 +32,12 @@ export default function App() {
           </Show>
           <Show when={asKind("run")} keyed>
             {(v) => <RunView id={v.id} runbook={v.runbook} />}
+          </Show>
+          <Show when={view().kind === "systems"}>
+            <SystemsView />
+          </Show>
+          <Show when={asKind("sysrun")} keyed>
+            {(v) => <SystemRunView id={v.id} system={v.system} action={v.action} />}
           </Show>
         </AppShell>
       </Show>
