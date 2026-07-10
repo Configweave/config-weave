@@ -1,0 +1,88 @@
+package "demo_files" {
+  description = "Files and directories: presence, content, and removal"
+
+  resource "file_present" {
+    description = "Ensure a file exists with the given content"
+    script = "resources/file_present.wscript"
+
+    param "path" {
+      description = "Absolute path of the file"
+      type = "string"
+      required = true
+    }
+    param "content" {
+      description = "Exact file content"
+      type = "string"
+      default = ""
+    }
+  }
+
+  resource "dir_present" {
+    description = "Ensure a directory exists"
+    script = "resources/dir_present.wscript"
+
+    param "path" {
+      description = "Absolute path of the directory"
+      type = "string"
+      required = true
+    }
+  }
+
+  resource "file_absent" {
+    description = "Ensure a file does not exist"
+    script = "resources/file_absent.wscript"
+
+    param "path" {
+      description = "Absolute path of the file to remove"
+      type = "string"
+      required = true
+    }
+  }
+
+  test "files_converge" {
+    description = "Directory and file converge; absence is idempotent"
+    image = "debian:12"
+    verify = "tests/files_verify.wscript"
+
+    step "make-dir" {
+      description = "Create the demo directory"
+      resource = "dir_present"
+      properties {
+        path = "/opt/demo"
+      }
+    }
+
+    step "make-conf" {
+      description = "Write the demo config file"
+      resource = "file_present"
+      requires = ["make-dir"]
+      properties {
+        path = "/opt/demo/app.conf"
+        content = "greeting=hello\n"
+      }
+    }
+
+    step "no-stale" {
+      description = "A file that never existed is already absent"
+      resource = "file_absent"
+      expect = "already_configured"
+      properties {
+        path = "/opt/demo/stale.conf"
+      }
+    }
+  }
+
+  test "rejects_empty_path" {
+    description = "file_present errors on an empty path"
+    image = "debian:12"
+
+    step "bad" {
+      description = "Apply with an invalid path"
+      resource = "file_present"
+      expect = "error"
+      properties {
+        path = ""
+      }
+    }
+  }
+}

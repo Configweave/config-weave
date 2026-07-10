@@ -1,0 +1,21 @@
+package "sysinfo" {
+  description = "Operating system facts for conditions and templates"
+
+  gatherer "os_info" {
+    description = "Report OS family, name, version, arch and CPU count"
+    script = "gatherers/os_info.wscript"
+  }
+
+  test "reports_linux" {
+    description = "Inside a debian container the family is linux"
+    image = "debian:12"
+
+    gather "os" {
+      description = "OS facts inside the container"
+      from = "os_info"
+      expect {
+        family = "linux"
+      }
+    }
+  }
+}

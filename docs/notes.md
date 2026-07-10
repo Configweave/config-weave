@@ -341,8 +341,12 @@ weave-server).
   `pwsh` (PSWSMan) and is best-effort — Windows targets are fully
   served over Win32-OpenSSH. Event topic `sysrun:{id}`, deploy progress
   as server-synthesized `deploy_phase` events.
-- **Package repository.** `--packages-dir` points at a folder of
-  package dirs. The CLI only understands playbook dirs, so the server
+- **Package repository.** The repo defaults to `packages/` inside the
+  served root (created on demand — zero flags needed); `--packages-dir`
+  overrides it, e.g. pointing at a config-weave-pkgs checkout's pkgs/
+  folder. `testdata/packages/` ships three demo packages (demo_files,
+  demo_users, sysinfo) so `just serve` has content out of the box. It is
+  a folder of package dirs. The CLI only understands playbook dirs, so the server
   synthesizes a tempdir wrapper (`playbook "package-repo"` +
   `pkgs/<name>` symlinks, fingerprint-cached on package.wcl mtimes) —
   safe because the testlab's synthesize step copies packages

@@ -72,6 +72,7 @@ struct Args {
     deploy_binary: Vec<String>,
     /// The package repository: a folder of package dirs (each with a
     /// package.wcl), e.g. a config-weave-pkgs checkout's pkgs/ folder.
+    /// Default: `packages/` inside --dir (created when missing).
     #[arg(long)]
     packages_dir: Option<PathBuf>,
     /// Serve the frontend from a directory instead of the embedded build
@@ -210,7 +211,7 @@ async fn main() -> ExitCode {
         }
     };
     let packages_dir = match &args.packages_dir {
-        None => None,
+        // An explicit flag must point at a real directory.
         Some(d) => match d.canonicalize() {
             Ok(c) if c.is_dir() => Some(c),
             _ => {
@@ -221,6 +222,22 @@ async fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         },
+        // Default: `packages/` inside the served root, created on
+        // demand so the Packages section works with zero flags. A
+        // creation failure only downgrades to the unconfigured hint.
+        None => {
+            let default = root.join("packages");
+            match std::fs::create_dir_all(&default).and_then(|_| default.canonicalize()) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    eprintln!(
+                        "weave-server: cannot use default packages dir {}: {e}",
+                        default.display()
+                    );
+                    None
+                }
+            }
+        }
     };
 
     let state: SharedState = Arc::new(ServerState {

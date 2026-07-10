@@ -1,0 +1,33 @@
+package "demo_users" {
+  description = "Local system users via useradd"
+
+  resource "user_present" {
+    description = "Ensure a local user account exists"
+    script = "resources/user_present.wscript"
+
+    param "name" {
+      description = "Account name"
+      type = "string"
+      required = true
+    }
+    param "shell" {
+      description = "Login shell"
+      type = "string"
+      default = "/usr/sbin/nologin"
+    }
+  }
+
+  test "creates_a_user" {
+    description = "user_present creates the account and is idempotent"
+    image = "debian:12"
+    verify = "tests/user_verify.wscript"
+
+    step "svc-account" {
+      description = "Create the demo service account"
+      resource = "user_present"
+      properties {
+        name = "weavedemo"
+      }
+    }
+  }
+}
