@@ -7,8 +7,12 @@
 #   CW_WCL=$HOME/dev/WCL CW_WSCRIPT=$HOME/dev/wscript \
 #     cross build --release --target x86_64-unknown-linux-musl
 
+# CW_FORGE is only needed so cargo can *load* the workspace: the server
+# member path-deps on ../../forge (the server itself is never cross-built —
+# default-members is the CLI alone).
+#
 # Keep container artifacts out of the host target dir (build scripts are
 # glibc-incompatible between the two).
 [build.env]
-volumes = ["CW_WCL", "CW_WSCRIPT"]
+volumes = ["CW_WCL", "CW_WSCRIPT", "CW_FORGE"]
 passthrough = ["CARGO_TARGET_DIR"]

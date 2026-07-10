@@ -1,3 +1,10 @@
+# Workspace: the CLI (this package, the root) plus the web GUI server.
+# `default-members` keeps plain `cargo build`/`cross build` on the CLI only,
+# so the release flow never drags the server's async web stack along.
+[workspace]
+members = [".", "server"]
+default-members = ["."]
+
 [package]
 name = "config-weave"
 version = "0.1.0"
@@ -48,6 +55,7 @@ windows = { version = "0.62", features = [
 [dev-dependencies]
 tempfile = "3"
 
+# Workspace-level (cargo warns if these sit in a member package's manifest).
 [profile.release]
 strip = true
 lto = "thin"

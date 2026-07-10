@@ -68,6 +68,28 @@ pub struct ExecOutput {
     pub stderr: String,
 }
 
+/// What a troubleshooting session or external cleanup needs to reach a
+/// live instance. Raw, untruncated identifiers on purpose — `handle()`
+/// stays the human-readable (shortened) form.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AttachInfo {
+    Docker {
+        /// Full container id (the 64-hex form `docker run -d` printed).
+        container_id: String,
+        image: String,
+        /// The discovered CLI ("docker" or "podman") to exec/clean with.
+        cli: String,
+    },
+    Vmlab {
+        /// The synthesized lab root; vmlab verbs run with this as cwd.
+        lab_dir: String,
+        lab: String,
+        machine: String,
+        template: String,
+    },
+}
+
 /// `Sync` so a single backend can be shared by reference across the
 /// parallel group-runner threads; both implementations are plain structs
 /// (`cmd`, `quiet`) that already qualify.
@@ -124,6 +146,10 @@ pub trait TestInstance {
 
     /// Human-readable handle for `--keep` messages.
     fn handle(&self) -> String;
+
+    /// Raw attach/cleanup coordinates for external tooling (the
+    /// `instance_ready` event of `--events-ndjson`).
+    fn attach_info(&self) -> AttachInfo;
 
     /// Tear down the instance; no-op when kept or already gone.
     fn teardown(&mut self) -> Result<(), Diag>;

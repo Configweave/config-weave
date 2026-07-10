@@ -26,6 +26,7 @@ use crate::model::{Expect, Package, Playbook, ScenarioDecl, TestDecl};
 use crate::report::JsonRunReport;
 
 use super::backend::{GuestOs, TestBackend, TestInstance};
+use super::events::{TestEvent, TestEventSink, TestPhase, tail_chunk};
 use super::report::{TestGatherResult, TestOutcome, TestReport, TestStepResult, VerifyResult};
 use super::synth;
 use super::synth::BinaryResolver;
@@ -37,8 +38,9 @@ pub struct RunnerOptions {
     pub keep: bool,
     /// Forwarded to the in-instance check/apply runs.
     pub jobs: Option<usize>,
-    /// Suppress stderr progress lines (JSON output mode).
-    pub quiet: bool,
+    /// Receives every lifecycle event; the human progress renderer and
+    /// the `--events-ndjson` emitter are both sinks (see testlab::events).
+    pub sink: TestEventSink,
     /// Max docker groups (containers) running at once.
     pub docker_cap: usize,
     /// Max vmlab groups (VMs) running at once — kept small, VMs are heavy.
@@ -145,13 +147,14 @@ pub fn run_groups(
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // Bucket groups by backend so each cap throttles only its own kind of
-    // instance; both buckets drain concurrently.
-    let mut docker: Vec<&GroupSpec> = Vec::new();
-    let mut vmlab: Vec<&GroupSpec> = Vec::new();
-    for g in &groups {
+    // instance; both buckets drain concurrently. The enumeration index is
+    // the group id events refer to.
+    let mut docker: Vec<(usize, &GroupSpec)> = Vec::new();
+    let mut vmlab: Vec<(usize, &GroupSpec)> = Vec::new();
+    for (gid, g) in groups.iter().enumerate() {
         match g.backend.name() {
-            "vmlab" => vmlab.push(g),
-            _ => docker.push(g),
+            "vmlab" => vmlab.push((gid, g)),
+            _ => docker.push((gid, g)),
         }
     }
 
@@ -171,8 +174,10 @@ pub fn run_groups(
                 s.spawn(move || {
                     loop {
                         let i = cursor.fetch_add(1, Ordering::Relaxed);
-                        let Some(group) = bucket.get(i) else { break };
-                        let reports = run_group(pb, group, opts);
+                        let Some((gid, group)) = bucket.get(i) else {
+                            break;
+                        };
+                        let reports = run_group(pb, *gid, group, opts);
                         results.lock().unwrap().extend(reports);
                     }
                 });
@@ -200,9 +205,15 @@ fn group_label(group: &GroupSpec) -> String {
 /// drive each test sequentially against the shared instance. Provision or
 /// smoke failure errors every test in the group; a single test's transport
 /// trouble errors only that test and the rest of the group proceeds.
-fn run_group(pb: &Playbook, group: &GroupSpec, opts: &RunnerOptions) -> Vec<(usize, TestReport)> {
+fn run_group(
+    pb: &Playbook,
+    gid: usize,
+    group: &GroupSpec,
+    opts: &RunnerOptions,
+) -> Vec<(usize, TestReport)> {
     let backend = group.backend;
     let image = group.image.clone();
+    let label = group_label(group);
 
     // One report per test, defaulting to Passed.
     let mut reports: Vec<(usize, TestReport)> = group
@@ -228,19 +239,28 @@ fn run_group(pb: &Playbook, group: &GroupSpec, opts: &RunnerOptions) -> Vec<(usi
         })
         .collect();
 
-    let group_progress = |msg: &str| {
-        if !opts.quiet {
-            eprintln!("⟳ [{}] {msg}", group_label(group));
-        }
-    };
+    // A group-level failure errors every member test; the events keep the
+    // GUI from waiting on tests that already died.
     let fail_all = |reports: &mut Vec<(usize, TestReport)>, d: &Diag| {
         for (_, r) in reports.iter_mut() {
             r.outcome = TestOutcome::Error;
             r.error = Some(d.message.clone());
+            (opts.sink)(TestEvent::TestFinished {
+                package: r.package.clone(),
+                test: r.name.clone(),
+                outcome: r.outcome.as_str(),
+                duration_secs: 0.0,
+                error: r.error.clone(),
+            });
         }
     };
 
-    group_progress(&format!("provisioning ({image})"));
+    (opts.sink)(TestEvent::GroupProvisioning {
+        group: gid,
+        label: label.clone(),
+        backend: backend.name().to_string(),
+        image: image.clone(),
+    });
     let mut instance = match backend.provision(&image, opts.keep) {
         Ok(i) => i,
         Err(d) => {
@@ -255,30 +275,34 @@ fn run_group(pb: &Playbook, group: &GroupSpec, opts: &RunnerOptions) -> Vec<(usi
         }
         return reports;
     }
+    (opts.sink)(TestEvent::InstanceReady {
+        group: gid,
+        label: label.clone(),
+        backend: backend.name().to_string(),
+        image: image.clone(),
+        attach: instance.attach_info(),
+    });
 
     let kept_handle = opts.keep.then(|| instance.handle());
 
     for (slot, (idx, pkg, test)) in group.tests.iter().enumerate() {
         let report = &mut reports[slot].1;
         report.kept = kept_handle.clone();
-        let progress = |msg: &str| {
-            if !opts.quiet {
-                eprintln!("⟳ {}:{} — {msg}", pkg.name, test.name);
-            }
+        (opts.sink)(TestEvent::TestStarted {
+            package: pkg.name.clone(),
+            test: test.name.clone(),
+            group: Some(gid),
+        });
+        let ctx = TestCtx {
+            sink: &opts.sink,
+            package: &pkg.name,
+            test: &test.name,
         };
         let t0 = Instant::now();
         let slug = test_slug(*idx, &pkg.name, &test.name);
         match synth::synthesize(pb, pkg, test) {
             Ok(synth) => {
-                match drive_one(
-                    test,
-                    instance.as_mut(),
-                    opts,
-                    &progress,
-                    &synth,
-                    &slug,
-                    report,
-                ) {
+                match drive_one(test, instance.as_mut(), opts, &ctx, &synth, &slug, report) {
                     Ok(()) => {
                         if report.steps.iter().any(|s| !s.failures.is_empty())
                             || report.gathers.iter().any(|g| !g.failures.is_empty())
@@ -299,21 +323,65 @@ fn run_group(pb: &Playbook, group: &GroupSpec, opts: &RunnerOptions) -> Vec<(usi
             }
         }
         report.duration = t0.elapsed();
+        (opts.sink)(TestEvent::TestFinished {
+            package: pkg.name.clone(),
+            test: test.name.clone(),
+            outcome: report.outcome.as_str(),
+            duration_secs: report.duration.as_secs_f64(),
+            error: report.error.clone(),
+        });
     }
 
-    if opts.keep {
-        group_progress(&format!(
-            "kept {} — remove it manually when done",
-            instance.handle()
-        ));
-    } else if let Err(d) = instance.teardown() {
+    let teardown_warning = if opts.keep {
+        None
+    } else {
         // Don't mask test results behind a teardown failure; surface it.
-        if !opts.quiet {
-            eprintln!("⚠ [{}] teardown: {}", group_label(group), d.message);
-        }
-    }
+        instance.teardown().err().map(|d| d.message)
+    };
+    (opts.sink)(TestEvent::GroupTeardown {
+        group: gid,
+        label,
+        kept: opts.keep,
+        handle: kept_handle,
+        warning: teardown_warning,
+    });
 
     reports
+}
+
+/// Per-test event context threaded through the drive functions in place
+/// of the old free-text progress callback.
+struct TestCtx<'a> {
+    sink: &'a TestEventSink,
+    package: &'a str,
+    test: &'a str,
+}
+
+impl TestCtx<'_> {
+    fn phase(&self, phase: TestPhase) {
+        (self.sink)(TestEvent::Phase {
+            package: self.package.to_string(),
+            test: self.test.to_string(),
+            phase,
+        });
+    }
+
+    /// Emit an exec's captured stderr as a log event (tail-truncated);
+    /// empty output stays silent.
+    fn log(&self, context: &str, output: &str) {
+        if output.trim().is_empty() {
+            return;
+        }
+        let (chunk, truncated) = tail_chunk(output);
+        (self.sink)(TestEvent::Log {
+            package: self.package.to_string(),
+            test: self.test.to_string(),
+            context: context.to_string(),
+            stream: "stderr",
+            chunk,
+            truncated,
+        });
+    }
 }
 
 /// Copy the binary into the shared bin path and smoke-test it. Done once
@@ -353,7 +421,7 @@ fn drive_one(
     test: &TestDecl,
     instance: &mut dyn TestInstance,
     opts: &RunnerOptions,
-    progress: &dyn Fn(&str),
+    ctx: &TestCtx,
     synthesized: &synth::SynthesizedTest,
     slug: &str,
     report: &mut TestReport,
@@ -380,7 +448,7 @@ fn drive_one(
     }
 
     if let Some(setup) = &test.setup {
-        progress("setup");
+        ctx.phase(TestPhase::Setup);
         let script;
         let argv: [&str; 3] = match os {
             // The exec working directory is backend-dependent; pin it.
@@ -394,6 +462,7 @@ fn drive_one(
             }
         };
         let out = instance.exec(&argv)?;
+        ctx.log("setup", &out.stderr);
         if out.exit_code != 0 {
             return Err(Diag::bare(format!(
                 "setup failed (exit {}): {}",
@@ -405,9 +474,9 @@ fn drive_one(
 
     instance.copy_in(synthesized.dir.path(), &paths.playbook)?;
 
-    let facts = run_gathers(test, instance, progress, &mut report.gathers, &paths)?;
-    run_steps(test, instance, opts, progress, &mut report.steps, &paths)?;
-    report.verify = run_verify(test, instance, progress, &facts, &paths)?;
+    let facts = run_gathers(test, instance, ctx, &mut report.gathers, &paths)?;
+    run_steps(test, instance, opts, ctx, &mut report.steps, &paths)?;
+    report.verify = run_verify(test, instance, ctx, &facts, &paths)?;
     Ok(())
 }
 
@@ -416,13 +485,15 @@ fn drive_one(
 fn run_gathers(
     test: &TestDecl,
     instance: &mut dyn TestInstance,
-    progress: &dyn Fn(&str),
+    ctx: &TestCtx,
     results: &mut Vec<TestGatherResult>,
     paths: &GuestPaths,
 ) -> Result<serde_json::Map<String, serde_json::Value>, Diag> {
     let mut facts = serde_json::Map::new();
     for g in &test.gathers {
-        progress(&format!("gather {}", g.name));
+        ctx.phase(TestPhase::Gather {
+            name: g.name.clone(),
+        });
         let key = format!("{}.{}", g.package, g.gatherer);
         let mut argv = vec![paths.bin, "__gather", paths.playbook.as_str(), &key];
         let params_json;
@@ -474,6 +545,12 @@ fn run_gathers(
                 parsed["error"].as_str().unwrap_or("(no error message)")
             ));
         }
+        (ctx.sink)(TestEvent::GatherResult {
+            package: ctx.package.to_string(),
+            test: ctx.test.to_string(),
+            gather: g.name.clone(),
+            failures: failures.clone(),
+        });
         results.push(TestGatherResult {
             name: g.name.clone(),
             failures,
@@ -487,7 +564,7 @@ fn run_steps(
     test: &TestDecl,
     instance: &mut dyn TestInstance,
     opts: &RunnerOptions,
-    progress: &dyn Fn(&str),
+    ctx: &TestCtx,
     results: &mut Vec<TestStepResult>,
     paths: &GuestPaths,
 ) -> Result<(), Diag> {
@@ -495,10 +572,17 @@ fn run_steps(
         return Ok(());
     }
 
+    const RUN_PHASES: [TestPhase; 3] = [
+        TestPhase::Check,
+        TestPhase::FirstApply,
+        TestPhase::SecondApply,
+    ];
+    const RUN_IDS: [&str; 3] = ["check", "first_apply", "second_apply"];
+
     let jobs = opts.jobs.map(|j| j.to_string());
     let mut reports: Vec<JsonRunReport> = Vec::with_capacity(3);
     for (i, mode) in ["check", "apply", "apply"].iter().enumerate() {
-        progress(RUN_LABELS[i]);
+        ctx.phase(RUN_PHASES[i].clone());
         // Always --continue-on-error so every step reports and the
         // expectation table stays total; dependents of errored steps
         // still come back `not_run` per the engine's requires semantics.
@@ -514,6 +598,7 @@ fn run_steps(
             argv.extend(["--jobs", j]);
         }
         let out = instance.exec(&argv)?;
+        ctx.log(RUN_IDS[i], &out.stderr);
         let parsed: JsonRunReport = serde_json::from_str(out.stdout.trim()).map_err(|_| {
             Diag::bare(format!(
                 "the {} run produced no parseable report (exit {}): {}",
@@ -559,6 +644,16 @@ fn run_steps(
                 )),
             }
         }
+        (ctx.sink)(TestEvent::StepResult {
+            package: ctx.package.to_string(),
+            test: ctx.test.to_string(),
+            step: s.name.clone(),
+            expect: s.expect.as_str(),
+            check: status_of(0).map(|st| st.id()),
+            apply: status_of(1).map(|st| st.id()),
+            second_apply: status_of(2).map(|st| st.id()),
+            failures: failures.clone(),
+        });
         results.push(TestStepResult {
             name: s.name.clone(),
             expect: s.expect,
@@ -576,14 +671,14 @@ fn run_steps(
 fn run_verify(
     test: &TestDecl,
     instance: &mut dyn TestInstance,
-    progress: &dyn Fn(&str),
+    ctx: &TestCtx,
     facts: &serde_json::Map<String, serde_json::Value>,
     paths: &GuestPaths,
 ) -> Result<Option<VerifyResult>, Diag> {
     let Some(verify) = &test.verify else {
         return Ok(None);
     };
-    progress("verify");
+    ctx.phase(TestPhase::Verify);
 
     let mut facts_file = tempfile::NamedTempFile::new()
         .map_err(|e| Diag::bare(format!("cannot create the facts temp file: {e}")))?;
@@ -604,15 +699,18 @@ fn run_verify(
         "--facts",
         paths.facts.as_str(),
     ])?;
+    let done = |passed: bool, message: Option<String>| {
+        (ctx.sink)(TestEvent::VerifyResult {
+            package: ctx.package.to_string(),
+            test: ctx.test.to_string(),
+            passed,
+            message: message.clone(),
+        });
+        Ok(Some(VerifyResult { passed, message }))
+    };
     match out.exit_code {
-        0 => Ok(Some(VerifyResult {
-            passed: true,
-            message: None,
-        })),
-        1 => Ok(Some(VerifyResult {
-            passed: false,
-            message: Some(tail(&out.stdout)),
-        })),
+        0 => done(true, None),
+        1 => done(false, Some(tail(&out.stdout))),
         code => Err(Diag::bare(format!(
             "the verify script broke inside the container (exit {code}): {}",
             tail(if out.stderr.is_empty() {
@@ -677,6 +775,7 @@ pub fn run_scenarios(
     bin_windows: Option<std::path::PathBuf>,
     keep: bool,
     quiet: bool,
+    sink: &TestEventSink,
 ) -> Vec<TestReport> {
     scenarios
         .into_iter()
@@ -687,7 +786,21 @@ pub fn run_scenarios(
                     u.package.name, u.scenario.name, u.scenario.description
                 );
             }
-            run_one_scenario(pb, &u, bin_linux.clone(), bin_windows.clone(), keep, quiet)
+            sink(TestEvent::TestStarted {
+                package: u.package.name.clone(),
+                test: u.scenario.name.clone(),
+                group: None,
+            });
+            let report =
+                run_one_scenario(pb, &u, bin_linux.clone(), bin_windows.clone(), keep, quiet);
+            sink(TestEvent::TestFinished {
+                package: report.package.clone(),
+                test: report.name.clone(),
+                outcome: report.outcome.as_str(),
+                duration_secs: report.duration.as_secs_f64(),
+                error: report.error.clone(),
+            });
+            report
         })
         .collect()
 }

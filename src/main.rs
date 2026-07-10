@@ -112,6 +112,13 @@ enum Command {
         /// VMs are heavy (default: 2).
         #[arg(long, value_name = "N")]
         vmlab_jobs: Option<usize>,
+        /// Stream one machine-readable JSON event per line to stderr
+        /// (lifecycle, per-phase progress, and raw instance attach info;
+        /// stdout still carries the final report). A supervisor that
+        /// kills this process must clean up instances itself using the
+        /// ids in `instance_ready` events.
+        #[arg(long)]
+        events_ndjson: bool,
     },
     /// Generate wdoc documentation (default outdir: <dir>/docs/).
     Docs {
@@ -158,8 +165,8 @@ fn main() -> ExitCode {
         }
     };
     let code = match &cli.command {
-        Command::Validate { playbook_dir } => cmd_validate(playbook_dir),
-        Command::List { playbook_dir } => cmd_list(playbook_dir),
+        Command::Validate { playbook_dir } => cmd_validate(&cli, playbook_dir),
+        Command::List { playbook_dir } => cmd_list(&cli, playbook_dir),
         Command::Version => {
             println!("config-weave {}", env!("CARGO_PKG_VERSION"));
             EXIT_OK
@@ -176,6 +183,7 @@ fn main() -> ExitCode {
             binary_windows,
             docker_jobs,
             vmlab_jobs,
+            events_ndjson,
         } => cmd_test(
             &cli,
             playbook_dir,
@@ -187,6 +195,7 @@ fn main() -> ExitCode {
             binary_windows.as_deref(),
             *docker_jobs,
             *vmlab_jobs,
+            *events_ndjson,
         ),
         Command::Docs {
             playbook_dir,
@@ -268,22 +277,50 @@ macro_rules! load_or_exit {
     };
 }
 
-fn cmd_validate(dir: &std::path::Path) -> u8 {
+fn cmd_validate(cli: &Cli, dir: &std::path::Path) -> u8 {
     match load_validated(dir) {
         Ok(pb) => {
             let steps: usize = pb.plays.iter().map(|p| p.steps().len()).sum();
-            println!(
-                "ok: playbook '{}' v{} — {} package(s), {} play(s), {} step(s)",
-                pb.name,
-                pb.version,
-                pb.packages.len(),
-                pb.plays.len(),
-                steps
-            );
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "playbook": pb.name,
+                        "version": pb.version,
+                        "packages": pb.packages.len(),
+                        "plays": pb.plays.len(),
+                        "steps": steps,
+                        "diags": [],
+                    })
+                );
+            } else {
+                println!(
+                    "ok: playbook '{}' v{} — {} package(s), {} play(s), {} step(s)",
+                    pb.name,
+                    pb.version,
+                    pb.packages.len(),
+                    pb.plays.len(),
+                    steps
+                );
+            }
             EXIT_OK
         }
         Err(diags) => {
-            print_diags(&diags);
+            if cli.json {
+                let items: Vec<serde_json::Value> = diags
+                    .iter()
+                    .map(|d| {
+                        serde_json::json!({
+                            "message": d.message,
+                            "rendered": d.rendered,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::json!({ "ok": false, "diags": items }));
+            } else {
+                print_diags(&diags);
+            }
             EXIT_VALIDATION
         }
     }
@@ -472,6 +509,7 @@ fn cmd_test(
     binary_windows: Option<&std::path::Path>,
     docker_jobs: Option<usize>,
     vmlab_jobs: Option<usize>,
+    events_ndjson: bool,
 ) -> u8 {
     let pb = std::rc::Rc::new(load_or_exit!(load_validated(dir)));
 
@@ -515,7 +553,16 @@ fn cmd_test(
     }
 
     let mode_out = report::select_mode(cli.json, cli.no_color);
-    let quiet = mode_out == report::OutputMode::Json;
+    // NDJSON claims stderr for events, so the human progress lines and
+    // the backends' raw prints go quiet exactly as in JSON output mode.
+    let quiet = mode_out == report::OutputMode::Json || events_ndjson;
+    let sink: testlab::events::TestEventSink = if events_ndjson {
+        testlab::events::ndjson_sink()
+    } else if quiet {
+        testlab::events::null_sink()
+    } else {
+        testlab::events::human_sink()
+    };
 
     // Discover each backend the selected tests actually use, once, up
     // front — a broken environment fails fast with exit 2 instead of
@@ -541,12 +588,46 @@ fn cmd_test(
         ),
         keep,
         jobs: cli.jobs,
-        quiet,
+        sink: sink.clone(),
         docker_cap: docker_jobs.unwrap_or_else(engine::run::default_jobs).max(1),
         vmlab_cap: vmlab_jobs.unwrap_or(2).max(1),
     };
 
     let groups = bucket_groups(&selected, &backends, backend_override, image_override);
+
+    // Announce the full plan up front so a consumer can size its progress
+    // view; scenarios follow the groups with no group index.
+    let mut planned: Vec<testlab::events::PlannedTest> = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(gid, g)| {
+            g.tests
+                .iter()
+                .map(move |(_, pkg, t)| testlab::events::PlannedTest {
+                    package: pkg.name.clone(),
+                    test: t.name.clone(),
+                    group: Some(gid),
+                    backend: g.backend.name().to_string(),
+                    image: g.image.clone(),
+                })
+        })
+        .collect();
+    planned.extend(
+        scenarios_sel
+            .iter()
+            .map(|(pkg, s)| testlab::events::PlannedTest {
+                package: pkg.name.clone(),
+                test: s.name.clone(),
+                group: None,
+                backend: "vmlab".to_string(),
+                image: "(scenario)".to_string(),
+            }),
+    );
+    sink(testlab::events::TestEvent::RunStarted {
+        playbook: pb.name.clone(),
+        groups: groups.len(),
+        tests: planned,
+    });
 
     let start = std::time::Instant::now();
     let mut tests = testlab::runner::run_groups(&pb, groups, &opts);
@@ -577,6 +658,7 @@ fn cmd_test(
             binary_windows.map(std::path::Path::to_path_buf),
             keep,
             quiet,
+            &sink,
         );
         tests.extend(scenario_reports);
     }
@@ -586,6 +668,18 @@ fn cmd_test(
         tests,
         duration: start.elapsed(),
     };
+    // The terminal event goes out before the stdout report so a streaming
+    // consumer sees the end even if it never reads stdout.
+    let count = |o: testlab::report::TestOutcome| {
+        run_report.tests.iter().filter(|t| t.outcome == o).count()
+    };
+    sink(testlab::events::TestEvent::RunFinished {
+        exit_code: run_report.exit_code(),
+        passed: count(testlab::report::TestOutcome::Passed),
+        failed: count(testlab::report::TestOutcome::Failed),
+        errors: count(testlab::report::TestOutcome::Error),
+        duration_secs: run_report.duration.as_secs_f64(),
+    });
     match mode_out {
         report::OutputMode::Json => println!("{}", report::test_json(&run_report)),
         report::OutputMode::Plain => print!("{}", report::test_plain(&run_report)),
@@ -777,7 +871,7 @@ fn cmd_docs(dir: &std::path::Path, outdir: Option<&std::path::Path>) -> u8 {
     }
 }
 
-fn cmd_list(dir: &std::path::Path) -> u8 {
+fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
     let loaded = model::load(dir);
     let Some(pb) = loaded.playbook else {
         print_diags(&loaded.diags);
@@ -786,6 +880,67 @@ fn cmd_list(dir: &std::path::Path) -> u8 {
     if !loaded.diags.is_empty() {
         print_diags(&loaded.diags);
         return EXIT_VALIDATION;
+    }
+    if cli.json {
+        // The full inventory, not just plays: machine consumers (the web
+        // GUI) need the packages' tests and scenarios to offer runs.
+        let plays: Vec<serde_json::Value> = pb
+            .plays
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "name": p.name,
+                    "description": p.description,
+                    "steps": p.steps().len(),
+                })
+            })
+            .collect();
+        let packages: Vec<serde_json::Value> = pb
+            .packages
+            .values()
+            .map(|pkg| {
+                let tests: Vec<serde_json::Value> = pkg
+                    .tests
+                    .iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "name": t.name,
+                            "description": t.description,
+                            "backend": t.backend,
+                            "image": t.image,
+                            "group": t.group,
+                        })
+                    })
+                    .collect();
+                let scenarios: Vec<serde_json::Value> = pkg
+                    .scenarios
+                    .iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "name": s.name,
+                            "description": s.description,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "name": pkg.name,
+                    "description": pkg.description,
+                    "tests": tests,
+                    "scenarios": scenarios,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({
+                "playbook": pb.name,
+                "version": pb.version,
+                "description": pb.description,
+                "plays": plays,
+                "packages": packages,
+            })
+        );
+        return EXIT_OK;
     }
     println!("{} v{} — {}", pb.name, pb.version, pb.description);
     for play in &pb.plays {

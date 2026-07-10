@@ -1,0 +1,31 @@
+{
+  "name": "weave-web-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.34.4",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.0",
+    "@forge/client": "link:../../forge/packages/client",
+    "@forge/code": "link:../../forge/packages/code",
+    "@forge/desktop": "link:../../forge/packages/desktop",
+    "@forge/term": "link:../../forge/packages/term",
+    "@forge/tokens": "link:../../forge/packages/tokens",
+    "@forge/ui": "link:../../forge/packages/ui",
+    "lucide-solid": "^0.469.0",
+    "solid-js": "^1.9.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vite": "^6.0.0",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}

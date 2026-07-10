@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
-use super::backend::{ExecOutput, GuestOs, TestBackend, TestInstance, TestLab};
+use super::backend::{AttachInfo, ExecOutput, GuestOs, TestBackend, TestInstance, TestLab};
 use super::output::stderr_tail;
 use crate::diag::Diag;
 
@@ -407,6 +407,15 @@ impl TestInstance for VmlabInstance {
             self.dir.display(),
             self.image
         )
+    }
+
+    fn attach_info(&self) -> AttachInfo {
+        AttachInfo::Vmlab {
+            lab_dir: self.dir.display().to_string(),
+            lab: self.lab.clone(),
+            machine: self.vm.clone(),
+            template: self.image.clone(),
+        }
     }
 
     fn teardown(&mut self) -> Result<(), Diag> {

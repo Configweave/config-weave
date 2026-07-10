@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use super::backend::{ExecOutput, GuestOs, TestBackend, TestInstance, TestLab};
+use super::backend::{AttachInfo, ExecOutput, GuestOs, TestBackend, TestInstance, TestLab};
 use super::output::stderr_tail;
 use crate::diag::Diag;
 
@@ -197,6 +197,14 @@ impl TestInstance for DockerInstance {
     fn handle(&self) -> String {
         let short = &self.id[..self.id.len().min(12)];
         format!("container {short} (image {})", self.image)
+    }
+
+    fn attach_info(&self) -> AttachInfo {
+        AttachInfo::Docker {
+            container_id: self.id.clone(),
+            image: self.image.clone(),
+            cli: self.cmd.clone(),
+        }
     }
 
     fn teardown(&mut self) -> Result<(), Diag> {
