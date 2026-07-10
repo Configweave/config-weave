@@ -58,7 +58,7 @@ pub fn init(dir: &Path) -> Result<(), Diag> {
     Ok(())
 }
 
-const PLAYBOOK: &str = r#"playbook "My Playbook" {
+pub(crate) const PLAYBOOK: &str = r#"playbook "My Playbook" {
   description = "Describe what this playbook converges"
   version = "0.1.0"
 
@@ -88,7 +88,7 @@ const PLAYBOOK: &str = r#"playbook "My Playbook" {
 }
 "#;
 
-const PACKAGE: &str = r#"package "example" {
+pub(crate) const PACKAGE: &str = r#"package "example" {
   description = "Example package scaffolded by config-weave init"
 
   gatherer "os_info" {
@@ -136,7 +136,7 @@ const PACKAGE: &str = r#"package "example" {
 }
 "#;
 
-const RESOURCE: &str = r#"use value
+pub(crate) const RESOURCE: &str = r#"use value
 use fs
 use path
 use log
@@ -174,7 +174,7 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
 }
 "#;
 
-const GATHERER: &str = r#"use value
+pub(crate) const GATHERER: &str = r#"use value
 use sys
 
 fn gather(params: Value) -> Value {
@@ -188,7 +188,7 @@ fn gather(params: Value) -> Value {
 }
 "#;
 
-const VERIFY: &str = r#"use value
+pub(crate) const VERIFY: &str = r#"use value
 use fs
 
 // Custom test assertions, run inside the test container after the apply

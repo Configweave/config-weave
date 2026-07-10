@@ -167,6 +167,21 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         facts: Option<PathBuf>,
     },
+    /// (internal) stdin `{kind, source}` → stdout `{ok, doc | diags}`:
+    /// structural DocJson extraction from one WCL source for the web
+    /// GUI's graphical editors. Content-based (no file IO), so it works
+    /// on unsaved buffers; kind is "playbook" or "package".
+    #[command(name = "__wcl-inspect", hide = true)]
+    WclInspect,
+    /// (internal) stdin `{kind, base_source, doc}` → stdout
+    /// `{ok, source | diags}`: sync a DocJson onto the base source's
+    /// AST (comments survive) and print the canonical WCL.
+    #[command(name = "__wcl-render", hide = true)]
+    WclRender,
+    /// (internal) Scaffold templates as JSON for the web GUI's "new
+    /// script" actions.
+    #[command(name = "__templates", hide = true)]
+    Templates,
 }
 
 fn main() -> ExitCode {
@@ -247,6 +262,21 @@ fn main() -> ExitCode {
             params_json,
         } => cmd_gather_one(playbook_dir, gatherer, params_json.as_deref()),
         Command::RunVerify { script, facts } => cmd_run_verify(script, facts.as_deref()),
+        Command::WclInspect => cmd_wcl_inspect(),
+        Command::WclRender => cmd_wcl_render(),
+        Command::Templates => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "playbook": scaffold::PLAYBOOK,
+                    "package": scaffold::PACKAGE,
+                    "resource_script": scaffold::RESOURCE,
+                    "gatherer_script": scaffold::GATHERER,
+                    "verify_script": scaffold::VERIFY,
+                })
+            );
+            EXIT_OK
+        }
         Command::Init { dir } => match scaffold::init(dir) {
             Ok(()) => {
                 println!(
@@ -898,6 +928,77 @@ fn cmd_docs(dir: &std::path::Path, outdir: Option<&std::path::Path>) -> u8 {
             eprintln!("{}", d.rendered);
             EXIT_VALIDATION
         }
+    }
+}
+
+/// Everything the DocJson subcommands need arrives as one JSON object
+/// on stdin; results leave as one JSON object on stdout. Errors are
+/// in-band (`ok: false`) so the server never has to parse stderr.
+fn read_stdin_json() -> Result<serde_json::Value, String> {
+    use std::io::Read as _;
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .map_err(|e| format!("cannot read stdin: {e}"))?;
+    serde_json::from_str(&buf).map_err(|e| format!("stdin is not JSON: {e}"))
+}
+
+fn docjson_fail(diags: Vec<String>) -> u8 {
+    println!("{}", serde_json::json!({ "ok": false, "diags": diags }));
+    EXIT_OK
+}
+
+fn cmd_wcl_inspect() -> u8 {
+    let input = match read_stdin_json() {
+        Ok(v) => v,
+        Err(e) => return docjson_fail(vec![e]),
+    };
+    let kind = input["kind"].as_str().unwrap_or_default().to_string();
+    let source = input["source"].as_str().unwrap_or_default();
+    let ast = match wcl_lang::parse_for_edit(source, "buffer.wcl") {
+        Ok(a) => a,
+        Err(e) => return docjson_fail(vec![format!("{e}")]),
+    };
+    let doc = match kind.as_str() {
+        "playbook" => model::inspect_ast::extract_playbook(&ast).map(|d| serde_json::to_value(d)),
+        "package" => model::inspect_ast::extract_package(&ast).map(|d| serde_json::to_value(d)),
+        other => return docjson_fail(vec![format!("unknown kind '{other}'")]),
+    };
+    match doc {
+        Ok(Ok(doc)) => {
+            println!(
+                "{}",
+                serde_json::json!({ "ok": true, "kind": kind, "doc": doc })
+            );
+            EXIT_OK
+        }
+        Ok(Err(e)) => docjson_fail(vec![format!("serialize: {e}")]),
+        Err(diags) => docjson_fail(diags),
+    }
+}
+
+fn cmd_wcl_render() -> u8 {
+    let input = match read_stdin_json() {
+        Ok(v) => v,
+        Err(e) => return docjson_fail(vec![e]),
+    };
+    let kind = input["kind"].as_str().unwrap_or_default();
+    let base = input["base_source"].as_str().unwrap_or_default();
+    let rendered = match kind {
+        "playbook" => serde_json::from_value::<model::docjson::PlaybookDoc>(input["doc"].clone())
+            .map_err(|e| vec![format!("doc does not match the playbook shape: {e}")])
+            .and_then(|doc| model::emit::render_playbook(base, &doc)),
+        "package" => serde_json::from_value::<model::docjson::PackageDoc>(input["doc"].clone())
+            .map_err(|e| vec![format!("doc does not match the package shape: {e}")])
+            .and_then(|doc| model::emit::render_package(base, &doc)),
+        other => return docjson_fail(vec![format!("unknown kind '{other}'")]),
+    };
+    match rendered {
+        Ok(source) => {
+            println!("{}", serde_json::json!({ "ok": true, "source": source }));
+            EXIT_OK
+        }
+        Err(diags) => docjson_fail(diags),
     }
 }
 
