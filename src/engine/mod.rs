@@ -39,6 +39,20 @@ pub fn execute(
         dag::build(p)?;
     }
 
+    events(events::Event::RunStarted {
+        play: play.name.clone(),
+        mode: mode.as_str(),
+        steps: play
+            .steps()
+            .iter()
+            .map(|s| events::PlannedStep {
+                name: s.name.clone(),
+                resource: format!("{}.{}", s.package, s.resource),
+                container_path: s.container_path.clone(),
+            })
+            .collect(),
+    });
+
     gather::run(pb, &scripts, &ctx, &mut store, &events)?;
 
     run::run_play(

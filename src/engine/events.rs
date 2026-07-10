@@ -22,8 +22,26 @@ impl Phase {
     }
 }
 
+/// One entry per step in the target play, flattened through containers in
+/// declaration order — the same order the scheduler assigns `idx`.
+#[derive(Debug, Clone)]
+pub struct PlannedStep {
+    pub name: String,
+    /// `package.resource`.
+    pub resource: String,
+    /// Enclosing container names, outermost first.
+    pub container_path: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Event {
+    /// Emitted once after validation/DAG build, before gathering, so a
+    /// machine consumer can pre-render the step table.
+    RunStarted {
+        play: String,
+        mode: &'static str,
+        steps: Vec<PlannedStep>,
+    },
     /// The gather phase begins with this many unique executions.
     GatherStarted {
         unique: usize,

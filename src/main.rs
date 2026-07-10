@@ -77,9 +77,25 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Report configuration status of all steps (never mutates).
-    Check { playbook_dir: PathBuf, play: String },
+    Check {
+        playbook_dir: PathBuf,
+        play: String,
+        /// Stream one machine-readable JSON event per line to stderr
+        /// (run/gather lifecycle and per-step phase progress; stdout
+        /// still carries the final --json report).
+        #[arg(long)]
+        events_ndjson: bool,
+    },
     /// Apply all unconfigured steps in a play.
-    Apply { playbook_dir: PathBuf, play: String },
+    Apply {
+        playbook_dir: PathBuf,
+        play: String,
+        /// Stream one machine-readable JSON event per line to stderr
+        /// (run/gather lifecycle and per-step phase progress; stdout
+        /// still carries the final --json report).
+        #[arg(long)]
+        events_ndjson: bool,
+    },
     /// List all plays defined in the playbook.
     List { playbook_dir: PathBuf },
     /// Full validation pipeline, no execution.
@@ -171,8 +187,16 @@ fn main() -> ExitCode {
             println!("config-weave {}", env!("CARGO_PKG_VERSION"));
             EXIT_OK
         }
-        Command::Check { playbook_dir, play } => cmd_run(&cli, playbook_dir, play, Mode::Check),
-        Command::Apply { playbook_dir, play } => cmd_run(&cli, playbook_dir, play, Mode::Apply),
+        Command::Check {
+            playbook_dir,
+            play,
+            events_ndjson,
+        } => cmd_run(&cli, playbook_dir, play, Mode::Check, *events_ndjson),
+        Command::Apply {
+            playbook_dir,
+            play,
+            events_ndjson,
+        } => cmd_run(&cli, playbook_dir, play, Mode::Apply, *events_ndjson),
         Command::Test {
             playbook_dir,
             filter,
@@ -341,11 +365,17 @@ fn override_store(cli: &Cli) -> Result<VarStore, Vec<Diag>> {
     Ok(store)
 }
 
-fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode) -> u8 {
+fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode, events_ndjson: bool) -> u8 {
     let pb = load_or_exit!(load_validated(dir));
     let store = load_or_exit!(override_store(cli));
     let mode_out = report::select_mode(cli.json, cli.no_color);
-    let sink = report::progress_sink(mode_out);
+    // NDJSON and the rich progress line both write stderr; the event
+    // stream wins (same exclusivity as `test --events-ndjson`).
+    let sink = if events_ndjson {
+        report::run_ndjson_sink()
+    } else {
+        report::progress_sink(mode_out)
+    };
     match engine::execute(
         &pb,
         play,
@@ -922,9 +952,48 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
                         })
                     })
                     .collect();
+                let params_json = |params: &[model::ParamDecl]| -> Vec<serde_json::Value> {
+                    params
+                        .iter()
+                        .map(|p| {
+                            serde_json::json!({
+                                "name": p.name,
+                                "description": p.description,
+                                "type": p.ty.as_str(),
+                                "required": p.required,
+                                "default": p.default.as_ref().map(convert::dyn_to_json),
+                            })
+                        })
+                        .collect()
+                };
+                let resources: Vec<serde_json::Value> = pkg
+                    .resources
+                    .values()
+                    .map(|r| {
+                        serde_json::json!({
+                            "name": r.name,
+                            "description": r.description,
+                            "concurrency": r.concurrency.as_str(),
+                            "params": params_json(&r.params),
+                        })
+                    })
+                    .collect();
+                let gatherers: Vec<serde_json::Value> = pkg
+                    .gatherers
+                    .values()
+                    .map(|g| {
+                        serde_json::json!({
+                            "name": g.name,
+                            "description": g.description,
+                            "params": params_json(&g.params),
+                        })
+                    })
+                    .collect();
                 serde_json::json!({
                     "name": pkg.name,
                     "description": pkg.description,
+                    "resources": resources,
+                    "gatherers": gatherers,
                     "tests": tests,
                     "scenarios": scenarios,
                 })

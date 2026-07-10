@@ -89,6 +89,67 @@ pub fn progress_sink(mode: OutputMode) -> EventSink {
     }
 }
 
+/// Machine-readable live progress for check/apply (`--events-ndjson`):
+/// one JSON object per line on stderr, `ts` (epoch millis) stamped at
+/// emit time — the same discipline as the testlab's NDJSON stream. The
+/// final `JsonRunReport` still goes to stdout via `--json`.
+pub fn run_ndjson_sink() -> EventSink {
+    std::sync::Arc::new(|event| {
+        use serde_json::json;
+        let mut value = match event {
+            Event::RunStarted { play, mode, steps } => json!({
+                "event": "run_started",
+                "play": play,
+                "mode": mode,
+                "steps": steps.iter().map(|s| json!({
+                    "name": s.name,
+                    "resource": s.resource,
+                    "container_path": s.container_path,
+                })).collect::<Vec<_>>(),
+            }),
+            Event::GatherStarted { unique } => {
+                json!({ "event": "gather_started", "unique": unique })
+            }
+            Event::GatherFinished => json!({ "event": "gather_finished" }),
+            Event::StepStarted { idx, name } => {
+                json!({ "event": "step_started", "idx": idx, "name": name })
+            }
+            Event::StepPhase { idx, name, phase } => json!({
+                "event": "step_phase",
+                "idx": idx,
+                "name": name,
+                "phase": phase.as_str(),
+            }),
+            Event::StepFinished { idx, report } => json!({
+                "event": "step_finished",
+                "idx": idx,
+                "name": report.name,
+                "container_path": report.container_path,
+                "resource": report.resource,
+                "status": report.status.id(),
+                "message": report.message,
+                "duration_secs": report.duration.as_secs_f64(),
+            }),
+            Event::StepResolved { idx, name, status } => json!({
+                "event": "step_resolved",
+                "idx": idx,
+                "name": name,
+                "status": status.id(),
+            }),
+        };
+        if let serde_json::Value::Object(map) = &mut value {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            map.insert("ts".into(), ts.into());
+        }
+        let stderr = std::io::stderr();
+        let mut out = stderr.lock();
+        let _ = writeln!(out, "{value}");
+    })
+}
+
 fn rich_event(s: &mut RichState, event: Event) {
     let mut err = std::io::stderr().lock();
     if s.live_line_shown {
@@ -96,6 +157,8 @@ fn rich_event(s: &mut RichState, event: Event) {
         s.live_line_shown = false;
     }
     match event {
+        // Machine-consumer preamble; the rich view has nothing to show yet.
+        Event::RunStarted { .. } => {}
         Event::GatherStarted { unique } => {
             s.gathering = Some(unique);
         }
