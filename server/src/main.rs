@@ -10,7 +10,10 @@ mod desktop;
 mod runbooks;
 mod runs;
 mod state;
+mod sysruns;
+mod systems;
 mod term;
+mod transport;
 
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -60,10 +63,81 @@ struct Args {
     /// Windows binary forwarded to `--binary-windows`.
     #[arg(long)]
     test_binary_windows: Option<PathBuf>,
+    /// Static config-weave build deployed to direct systems, as
+    /// KEY=PATH with KEY `{os}-{arch}` (e.g. linux-x86_64=dist/...).
+    /// Repeatable. Unset keys fall back to --test-binary(-windows),
+    /// then to `just release` artifacts found near this executable.
+    #[arg(long, value_name = "KEY=PATH")]
+    deploy_binary: Vec<String>,
     /// Serve the frontend from a directory instead of the embedded build
     /// (dev: point at web-ui/dist while iterating, or use `pnpm dev`).
     #[arg(long)]
     frontend_dir: Option<PathBuf>,
+}
+
+/// The deploy-binary registry: explicit --deploy-binary pairs win, then
+/// --test-binary(-windows) for the x86_64 keys, then the freshest
+/// `just release` artifact near this executable (same candidate paths
+/// the testlab probes).
+fn deploy_binaries(args: &Args) -> Result<std::collections::HashMap<String, PathBuf>, String> {
+    let mut map = std::collections::HashMap::new();
+    for pair in &args.deploy_binary {
+        let Some((key, path)) = pair.split_once('=') else {
+            return Err(format!("--deploy-binary '{pair}' is not KEY=PATH"));
+        };
+        let path = PathBuf::from(path);
+        if !path.is_file() {
+            return Err(format!("--deploy-binary {key}: {} does not exist", path.display()));
+        }
+        map.insert(key.to_string(), path);
+    }
+    let mut fallback = |key: &str, explicit: &Option<PathBuf>, candidates: [&str; 2]| {
+        if map.contains_key(key) {
+            return;
+        }
+        if let Some(p) = explicit
+            && p.is_file()
+        {
+            map.insert(key.into(), p.clone());
+            return;
+        }
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(ws) = exe.ancestors().nth(3)
+        {
+            let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+            for c in candidates {
+                let c = ws.join(c);
+                if c.is_file() {
+                    let mtime = std::fs::metadata(&c)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
+                        best = Some((mtime, c));
+                    }
+                }
+            }
+            if let Some((_, p)) = best {
+                map.insert(key.into(), p);
+            }
+        }
+    };
+    fallback(
+        "linux-x86_64",
+        &args.test_binary,
+        [
+            "target-cross/x86_64-unknown-linux-musl/release/config-weave",
+            "dist/config-weave-linux-x86_64",
+        ],
+    );
+    fallback(
+        "windows-x86_64",
+        &args.test_binary_windows,
+        [
+            "target-cross/x86_64-pc-windows-gnu/release/config-weave.exe",
+            "dist/config-weave-windows-x86_64.exe",
+        ],
+    );
+    Ok(map)
 }
 
 /// `config-weave` beside this executable wins (installed layout), then
@@ -110,6 +184,24 @@ async fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
+    // A malformed systems.wcl refuses startup: a later GUI save would
+    // regenerate (and so clobber) a file we could not fully read.
+    let systems_path = root.join("systems.wcl");
+    let loaded_systems = match systems::load(&systems_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("weave-server: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let deploy = match deploy_binaries(&args) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("weave-server: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
     let state: SharedState = Arc::new(ServerState {
         root: root.clone(),
         config_weave: args.config_weave.unwrap_or_else(default_config_weave),
@@ -117,6 +209,10 @@ async fn main() -> ExitCode {
         test_binary_windows: args.test_binary_windows,
         runs: runs::RunManager::default(),
         events: app.event_bus(),
+        systems_path,
+        systems: std::sync::Mutex::new(loaded_systems),
+        deploy_binaries: deploy,
+        sysruns: sysruns::SysRunManager::default(),
     });
 
     app = app
@@ -128,6 +224,15 @@ async fn main() -> ExitCode {
         )
         .route("/api/runbooks/{rb}/validate", post(runbooks::validate))
         .route("/api/runbooks/{rb}/inventory", get(runbooks::inventory))
+        .route("/api/systems", get(systems::list).post(systems::create))
+        .route(
+            "/api/systems/{name}",
+            axum::routing::put(systems::update).delete(systems::delete),
+        )
+        .route("/api/systems/{name}/runs", post(sysruns::create))
+        .route("/api/system-runs", get(sysruns::list))
+        .route("/api/system-runs/{id}", get(sysruns::get))
+        .route("/api/system-runs/{id}/cancel", post(sysruns::cancel))
         .route("/api/runs", get(runs::list).post(runs::create))
         .route("/api/runs/{id}", get(runs::get))
         .route("/api/runs/{id}/cancel", post(runs::cancel))

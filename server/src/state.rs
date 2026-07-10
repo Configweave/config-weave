@@ -1,12 +1,15 @@
 //! Shared server state, handed to custom routes via an axum `Extension`
 //! layer (forge's custom routes only carry `ForgeState`).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use forge_server::EventBus;
 
 use crate::runs::RunManager;
+use crate::sysruns::SysRunManager;
+use crate::systems::SystemDef;
 
 pub struct ServerState {
     /// The runbooks root: every immediate child directory containing a
@@ -20,6 +23,14 @@ pub struct ServerState {
     pub test_binary_windows: Option<PathBuf>,
     pub runs: RunManager,
     pub events: EventBus,
+    /// `{root}/systems.wcl` — the systems inventory, mirrored in memory
+    /// and regenerated on every mutation.
+    pub systems_path: PathBuf,
+    pub systems: Mutex<Vec<SystemDef>>,
+    /// Deployable static binaries keyed `"{os}-{arch}"` (dist/ naming:
+    /// `linux-x86_64`, `windows-x86_64`), for direct-system runs.
+    pub deploy_binaries: HashMap<String, PathBuf>,
+    pub sysruns: SysRunManager,
 }
 
 pub type SharedState = Arc<ServerState>;

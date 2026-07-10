@@ -23,6 +23,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
+# systems.wcl store: schema-validated load + AST-built regeneration
+# (same path-dep convention as the main crate's ../WCL).
+wcl_lang = { path = "../../WCL/crates/wcl_lang" }
+# powershell -EncodedCommand payloads for Windows-over-ssh targets.
+base64 = "0.22"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -14,10 +14,15 @@ pub const PLAYBOOK_VOCAB: &str = include_str!("vocab/playbook.wcl");
 /// Schema for `package.wcl`.
 pub const PACKAGE_VOCAB: &str = include_str!("vocab/package.wcl");
 
+/// Schema for `systems.wcl` (weave-server's system inventory; the CLI
+/// only serves the vocab so there is one source of truth).
+pub const SYSTEMS_VOCAB: &str = include_str!("vocab/systems.wcl");
+
 /// Registry-relative names the engine appends as imports.
 pub const PLAYBOOK_IMPORT: &str = "weave/playbook.wcl";
 pub const PACKAGE_IMPORT: &str = "weave/package.wcl";
 pub const VARS_IMPORT: &str = "weave/vars.wcl";
+pub const SYSTEMS_IMPORT: &str = "weave/systems.wcl";
 
 /// Build the system-import loader. `vars` is the generated variables file
 /// (gatherer results and overrides as `let` declarations); pass `None`
@@ -26,6 +31,7 @@ pub fn loader(vars: Option<String>) -> FileLoader {
     let mut reg = Registry::new();
     reg.register(PLAYBOOK_IMPORT, PLAYBOOK_VOCAB);
     reg.register(PACKAGE_IMPORT, PACKAGE_VOCAB);
+    reg.register(SYSTEMS_IMPORT, SYSTEMS_VOCAB);
     if let Some(v) = vars {
         reg.register(VARS_IMPORT, v);
     }

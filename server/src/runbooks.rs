@@ -19,7 +19,7 @@ use crate::state::SharedState;
 const IGNORED_DIRS: [&str; 4] = [".git", "node_modules", "target", ".vmlab"];
 
 /// A runbook name straight from the URL: a single path component.
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with('.')
         && name
@@ -28,7 +28,7 @@ fn valid_name(name: &str) -> bool {
 }
 
 /// Resolve a runbook by name; `None` when it does not exist under root.
-fn runbook_dir(state: &SharedState, name: &str) -> Option<PathBuf> {
+pub(crate) fn runbook_dir(state: &SharedState, name: &str) -> Option<PathBuf> {
     if !valid_name(name) {
         return None;
     }
