@@ -16,9 +16,6 @@ use super::docjson::*;
 
 type Diags = Vec<String>;
 
-/// The kinds a play/container body owns (one ordered sequence).
-pub(crate) const PLAY_ITEM_KINDS: [&str; 2] = ["step", "container"];
-
 pub fn extract_playbook(src: &Source) -> Result<PlaybookDoc, Diags> {
     let block = find_top_block(src, "playbook")
         .ok_or_else(|| vec!["no `playbook` block found".to_string()])?;

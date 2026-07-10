@@ -92,7 +92,10 @@ fn deploy_binaries(args: &Args) -> Result<std::collections::HashMap<String, Path
         };
         let path = PathBuf::from(path);
         if !path.is_file() {
-            return Err(format!("--deploy-binary {key}: {} does not exist", path.display()));
+            return Err(format!(
+                "--deploy-binary {key}: {} does not exist",
+                path.display()
+            ));
         }
         map.insert(key.to_string(), path);
     }

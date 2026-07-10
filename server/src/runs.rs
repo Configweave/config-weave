@@ -465,7 +465,7 @@ pub async fn teardown(
     // Nudge any open RunView so the troubleshoot tabs disappear live.
     let event = json!({ "event": "instances_torn_down" });
     push_event(&run, event.clone());
-    state.events.publish(&format!("run:{id}"), event);
+    state.events.publish(format!("run:{id}"), event);
     ok(run.snapshot())
 }
 

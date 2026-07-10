@@ -300,3 +300,70 @@ runs each in a disposable backend instance. Bindings fixed here:
 - `print`/`println` in wscript-vm write directly to stdout; routing them
   into `log::info` needs a small upstream hook in wscript-vm (planned with
   M3's stdout-redirection work).
+
+## weave-server: systems, package repo, graphical editors (post-v1)
+
+The web GUI grew three pillars; the CLI stays purely local (the PRD's
+remote-execution non-goal holds — all transport orchestration lives in
+weave-server).
+
+- **Live engine events.** `check`/`apply` gained `--events-ndjson`
+  (mirror of the testlab flag): one JSON object per stderr line, `ts`
+  epoch-ms, events `run_started` (with the planned step list, idx order
+  = the scheduler's), `gather_started/finished`, `step_started`,
+  `step_phase` (checking | applying | re-checking), `step_finished`
+  (status id + message + duration), `step_resolved`. stdout still
+  carries the one final `--json` report. `list --json` now also emits
+  each package's `resources`/`gatherers` with full param schemas (the
+  GUI's docs pages and schema-aware property editors feed off it).
+- **Systems inventory.** `{server root}/systems.wcl`, schema
+  `<weave/systems.wcl>` (embedded in both crates from
+  `src/vocab/systems.wcl`): `system "name" { playbook, play, kind =
+  "direct"|"remote", os, arch, transport "ssh"|"winrm" { host, port?,
+  user, password?, private_key?, use_tls } }`. Credentials are inline
+  by explicit choice; the server keeps the file 0600 and regenerates it
+  on every GUI edit via wcl_lang's AST builder + canonical printer
+  (hand comments do not survive a GUI save). A malformed systems.wcl
+  refuses server startup rather than risk a clobbering save.
+- **System runs.** *Remote* systems run the playbook locally on the
+  server with the connection details injected as vars via a 0600
+  `--var-file`: `system_name/host/port/user/password/private_key/
+  transport/os` (flat identifiers — var keys cannot contain dots).
+  Playbooks consume them by declaring same-named `vars` entries the
+  overrides replace. *Direct* systems get the matching static build
+  (registry keyed `{os}-{arch}`, `--deploy-binary` with `just release`
+  artifact fallbacks) plus the playbook staged to `/tmp/weave-run-{id}`
+  (`C:/Windows/Temp/…`), run there with remote stdout always redirected
+  to `<stage>/report.json` and fetched afterwards — the one protocol
+  that survives both ssh and PSRemoting stream semantics. Windows
+  remote commands always go through `powershell -EncodedCommand`
+  (UTF-16LE base64), immune to ssh/cmd quoting; winrm shells out to
+  `pwsh` (PSWSMan) and is best-effort — Windows targets are fully
+  served over Win32-OpenSSH. Event topic `sysrun:{id}`, deploy progress
+  as server-synthesized `deploy_phase` events.
+- **Package repository.** `--packages-dir` points at a folder of
+  package dirs. The CLI only understands playbook dirs, so the server
+  synthesizes a tempdir wrapper (`playbook "package-repo"` +
+  `pkgs/<name>` symlinks, fingerprint-cached on package.wcl mtimes) —
+  safe because the testlab's synthesize step copies packages
+  (dereferencing symlinks) before anything reaches an instance.
+  Add-to-playbook *copies* (the runbook editor refuses symlink
+  escapes). Debug-a-test = a kept single-test run; kept instances stay
+  attachable after completion and `POST /api/runs/{id}/teardown` reuses
+  the orphan cleanup to destroy them on demand.
+- **Graphical editors (DocJson).** playbook.wcl / package.wcl get a
+  Visual mode: `__wcl-inspect` extracts a structural doc from the
+  `parse_for_edit` AST (every leaf `{lit}` or `{expr: "source"}`;
+  extraction **fails closed** on constructs forms can't represent, e.g.
+  non-field items inside schemaless maps); `__wcl-render` syncs the doc
+  back onto the current file's AST — blocks matched by `_orig`-or-name,
+  updated in place so comments survive (canonical printer re-emits them
+  `#`-prefixed), unknown items preserved — and re-parses the output
+  before it can reach disk. Saves go through a content-hash conflict
+  guard (409 on concurrent change). Formatting canonicalizes on first
+  visual save (one-line `param` blocks expand; printer is idempotent
+  after).
+- **SSE has no replay.** EventSource connections miss events published
+  while connecting, so both run views treat the server's per-run event
+  buffer as authoritative: seed from the snapshot, then poll until one
+  final reseed of a finished run has happened.

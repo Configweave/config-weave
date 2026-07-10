@@ -37,8 +37,8 @@ pub struct WrapperCache(Mutex<Option<Wrapper>>);
 /// Scan the repo: package dirs (containing package.wcl) + their mtimes.
 fn scan_repo(packages_dir: &Path) -> Result<Vec<(String, SystemTime)>, String> {
     let mut found = Vec::new();
-    let entries = std::fs::read_dir(packages_dir)
-        .map_err(|e| format!("cannot read packages dir: {e}"))?;
+    let entries =
+        std::fs::read_dir(packages_dir).map_err(|e| format!("cannot read packages dir: {e}"))?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let manifest = entry.path().join("package.wcl");
@@ -173,7 +173,10 @@ pub async fn add_to_runbook(
         }
     }
     if let Err(e) = crate::transport::copy_dir_filtered(&src, &dest) {
-        return err(StatusCode::INTERNAL_SERVER_ERROR, format!("cannot copy: {e}"));
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot copy: {e}"),
+        );
     }
     ok(json!({ "runbook": req.runbook, "package": name, "path": format!("pkgs/{name}") }))
 }

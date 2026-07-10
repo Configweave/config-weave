@@ -25,10 +25,17 @@ convergence tests in disposable instances — docker containers (linux) or
 vmlab VMs (linux + windows guests, shelling out to the sibling `../vmlab`
 CLI) — with `test` blocks in package.wcl, a three-run idempotence
 protocol, `just test-lab` for the docker-gated suite, and `just
-test-lab-vm` for a vmlab smoke. `docs/notes.md` records how the PRD's illustrative
+test-lab-vm` for a vmlab smoke. `weave-server` (`server/` + SolidJS
+`web-ui/`, on the sibling `../forge` stack) is the web GUI: runbook
+browsing/editing with visual playbook/package editors (DocJson pipeline
+in `src/model/{docjson,inspect_ast,emit}.rs`), a systems inventory
+(`systems.wcl`, ssh/winrm deployment of direct systems, remote systems
+via injected `system_*` vars), a package repository (`--packages-dir`),
+and live test/system runs with docker-terminal/VNC debugging.
+`docs/notes.md` records how the PRD's illustrative
 sketches were bound to the real WCL and wscript APIs, plus the testlab's
-bindings — read it before changing the vocabulary, the variable scheme,
-the host API surface, or the test protocol.
+and weave-server's bindings — read it before changing the vocabulary,
+the variable scheme, the host API surface, or the test protocol.
 
 ## Layout
 

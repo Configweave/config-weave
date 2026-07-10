@@ -145,7 +145,13 @@ impl SshTransport {
                 let mut f = tempfile::NamedTempFile::new()
                     .map_err(|e| format!("cannot write key file: {e}"))?;
                 f.write_all(k.as_bytes())
-                    .and_then(|_| if k.ends_with('\n') { Ok(()) } else { f.write_all(b"\n") })
+                    .and_then(|_| {
+                        if k.ends_with('\n') {
+                            Ok(())
+                        } else {
+                            f.write_all(b"\n")
+                        }
+                    })
                     .map_err(|e| format!("cannot write key file: {e}"))?;
                 #[cfg(unix)]
                 {
@@ -519,7 +525,10 @@ fn ps_exec_script(spec: &ExecSpec) -> String {
         exe = ps_quote(&spec.program),
     );
     match &spec.stdout_to {
-        Some(out) => format!("{body} | Out-File -Encoding utf8 {}\nexit $LASTEXITCODE", ps_quote(out)),
+        Some(out) => format!(
+            "{body} | Out-File -Encoding utf8 {}\nexit $LASTEXITCODE",
+            ps_quote(out)
+        ),
         None => format!("{body}\nexit $LASTEXITCODE"),
     }
 }
@@ -704,7 +713,10 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         drop(t);
-        assert!(!path.exists(), "tempfile key must vanish with the transport");
+        assert!(
+            !path.exists(),
+            "tempfile key must vanish with the transport"
+        );
     }
 
     #[test]

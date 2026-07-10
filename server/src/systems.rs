@@ -278,9 +278,9 @@ fn read_transport(block: &wcl_lang::Block<'_>, ctx: &str) -> Result<TransportCon
     let port = match block.fields().find(|f| f.name() == "port") {
         None => None,
         Some(f) => match f.value().map_err(|e| e.to_string())?.clone() {
-            wcl_lang::Value::I64(i) => Some(
-                u16::try_from(i).map_err(|_| format!("{ctx}: port {i} out of range"))?,
-            ),
+            wcl_lang::Value::I64(i) => {
+                Some(u16::try_from(i).map_err(|_| format!("{ctx}: port {i} out of range"))?)
+            }
             other => return Err(format!("{ctx}: port must be an integer, got {other:?}")),
         },
     };
@@ -328,7 +328,7 @@ pub fn save(path: &Path, systems: &[SystemDef]) -> Result<(), String> {
                 .map(|l| ast::Trivia::LineComment(l.to_string()))
                 .collect();
             trivia.push(ast::Trivia::BlankLine);
-            trivia.extend(b.leading_trivia.drain(..));
+            trivia.append(&mut b.leading_trivia);
             b.leading_trivia = trivia;
         }
         _ => {
@@ -369,12 +369,7 @@ fn system_block(sys: &SystemDef) -> ast::Block {
     fields.push(("os".into(), str_expr(sys.os.as_str())));
     fields.push(("arch".into(), str_expr(&sys.arch)));
 
-    let mut block = edit::build_block(
-        "system",
-        &[],
-        vec![str_expr(&sys.name)],
-        fields,
-    );
+    let mut block = edit::build_block("system", &[], vec![str_expr(&sys.name)], fields);
 
     let t = &sys.transport;
     let mut tfields: Vec<(String, ast::Expr)> = vec![("host".into(), str_expr(&t.host))];
@@ -421,7 +416,11 @@ fn validate_def(state: &SharedState, def: &SystemDef) -> Result<(), String> {
 }
 
 /// Persist the inventory, restoring `previous` in memory on failure.
-fn persist(state: &SharedState, systems: &mut Vec<SystemDef>, previous: Vec<SystemDef>) -> Option<String> {
+fn persist(
+    state: &SharedState,
+    systems: &mut Vec<SystemDef>,
+    previous: Vec<SystemDef>,
+) -> Option<String> {
     match save(&state.systems_path, systems) {
         Ok(()) => None,
         Err(e) => {
@@ -448,7 +447,10 @@ pub async fn create(
     }
     let mut systems = state.systems.lock().unwrap();
     if systems.iter().any(|s| s.name == def.name) {
-        return err(StatusCode::CONFLICT, "a system with that name already exists");
+        return err(
+            StatusCode::CONFLICT,
+            "a system with that name already exists",
+        );
     }
     let previous = systems.clone();
     systems.push(def.clone());
@@ -473,7 +475,10 @@ pub async fn update(
         return err(StatusCode::NOT_FOUND, "no such system");
     };
     if def.name != name && systems.iter().any(|s| s.name == def.name) {
-        return err(StatusCode::CONFLICT, "a system with that name already exists");
+        return err(
+            StatusCode::CONFLICT,
+            "a system with that name already exists",
+        );
     }
     let previous = systems.clone();
     systems[idx] = def.clone();

@@ -208,7 +208,10 @@ impl SysRunManager {
 /// A driver's terminal state: exit code of the run, or an error message,
 /// or cancellation.
 enum Outcome {
-    Finished { exit_code: i32, report: Option<Value> },
+    Finished {
+        exit_code: i32,
+        report: Option<Value>,
+    },
     Cancelled,
     Failed(String),
 }
@@ -304,7 +307,10 @@ fn system_var_file(sys: &SystemDef) -> String {
         "system_private_key",
         edit::string_literal_expr(t.private_key.as_deref().unwrap_or("")),
     );
-    push("system_transport", edit::string_literal_expr(t.kind.as_str()));
+    push(
+        "system_transport",
+        edit::string_literal_expr(t.kind.as_str()),
+    );
     push("system_os", edit::string_literal_expr(sys.os.as_str()));
     wclformat::to_source(&src)
 }
@@ -426,7 +432,9 @@ async fn drive_direct(run: &Arc<SysRun>, ctx: &SysRunContext) -> Outcome {
         transport.copy_file_in(binary, &exe, true).await?;
 
         deploy_phase(run, &ctx.events, &topic, "stage_playbook");
-        transport.copy_dir_in(&ctx.runbook_dir, &playbook_dest).await?;
+        transport
+            .copy_dir_in(&ctx.runbook_dir, &playbook_dest)
+            .await?;
 
         deploy_phase(run, &ctx.events, &topic, "run");
         let spec = ExecSpec {
@@ -446,7 +454,9 @@ async fn drive_direct(run: &Arc<SysRun>, ctx: &SysRunContext) -> Outcome {
         let bus = ctx.events.clone();
         let topic_line = topic.clone();
         let mut on_line = move |line: String| relay_line(&run_ref, &bus, &topic_line, &line);
-        let exec = transport.exec_stream(&spec, &mut on_line, &run.cancel).await;
+        let exec = transport
+            .exec_stream(&spec, &mut on_line, &run.cancel)
+            .await;
 
         match exec {
             Err(e) if e == "cancelled" => Ok(Outcome::Cancelled),
@@ -518,7 +528,10 @@ pub async fn create(
     let Some(dir) = runbook_dir(&state, &system.playbook) else {
         return err(
             StatusCode::CONFLICT,
-            format!("the system's runbook '{}' no longer exists", system.playbook),
+            format!(
+                "the system's runbook '{}' no longer exists",
+                system.playbook
+            ),
         );
     };
     let ctx = SysRunContext {

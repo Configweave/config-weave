@@ -34,7 +34,8 @@ pub fn render_package(base_source: &str, doc: &PackageDoc) -> Result<String, Dia
 }
 
 fn parse_base(source: &str) -> Result<Source, Diags> {
-    parse_for_edit(source, "edit.wcl").map_err(|e| vec![format!("current file does not parse: {e}")])
+    parse_for_edit(source, "edit.wcl")
+        .map_err(|e| vec![format!("current file does not parse: {e}")])
 }
 
 fn finish(src: Source) -> Result<String, Diags> {
@@ -107,8 +108,7 @@ fn sync_play_items(parent: &mut Block, docs: &[PlayItemDoc], diags: &mut Diags) 
                 ordered.push(b);
             }
             PlayItemDoc::Container(c) => {
-                let mut b =
-                    take_or_new(&mut pool, "container", c.orig.as_ref().unwrap_or(&c.name));
+                let mut b = take_or_new(&mut pool, "container", c.orig.as_ref().unwrap_or(&c.name));
                 sync_container(&mut b, c, diags);
                 ordered.push(b);
             }
@@ -332,8 +332,12 @@ fn take_singleton(pool: &mut Pool, kind: &str) -> Block {
 fn splice(items: &mut Vec<Item>, at: usize, blocks: Vec<Block>) {
     let at = at.min(items.len());
     for (offset, mut b) in blocks.into_iter().enumerate() {
-        if !b.leading_trivia.iter().any(|t| matches!(t, Trivia::BlankLine))
-            && !(at == 0 && offset == 0 && items.is_empty())
+        let very_first = at == 0 && offset == 0 && items.is_empty();
+        if !very_first
+            && !b
+                .leading_trivia
+                .iter()
+                .any(|t| matches!(t, Trivia::BlankLine))
         {
             b.leading_trivia.insert(0, Trivia::BlankLine);
         }
@@ -408,9 +412,10 @@ fn val_to_expr(v: &Val) -> Result<Expr, String> {
 /// keys/order (each surviving field keeps its trivia), drop the block
 /// when the doc has no entries.
 fn sync_kv_child(parent: &mut Block, kind: &str, kvs: &[Kv], diags: &mut Diags) {
-    let existing = parent.items.iter().position(
-        |i| matches!(i, Item::Block(b) if b.kind == kind),
-    );
+    let existing = parent
+        .items
+        .iter()
+        .position(|i| matches!(i, Item::Block(b) if b.kind == kind));
     if kvs.is_empty() {
         if let Some(i) = existing {
             parent.items.remove(i);

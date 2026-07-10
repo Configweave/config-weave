@@ -292,7 +292,9 @@ fn content_hash(content: &str) -> String {
     format!("{h:016x}")
 }
 
-/// Resolve + read the file a doc request names.
+/// Resolve + read the file a doc request names. The Err side carries a
+/// ready HTTP response; its size is fine for this cold path.
+#[allow(clippy::result_large_err)]
 fn doc_target(
     state: &SharedState,
     rb: &str,

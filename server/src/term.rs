@@ -91,7 +91,7 @@ mod tests {
     fn container_ids_are_hex_only() {
         assert!(valid_container_id(&"a1".repeat(12)));
         assert!(!valid_container_id("short"));
-        assert!(!valid_container_id(&"$(rm -rf /)aaaaaaaaaaaa"));
+        assert!(!valid_container_id("$(rm -rf /)aaaaaaaaaaaa"));
         assert!(!valid_container_id(&"g".repeat(20)));
     }
 

@@ -960,8 +960,8 @@ fn cmd_wcl_inspect() -> u8 {
         Err(e) => return docjson_fail(vec![format!("{e}")]),
     };
     let doc = match kind.as_str() {
-        "playbook" => model::inspect_ast::extract_playbook(&ast).map(|d| serde_json::to_value(d)),
-        "package" => model::inspect_ast::extract_package(&ast).map(|d| serde_json::to_value(d)),
+        "playbook" => model::inspect_ast::extract_playbook(&ast).map(serde_json::to_value),
+        "package" => model::inspect_ast::extract_package(&ast).map(serde_json::to_value),
         other => return docjson_fail(vec![format!("unknown kind '{other}'")]),
     };
     match doc {
