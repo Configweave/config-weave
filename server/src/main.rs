@@ -7,6 +7,7 @@
 //! `--json --events-ndjson` and relays the event stream to the bus.
 
 mod desktop;
+mod packages;
 mod runbooks;
 mod runs;
 mod state;
@@ -69,6 +70,10 @@ struct Args {
     /// then to `just release` artifacts found near this executable.
     #[arg(long, value_name = "KEY=PATH")]
     deploy_binary: Vec<String>,
+    /// The package repository: a folder of package dirs (each with a
+    /// package.wcl), e.g. a config-weave-pkgs checkout's pkgs/ folder.
+    #[arg(long)]
+    packages_dir: Option<PathBuf>,
     /// Serve the frontend from a directory instead of the embedded build
     /// (dev: point at web-ui/dist while iterating, or use `pnpm dev`).
     #[arg(long)]
@@ -201,6 +206,19 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let packages_dir = match &args.packages_dir {
+        None => None,
+        Some(d) => match d.canonicalize() {
+            Ok(c) if c.is_dir() => Some(c),
+            _ => {
+                eprintln!(
+                    "weave-server: --packages-dir {} is not a directory",
+                    d.display()
+                );
+                return ExitCode::from(2);
+            }
+        },
+    };
 
     let state: SharedState = Arc::new(ServerState {
         root: root.clone(),
@@ -213,6 +231,8 @@ async fn main() -> ExitCode {
         systems: std::sync::Mutex::new(loaded_systems),
         deploy_binaries: deploy,
         sysruns: sysruns::SysRunManager::default(),
+        packages_dir,
+        pkg_wrapper: packages::WrapperCache::default(),
     });
 
     app = app
@@ -233,9 +253,17 @@ async fn main() -> ExitCode {
         .route("/api/system-runs", get(sysruns::list))
         .route("/api/system-runs/{id}", get(sysruns::get))
         .route("/api/system-runs/{id}/cancel", post(sysruns::cancel))
+        .route("/api/packages", get(packages::list))
+        .route("/api/packages/{name}", get(packages::detail))
+        .route(
+            "/api/packages/{name}/add-to-runbook",
+            post(packages::add_to_runbook),
+        )
+        .route("/api/packages/{name}/test", post(packages::run_tests))
         .route("/api/runs", get(runs::list).post(runs::create))
         .route("/api/runs/{id}", get(runs::get))
         .route("/api/runs/{id}/cancel", post(runs::cancel))
+        .route("/api/runs/{id}/teardown", post(runs::teardown))
         .route("/api/term/docker/{container}", get(term::docker_term))
         .route("/api/desktop/vnc/{run}/{machine}", get(desktop::vnc));
 

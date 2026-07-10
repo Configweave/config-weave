@@ -31,6 +31,10 @@ pub struct ServerState {
     /// `linux-x86_64`, `windows-x86_64`), for direct-system runs.
     pub deploy_binaries: HashMap<String, PathBuf>,
     pub sysruns: SysRunManager,
+    /// The package repository (`--packages-dir`): a folder of package
+    /// dirs, each with a package.wcl. None = feature hidden.
+    pub packages_dir: Option<PathBuf>,
+    pub pkg_wrapper: crate::packages::WrapperCache,
 }
 
 pub type SharedState = Arc<ServerState>;

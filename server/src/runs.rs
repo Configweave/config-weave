@@ -111,6 +111,8 @@ impl Run {
             "filter": self.request.filter,
             "status": inner.status,
             "exit_code": inner.exit_code,
+            // Live (not torn down) instances — kept ones show a badge.
+            "kept_alive": inner.instances.iter().filter(|i| !i.torn_down).count(),
         })
     }
 
@@ -444,6 +446,27 @@ pub async fn cancel(
         }
         None => err(StatusCode::NOT_FOUND, "no such run"),
     }
+}
+
+/// POST /api/runs/{id}/teardown — remove a finished run's kept (or
+/// orphaned) instances on demand: the debug flow's cleanup button.
+pub async fn teardown(
+    Extension(state): Extension<SharedState>,
+    UrlPath(id): UrlPath<String>,
+    _claims: RequireClaims,
+) -> Response {
+    let Some(run) = state.runs.get(&id) else {
+        return err(StatusCode::NOT_FOUND, "no such run");
+    };
+    if run.status() == RunStatus::Running {
+        return err(StatusCode::CONFLICT, "run is still running");
+    }
+    cleanup_instances(&run).await;
+    // Nudge any open RunView so the troubleshoot tabs disappear live.
+    let event = json!({ "event": "instances_torn_down" });
+    push_event(&run, event.clone());
+    state.events.publish(&format!("run:{id}"), event);
+    ok(run.snapshot())
 }
 
 /// Remove instances the killed child left behind: `docker rm -f` for

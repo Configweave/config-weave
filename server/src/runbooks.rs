@@ -199,7 +199,7 @@ pub async fn file_put(
 
 /// Shell out to the config-weave CLI with `--json` and hand back its
 /// stdout object (exit codes 0 and 2 both carry a valid JSON body).
-async fn cli_json(state: &SharedState, args: &[&str]) -> Result<Value, String> {
+pub(crate) async fn cli_json(state: &SharedState, args: &[&str]) -> Result<Value, String> {
     let out = tokio::process::Command::new(&state.config_weave)
         .args(args)
         .output()

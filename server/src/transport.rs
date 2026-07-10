@@ -615,8 +615,9 @@ async fn stream_child(
 }
 
 /// Recursive copy skipping EXCLUDED_DIRS and dotdirs, dereferencing
-/// nothing exotic (symlinked files copy as their content).
-fn copy_dir_filtered(src: &Path, dest: &Path) -> std::io::Result<()> {
+/// nothing exotic (symlinked files copy as their content). Also used by
+/// the package repository's add-to-runbook copy.
+pub(crate) fn copy_dir_filtered(src: &Path, dest: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
