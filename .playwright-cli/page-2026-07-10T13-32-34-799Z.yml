@@ -1,0 +1,63 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - strong [ref=e6]: config-weave
+      - generic [ref=e42]: systems
+  - navigation [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9] [cursor=pointer]:
+        - img [ref=e10]
+        - text: Runbooks
+      - generic [ref=e12] [cursor=pointer]: sample
+    - generic [ref=e13]:
+      - generic [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+        - text: Systems
+      - generic [ref=e20] [cursor=pointer]: edge-router · check
+      - generic [ref=e23] [cursor=pointer]: edge-router · check
+      - generic [ref=e26] [cursor=pointer]: edge-router · check
+    - generic [ref=e44] [cursor=pointer]:
+      - img [ref=e45]
+      - text: Packages
+    - generic [ref=e28]:
+      - img [ref=e29]
+      - text: Runs
+  - main [ref=e31]:
+    - generic [ref=e49]:
+      - generic [ref=e50]:
+        - heading "Systems" [level=1] [ref=e51]
+        - generic [ref=e52]: Machines this server applies configuration to (systems.wcl)
+      - button "Add system" [ref=e54] [cursor=pointer]:
+        - img [ref=e55]
+        - text: Add system
+    - table [ref=e59]:
+      - rowgroup [ref=e60]:
+        - row "System Playbook Kind Target Transport" [ref=e61]:
+          - columnheader "System" [ref=e62]
+          - columnheader "Playbook" [ref=e63]
+          - columnheader "Kind" [ref=e64]
+          - columnheader "Target" [ref=e65]
+          - columnheader "Transport" [ref=e66]
+          - columnheader [ref=e67]
+      - rowgroup [ref=e68]:
+        - row "edge-router test remote system sample:baseline remote linux/x86_64 ssh admin@10.0.0.1 Check Apply" [ref=e69] [cursor=pointer]:
+          - cell "edge-router test remote system" [ref=e70]:
+            - generic [ref=e71]: edge-router
+            - generic [ref=e72]: test remote system
+          - cell "sample:baseline" [ref=e73]
+          - cell "remote" [ref=e74]:
+            - generic [ref=e75]: remote
+          - cell "linux/x86_64" [ref=e76]
+          - cell "ssh admin@10.0.0.1" [ref=e77]
+          - cell "Check Apply" [ref=e78]:
+            - generic [ref=e79]:
+              - button "Check" [ref=e80]:
+                - img [ref=e81]
+                - text: Check
+              - button "Apply" [ref=e84]:
+                - img [ref=e85]
+                - text: Apply
+              - button [ref=e87]:
+                - img [ref=e88]
+              - button [ref=e91]:
+                - img [ref=e92]

@@ -4,7 +4,7 @@
 // systems), a raw log, and the final JsonRunReport.
 
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import { createStore, produce } from "solid-js/store";
+import { createStore, produce, reconcile } from "solid-js/store";
 import {
   Badge,
   Button,
@@ -136,6 +136,18 @@ export default function SystemRunView(props: { id: string; system: string; actio
     }
   };
 
+  /// Rebuild everything from the snapshot's event buffer (the SSE
+  /// stream has no replay, so missed events are recovered here).
+  const seed = (snap: Awaited<ReturnType<typeof getSystemRun>>) => {
+    setSteps(reconcile([]));
+    setLogs(reconcile([]));
+    setError(null);
+    if (snap.kind === "direct") setIsDirect(true);
+    for (const e of snap.events) apply(e);
+    setStatus(snap.status);
+    setReport(snap.report);
+  };
+
   onMount(async () => {
     const pending: any[] = [];
     let replaying = true;
@@ -145,17 +157,35 @@ export default function SystemRunView(props: { id: string; system: string; actio
     });
     onCleanup(unsub);
 
+    // Events published before the EventSource finishes connecting are
+    // gone (SSE has no replay), so live state can miss the head or the
+    // tail of a fast run. The buffer snapshot is authoritative: seed
+    // from it now, and keep polling until one final reseed of a
+    // *finished* run has happened.
+    let sealed = false;
     try {
       const snap = await getSystemRun(props.id);
-      if (snap.kind === "direct") setIsDirect(true);
-      for (const e of snap.events) apply(e);
-      setStatus(snap.status);
-      setReport(snap.report);
+      seed(snap);
+      sealed = snap.status !== "running";
     } catch (e: any) {
       toast(e?.message ?? "cannot load the run", { tone: "danger" });
     }
     replaying = false;
     for (const e of pending) apply(e);
+
+    const timer = setInterval(async () => {
+      if (sealed) return;
+      try {
+        const snap = await getSystemRun(props.id);
+        if (snap.status !== "running") {
+          sealed = true;
+          seed(snap);
+        }
+      } catch {
+        /* transient */
+      }
+    }, 1200);
+    onCleanup(() => clearInterval(timer));
   });
 
   const cancel = async () => {

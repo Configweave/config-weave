@@ -121,6 +121,178 @@ export const validateRunbook = (rb: string) =>
 export const runbookInventory = (rb: string) =>
   api.request<Inventory>("GET", `/api/runbooks/${encodeURIComponent(rb)}/inventory`);
 
+// --- graphical editors (DocJson) --------------------------------------------
+
+export type Val = { lit: any } | { expr: string };
+export interface Kv {
+  key: string;
+  value: Val;
+}
+
+export interface StepDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  resource: string;
+  condition?: string;
+  requires: string[];
+  concurrency?: string;
+  properties: Kv[];
+}
+
+export interface ContainerDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  condition?: string;
+  items: PlayItemDoc[];
+}
+
+export type PlayItemDoc = { step: StepDoc } | { container: ContainerDoc };
+
+export interface PlayDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  parallel?: boolean;
+  items: PlayItemDoc[];
+}
+
+export interface GatherDoc {
+  name: string;
+  _orig?: string;
+  description?: string;
+  from: string;
+  params: Kv[];
+}
+
+export interface PlaybookDoc {
+  name: string;
+  description: string;
+  version?: string;
+  gathers: GatherDoc[];
+  vars: Kv[];
+  plays: PlayDoc[];
+}
+
+export interface ParamDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  type: string;
+  required?: boolean;
+  default?: Val;
+}
+
+export interface ResourceDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  script: string;
+  concurrency?: string;
+  params: ParamDoc[];
+}
+
+export interface GathererDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  script: string;
+  params: ParamDoc[];
+}
+
+export interface TestStepDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  resource: string;
+  expect?: string;
+  condition?: string;
+  requires: string[];
+  properties: Kv[];
+}
+
+export interface TestGatherDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  from: string;
+  params: Kv[];
+  expect: Kv[];
+}
+
+export interface TestDocEd {
+  name: string;
+  _orig?: string;
+  description: string;
+  backend?: string;
+  image: string;
+  group?: string;
+  setup?: string;
+  verify?: string;
+  steps: TestStepDoc[];
+  gathers: TestGatherDoc[];
+}
+
+export interface ScenarioDoc {
+  name: string;
+  _orig?: string;
+  description: string;
+  lab: string;
+  script: string;
+}
+
+export interface PackageDoc {
+  name: string;
+  description: string;
+  gatherers: GathererDoc[];
+  resources: ResourceDoc[];
+  tests: TestDocEd[];
+  scenarios: ScenarioDoc[];
+}
+
+export interface DocParseResult {
+  ok: boolean;
+  kind?: "playbook" | "package";
+  doc?: PlaybookDoc | PackageDoc;
+  diags?: string[];
+  base_hash?: string;
+}
+
+export interface DocRenderResult {
+  ok: boolean;
+  source?: string;
+  diags?: string[];
+}
+
+export interface DocSaveResult {
+  ok: boolean;
+  path?: string;
+  content?: string;
+  base_hash?: string;
+  diags?: string[];
+}
+
+export const docParse = (rb: string, path: string, content?: string) =>
+  api.request<DocParseResult>("POST", `/api/runbooks/${encodeURIComponent(rb)}/doc/parse`, {
+    path,
+    content,
+  });
+export const docRender = (rb: string, path: string, doc: any, base_content?: string) =>
+  api.request<DocRenderResult>("POST", `/api/runbooks/${encodeURIComponent(rb)}/doc/render`, {
+    path,
+    doc,
+    base_content,
+  });
+export const docSave = (rb: string, path: string, doc: any, base_hash?: string) =>
+  api.request<DocSaveResult>("PUT", `/api/runbooks/${encodeURIComponent(rb)}/doc`, {
+    path,
+    doc,
+    base_hash,
+  });
+export const getTemplates = () =>
+  api.request<Record<string, string>>("GET", "/api/templates");
+
 // --- systems ---------------------------------------------------------------
 
 export interface TransportConfig {

@@ -1,0 +1,331 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - strong [ref=e6]: config-weave
+        - generic [ref=e31]:
+          - generic [ref=e32]: runbooks
+          - generic [ref=e33]: /
+          - generic [ref=e34]: sample
+    - navigation [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9] [cursor=pointer]:
+          - img [ref=e10]
+          - text: Runbooks
+        - generic [ref=e35] [cursor=pointer]: sample
+      - generic [ref=e13] [cursor=pointer]:
+        - img [ref=e14]
+        - text: Systems
+      - generic [ref=e37] [cursor=pointer]:
+        - img [ref=e38]
+        - text: Packages
+      - generic [ref=e18]:
+        - img [ref=e19]
+        - text: Runs
+    - main [ref=e21]:
+      - generic [ref=e42]:
+        - generic [ref=e43]:
+          - heading "sample" [level=1] [ref=e44]
+          - generic [ref=e45]: Exercises the model loader, validation and execution
+        - generic [ref=e47]:
+          - button "Validate" [ref=e48] [cursor=pointer]
+          - button "Run all tests" [ref=e49] [cursor=pointer]:
+            - img [ref=e50]
+            - text: Run all tests
+      - generic [ref=e52]:
+        - generic [ref=e54]:
+          - button "lib" [ref=e56] [cursor=pointer]:
+            - img [ref=e57]
+            - text: lib
+          - generic [ref=e59]:
+            - button "pkgs" [ref=e60] [cursor=pointer]:
+              - img [ref=e61]
+              - text: pkgs
+            - generic [ref=e64]:
+              - button "core" [ref=e65] [cursor=pointer]:
+                - img [ref=e66]
+                - text: core
+              - generic [ref=e68]:
+                - generic [ref=e69]:
+                  - button "gatherers" [ref=e70] [cursor=pointer]:
+                    - img [ref=e71]
+                    - text: gatherers
+                  - button "os_info.wscript" [ref=e74] [cursor=pointer]:
+                    - img [ref=e75]
+                    - text: os_info.wscript
+                - generic [ref=e78]:
+                  - button "resources" [ref=e79] [cursor=pointer]:
+                    - img [ref=e80]
+                    - text: resources
+                  - button "file_present.wscript" [ref=e83] [cursor=pointer]:
+                    - img [ref=e84]
+                    - text: file_present.wscript
+                - generic [ref=e87]:
+                  - button "tests" [ref=e88] [cursor=pointer]:
+                    - img [ref=e89]
+                    - text: tests
+                  - button "file_present_verify.wscript" [ref=e92] [cursor=pointer]:
+                    - img [ref=e93]
+                    - text: file_present_verify.wscript
+                - button "package.wcl" [ref=e96] [cursor=pointer]:
+                  - img [ref=e97]
+                  - text: package.wcl
+          - button "playbook.wcl" [ref=e100] [cursor=pointer]:
+            - img [ref=e101]
+            - text: playbook.wcl
+        - separator [ref=e104]
+        - generic [ref=e106]:
+          - tablist [ref=e139]:
+            - tab "playbook.wcl" [selected] [ref=e417] [cursor=pointer]
+          - radiogroup [ref=e142]:
+            - radio "Visual" [checked] [ref=e143] [cursor=pointer]
+            - radio "Source" [ref=e144] [cursor=pointer]
+          - generic [ref=e146]:
+            - generic [ref=e147]:
+              - generic [ref=e148]: Playbook
+              - generic [ref=e149]:
+                - generic [ref=e150]:
+                  - generic [ref=e151]: Name
+                  - textbox "Name" [ref=e153]: Sample Baseline
+                - generic [ref=e154]:
+                  - generic [ref=e155]: Version
+                  - textbox "Version" [ref=e157]: 1.0.0
+              - generic [ref=e158]:
+                - generic [ref=e159]: Description
+                - textbox "Description" [ref=e161]: 2.0.0
+            - generic [ref=e162]:
+              - generic [ref=e163]:
+                - text: Gathers
+                - button "Add gather" [ref=e164] [cursor=pointer]:
+                  - img [ref=e165]
+                  - text: Add gather
+              - generic [ref=e166]:
+                - generic [ref=e167]:
+                  - generic [ref=e168]:
+                    - generic [ref=e169]: Variable
+                    - textbox "Variable" [ref=e171]: os
+                  - generic [ref=e172]:
+                    - generic [ref=e173]: Gatherer
+                    - button "core.os_info" [ref=e175] [cursor=pointer]:
+                      - generic [ref=e176]: core.os_info
+                      - img [ref=e177]
+                  - button [ref=e180] [cursor=pointer]:
+                    - img [ref=e181]
+                - button "Add entry" [ref=e185] [cursor=pointer]:
+                  - img [ref=e186]
+                  - text: Add entry
+            - generic [ref=e187]:
+              - generic [ref=e188]: Vars
+              - generic [ref=e189]:
+                - generic [ref=e190]:
+                  - textbox [ref=e193]:
+                    - /placeholder: variable
+                    - text: work_root
+                  - generic [ref=e194]: =
+                  - textbox [ref=e198]:
+                    - /placeholder: WCL expression
+                  - button [ref=e199] [cursor=pointer]:
+                    - img [ref=e200]
+                - generic [ref=e203]:
+                  - textbox [ref=e206]:
+                    - /placeholder: variable
+                    - text: is_linux
+                  - generic [ref=e207]: =
+                  - textbox [ref=e211]:
+                    - /placeholder: WCL expression
+                    - text: os.family == "linux"
+                  - button [ref=e212] [cursor=pointer]:
+                    - img [ref=e213]
+                - generic [ref=e216]:
+                  - textbox [ref=e219]:
+                    - /placeholder: variable
+                    - text: marker_a
+                  - generic [ref=e220]: =
+                  - textbox [ref=e224]:
+                    - /placeholder: WCL expression
+                    - text: "$\"${work_root}/a.txt\""
+                  - button [ref=e225] [cursor=pointer]:
+                    - img [ref=e226]
+                - generic [ref=e229]:
+                  - textbox [ref=e232]:
+                    - /placeholder: variable
+                    - text: marker_b
+                  - generic [ref=e233]: =
+                  - textbox [ref=e237]:
+                    - /placeholder: WCL expression
+                    - text: "$\"${work_root}/b.txt\""
+                  - button [ref=e238] [cursor=pointer]:
+                    - img [ref=e239]
+                - button "Add entry" [ref=e242] [cursor=pointer]:
+                  - img [ref=e243]
+                  - text: Add entry
+            - generic [ref=e244]:
+              - generic [ref=e245]:
+                - text: Plays
+                - button "Add play" [ref=e246] [cursor=pointer]:
+                  - img [ref=e247]
+                  - text: Add play
+              - generic [ref=e248]:
+                - generic [ref=e249] [cursor=pointer]:
+                  - img [ref=e250]
+                  - generic [ref=e252]: play
+                  - generic [ref=e253]: baseline
+                  - generic [ref=e254]: Create marker files in order
+                  - button [ref=e255]:
+                    - img [ref=e256]
+                - generic [ref=e259]:
+                  - generic [ref=e260]:
+                    - generic [ref=e261]:
+                      - generic [ref=e262]: Name
+                      - textbox "Name" [ref=e264]: baseline
+                    - generic [ref=e265]:
+                      - generic [ref=e266]: Description
+                      - textbox "Description" [ref=e268]: Create marker files in order
+                    - generic [ref=e269]:
+                      - generic [ref=e270]: Parallel (default on)
+                      - generic [ref=e271] [cursor=pointer]:
+                        - switch "Parallel (default on)" [checked]
+                  - generic [ref=e274]:
+                    - generic [ref=e275]:
+                      - generic [ref=e276]:
+                        - button [ref=e277] [cursor=pointer]:
+                          - img [ref=e278]
+                        - button [ref=e280] [cursor=pointer]:
+                          - img [ref=e281]
+                      - generic [ref=e285] [cursor=pointer]:
+                        - img [ref=e286]
+                        - generic [ref=e288]: step
+                        - generic [ref=e289]: make-a
+                        - generic [ref=e290]: core.file_present
+                        - button [ref=e291]:
+                          - img [ref=e292]
+                    - generic [ref=e295]:
+                      - generic [ref=e296]:
+                        - button [ref=e297] [cursor=pointer]:
+                          - img [ref=e298]
+                        - button [ref=e300] [cursor=pointer]:
+                          - img [ref=e301]
+                      - generic [ref=e304]:
+                        - generic [ref=e305] [cursor=pointer]:
+                          - img [ref=e306]
+                          - generic [ref=e308]: container
+                          - generic [ref=e309]: secondary
+                          - generic [ref=e310]: Files that depend on the first
+                          - button [ref=e311]:
+                            - img [ref=e312]
+                        - generic [ref=e315]:
+                          - generic [ref=e316]:
+                            - generic [ref=e317]:
+                              - generic [ref=e318]: Name
+                              - textbox "Name" [ref=e320]: secondary
+                            - generic [ref=e321]:
+                              - generic [ref=e322]: Description
+                              - textbox "Description" [ref=e324]: Files that depend on the first
+                          - generic [ref=e325]:
+                            - generic [ref=e326]: Condition (applies to all children)
+                            - textbox "Condition (applies to all children)" [ref=e328]
+                          - generic [ref=e329]:
+                            - generic [ref=e330]:
+                              - generic [ref=e331]:
+                                - button [ref=e332] [cursor=pointer]:
+                                  - img [ref=e333]
+                                - button [ref=e335] [cursor=pointer]:
+                                  - img [ref=e336]
+                              - generic [ref=e340] [cursor=pointer]:
+                                - img [ref=e341]
+                                - generic [ref=e343]: step
+                                - generic [ref=e344]: make-b
+                                - generic [ref=e345]: core.file_present
+                                - button [ref=e346]:
+                                  - img [ref=e347]
+                            - generic [ref=e350]:
+                              - button "Add step" [ref=e351] [cursor=pointer]:
+                                - img [ref=e352]
+                                - text: Add step
+                              - button "Add container" [ref=e353] [cursor=pointer]:
+                                - img [ref=e354]
+                                - text: Add container
+                    - generic [ref=e355]:
+                      - button "Add step" [ref=e356] [cursor=pointer]:
+                        - img [ref=e357]
+                        - text: Add step
+                      - button "Add container" [ref=e358] [cursor=pointer]:
+                        - img [ref=e359]
+                        - text: Add container
+              - generic [ref=e360]:
+                - generic [ref=e361] [cursor=pointer]:
+                  - img [ref=e362]
+                  - generic [ref=e364]: play
+                  - generic [ref=e365]: noop
+                  - generic [ref=e366]: A play with nothing to do
+                  - button [ref=e367]:
+                    - img [ref=e368]
+                - generic [ref=e371]:
+                  - generic [ref=e372]:
+                    - generic [ref=e373]:
+                      - generic [ref=e374]: Name
+                      - textbox "Name" [ref=e376]: noop
+                    - generic [ref=e377]:
+                      - generic [ref=e378]: Description
+                      - textbox "Description" [ref=e380]: A play with nothing to do
+                    - generic [ref=e381]:
+                      - generic [ref=e382]: Parallel (default on)
+                      - generic [ref=e383] [cursor=pointer]:
+                        - switch "Parallel (default on)" [checked]
+                  - generic [ref=e386]:
+                    - generic [ref=e387]:
+                      - generic [ref=e388]:
+                        - button [ref=e389] [cursor=pointer]:
+                          - img [ref=e390]
+                        - button [ref=e392] [cursor=pointer]:
+                          - img [ref=e393]
+                      - generic [ref=e397] [cursor=pointer]:
+                        - img [ref=e398]
+                        - generic [ref=e400]: step
+                        - generic [ref=e401]: skipped-on-purpose
+                        - generic [ref=e402]: core.file_present
+                        - button [ref=e403]:
+                          - img [ref=e404]
+                    - generic [ref=e407]:
+                      - button "Add step" [ref=e408] [cursor=pointer]:
+                        - img [ref=e409]
+                        - text: Add step
+                      - button "Add container" [ref=e410] [cursor=pointer]:
+                        - img [ref=e411]
+                        - text: Add container
+          - generic [ref=e412]:
+            - generic [ref=e413]: playbook.wcl
+            - button "Close" [ref=e414] [cursor=pointer]
+            - button "Save" [disabled] [ref=e415]
+      - generic [ref=e110]:
+        - generic [ref=e111]:
+          - heading "Tests" [level=3] [ref=e112]
+          - generic [ref=e113] [cursor=pointer]:
+            - checkbox "keep instances (post-mortem)"
+            - generic [ref=e114]:
+              - img [ref=e115]
+              - img [ref=e117]
+            - generic [ref=e118]: keep instances (post-mortem)
+        - generic [ref=e120]:
+          - generic [ref=e121]:
+            - strong [ref=e122]: core
+            - generic [ref=e123]: Core sample package
+            - button "Run package" [ref=e124] [cursor=pointer]
+          - generic [ref=e125]:
+            - generic [ref=e126]: file_present_converges
+            - generic [ref=e127]: docker
+            - generic [ref=e128]: debian:12
+            - button "Run" [ref=e129] [cursor=pointer]:
+              - img [ref=e130]
+              - text: Run
+          - generic [ref=e132]:
+            - generic [ref=e133]: file_present_rejects_bad_path
+            - generic [ref=e134]: docker
+            - generic [ref=e135]: debian:12
+            - button "Run" [ref=e136] [cursor=pointer]:
+              - img [ref=e137]
+              - text: Run
+  - status [ref=e418]:
+    - generic [ref=e419]: saved playbook.wcl (canonical formatting applied)
+    - button "Dismiss" [ref=e420] [cursor=pointer]:
+      - img [ref=e421]

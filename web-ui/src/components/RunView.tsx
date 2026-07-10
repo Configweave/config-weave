@@ -134,6 +134,18 @@ export default function RunView(props: { id: string; runbook: string }) {
     }
   };
 
+  /// Rebuild everything from the snapshot's event buffer (the SSE
+  /// stream has no replay, so missed events are recovered here).
+  const seed = (snap: Awaited<ReturnType<typeof getRun>>) => {
+    setTests(reconcile({}));
+    setLogs(reconcile([]));
+    setInstances(reconcile([]));
+    for (const e of snap.events) apply(e);
+    setStatus(snap.status);
+    setReport(snap.report);
+    setInstances(reconcile(snap.instances));
+  };
+
   onMount(async () => {
     // Subscribe first, buffering, so nothing falls between the snapshot
     // and the live stream; the buffer replays after the snapshot.
@@ -145,16 +157,35 @@ export default function RunView(props: { id: string; runbook: string }) {
     });
     onCleanup(unsub);
 
+    // Events published before the EventSource finishes connecting are
+    // gone (SSE has no replay), so live state can miss the head or the
+    // tail of a fast run. The buffer snapshot is authoritative: seed
+    // from it now, and keep polling until one final reseed of a
+    // *finished* run has happened.
+    let sealed = false;
     try {
       const snap = await getRun(props.id);
-      for (const e of snap.events) apply(e);
-      setStatus(snap.status);
-      setReport(snap.report);
+      seed(snap);
+      sealed = snap.status !== "running";
     } catch (e: any) {
       toast(e?.message ?? "cannot load the run", { tone: "danger" });
     }
     replaying = false;
     for (const e of pending) apply(e);
+
+    const timer = setInterval(async () => {
+      if (sealed) return;
+      try {
+        const snap = await getRun(props.id);
+        if (snap.status !== "running") {
+          sealed = true;
+          seed(snap);
+        }
+      } catch {
+        /* transient */
+      }
+    }, 1200);
+    onCleanup(() => clearInterval(timer));
   });
 
   const cancel = async () => {

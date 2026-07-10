@@ -1,0 +1,59 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - strong [ref=e6]: config-weave
+      - generic [ref=e32]: systems
+  - navigation [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9] [cursor=pointer]:
+        - img [ref=e10]
+        - text: Runbooks
+      - generic [ref=e35] [cursor=pointer]: sample
+    - generic [ref=e13] [cursor=pointer]:
+      - img [ref=e14]
+      - text: Systems
+    - generic [ref=e37] [cursor=pointer]:
+      - img [ref=e38]
+      - text: Packages
+    - generic [ref=e18]:
+      - img [ref=e19]
+      - text: Runs
+  - main [ref=e21]:
+    - generic [ref=e1016]:
+      - generic [ref=e1017]:
+        - heading "Systems" [level=1] [ref=e1018]
+        - generic [ref=e1019]: Machines this server applies configuration to (systems.wcl)
+      - button "Add system" [ref=e1021] [cursor=pointer]:
+        - img [ref=e1022]
+        - text: Add system
+    - table [ref=e1026]:
+      - rowgroup [ref=e1027]:
+        - row "System Playbook Kind Target Transport" [ref=e1028]:
+          - columnheader "System" [ref=e1029]
+          - columnheader "Playbook" [ref=e1030]
+          - columnheader "Kind" [ref=e1031]
+          - columnheader "Target" [ref=e1032]
+          - columnheader "Transport" [ref=e1033]
+          - columnheader [ref=e1034]
+      - rowgroup [ref=e1035]:
+        - row "edge-router test remote system sample:baseline remote linux/x86_64 ssh admin@10.0.0.1 Check Apply" [ref=e1036] [cursor=pointer]:
+          - cell "edge-router test remote system" [ref=e1037]:
+            - generic [ref=e1038]: edge-router
+            - generic [ref=e1039]: test remote system
+          - cell "sample:baseline" [ref=e1040]
+          - cell "remote" [ref=e1041]:
+            - generic [ref=e1042]: remote
+          - cell "linux/x86_64" [ref=e1043]
+          - cell "ssh admin@10.0.0.1" [ref=e1044]
+          - cell "Check Apply" [ref=e1045]:
+            - generic [ref=e1046]:
+              - button "Check" [ref=e1047]:
+                - img [ref=e1048]
+                - text: Check
+              - button "Apply" [ref=e1051]:
+                - img [ref=e1052]
+                - text: Apply
+              - button [ref=e1054]:
+                - img [ref=e1055]
+              - button [ref=e1058]:
+                - img [ref=e1059]
