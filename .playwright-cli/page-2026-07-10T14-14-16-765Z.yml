@@ -1,0 +1,84 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - strong [ref=e6]: config-weave
+      - generic [ref=e346]:
+        - generic [ref=e347]: runbooks
+        - generic [ref=e348]: /
+        - generic [ref=e349]: sample
+  - navigation [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9] [cursor=pointer]:
+        - img [ref=e10]
+        - text: Runbooks
+      - generic [ref=e12] [cursor=pointer]: sample
+    - generic [ref=e14] [cursor=pointer]:
+      - img [ref=e15]
+      - text: Systems
+    - generic [ref=e19] [cursor=pointer]:
+      - img [ref=e20]
+      - text: Packages
+    - generic [ref=e25]:
+      - img [ref=e26]
+      - text: Runs
+  - main [ref=e28]:
+    - generic [ref=e350]:
+      - generic [ref=e351]:
+        - heading "sample" [level=1] [ref=e352]
+        - generic [ref=e353]: Exercises the model loader, validation and execution
+      - generic [ref=e355]:
+        - button "Validate" [ref=e356] [cursor=pointer]
+        - button "Run all tests" [ref=e357] [cursor=pointer]:
+          - img [ref=e358]
+          - text: Run all tests
+    - generic [ref=e360]:
+      - generic [ref=e362]:
+        - button "lib" [ref=e364] [cursor=pointer]:
+          - img [ref=e365]
+          - text: lib
+        - button "playbook.wcl" [ref=e367] [cursor=pointer]:
+          - img [ref=e368]
+          - text: playbook.wcl
+      - separator [ref=e371]
+      - generic [ref=e374]:
+        - heading "No file open" [level=3] [ref=e375]
+        - paragraph [ref=e376]: Pick a file from the tree.
+    - generic [ref=e377]:
+      - heading "Installed packages" [level=3] [ref=e379]
+      - generic [ref=e381]:
+        - generic [ref=e382]: core
+        - generic [ref=e383]: Core sample package
+        - button "Edit" [ref=e384] [cursor=pointer]:
+          - img [ref=e385]
+          - text: Edit
+        - button "Remove" [ref=e388] [cursor=pointer]:
+          - img [ref=e389]
+          - text: Remove
+    - generic [ref=e392]:
+      - generic [ref=e393]:
+        - heading "Tests" [level=3] [ref=e394]
+        - generic [ref=e395] [cursor=pointer]:
+          - checkbox "keep instances (post-mortem)"
+          - generic [ref=e396]:
+            - img [ref=e397]
+            - img [ref=e399]
+          - generic [ref=e400]: keep instances (post-mortem)
+      - generic [ref=e402]:
+        - generic [ref=e403]:
+          - strong [ref=e404]: core
+          - generic [ref=e405]: Core sample package
+          - button "Run package" [ref=e406] [cursor=pointer]
+        - generic [ref=e407]:
+          - generic [ref=e408]: file_present_converges
+          - generic [ref=e409]: docker
+          - generic [ref=e410]: debian:12
+          - button "Run" [ref=e411] [cursor=pointer]:
+            - img [ref=e412]
+            - text: Run
+        - generic [ref=e414]:
+          - generic [ref=e415]: file_present_rejects_bad_path
+          - generic [ref=e416]: docker
+          - generic [ref=e417]: debian:12
+          - button "Run" [ref=e418] [cursor=pointer]:
+            - img [ref=e419]
+            - text: Run

@@ -351,6 +351,19 @@ weave-server).
   escapes). Debug-a-test = a kept single-test run; kept instances stay
   attachable after completion and `POST /api/runs/{id}/teardown` reuses
   the orphan cleanup to destroy them on demand.
+- **Packages are the editing hub.** The runbook file tree hides `pkgs/`
+  (client-side only — paths stay reachable by the file API); runbooks
+  show an installed-packages card instead, and `DELETE
+  /api/runbooks/{rb}/packages/{name}` is add-to-runbook's inverse
+  (symlinked entries refused before `remove_dir_all`). The package
+  editor page serves two sources through one `WorkspaceScope`
+  abstraction: repo packages edit **in place** via
+  `/api/packages/{name}/{tree,file,doc/*}` (same handler guts as the
+  runbook routes, resolved against the packages dir; the wrapper cache
+  self-invalidates on the manifest mtime), and runbook copies ride the
+  existing runbook endpoints re-rooted at `pkgs/<name>`
+  (`prefixedScope` — no extra server surface). The Packages section is
+  always visible; unconfigured just means a hint instead of a list.
 - **Graphical editors (DocJson).** playbook.wcl / package.wcl get a
   Visual mode: `__wcl-inspect` extracts a structural doc from the
   `parse_for_edit` AST (every leaf `{lit}` or `{expr: "source"}`;

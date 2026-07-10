@@ -5,7 +5,7 @@ import { For, Show, createResource, onCleanup } from "solid-js";
 import { Badge, NavLink, NavSection, StatusDot } from "@forge/ui";
 import type { StatusTone } from "@forge/ui";
 import { BookOpen, FlaskConical, PackageOpen, Server } from "lucide-solid";
-import { listPackages, listRunbooks, listRuns, listSystemRuns } from "../api";
+import { listRunbooks, listRuns, listSystemRuns } from "../api";
 import { setView, view } from "../store";
 
 const RUN_TONE: Record<string, StatusTone> = {
@@ -22,8 +22,6 @@ export default function Sidebar() {
   const [runbooks] = createResource(listRunbooks);
   const [runs, { refetch }] = createResource(listRuns);
   const [sysRuns, { refetch: refetchSys }] = createResource(listSystemRuns);
-  // 404 = no --packages-dir configured → hide the section entirely.
-  const [repo] = createResource(() => listPackages().catch(() => null));
   const timer = setInterval(() => {
     if ((runs() ?? []).some((r) => r.status === "running") || view().kind === "run") refetch();
     if ((sysRuns() ?? []).some((r) => r.status === "running") || view().kind === "sysrun")
@@ -78,17 +76,15 @@ export default function Sidebar() {
           )}
         </For>
       </NavSection>
-      <Show when={repo()}>
-        <NavSection>
-          <NavLink
-            icon={PackageOpen}
-            active={view().kind === "packages" || view().kind === "package"}
-            onClick={() => setView({ kind: "packages" })}
-          >
-            Packages
-          </NavLink>
-        </NavSection>
-      </Show>
+      <NavSection>
+        <NavLink
+          icon={PackageOpen}
+          active={view().kind === "packages" || view().kind === "package"}
+          onClick={() => setView({ kind: "packages" })}
+        >
+          Packages
+        </NavLink>
+      </NavSection>
       <NavSection>
         <div class="sidebar-heading">
           <FlaskConical size={14} /> Runs

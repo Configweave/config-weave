@@ -1,0 +1,32 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - strong [ref=e6]: config-weave
+  - navigation [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9] [cursor=pointer]:
+        - img [ref=e10]
+        - text: Runbooks
+      - generic [ref=e12] [cursor=pointer]: sample
+    - generic [ref=e14] [cursor=pointer]:
+      - img [ref=e15]
+      - text: Systems
+    - generic [ref=e19] [cursor=pointer]:
+      - img [ref=e20]
+      - text: Packages
+    - generic [ref=e25]:
+      - img [ref=e26]
+      - text: Runs
+  - main [ref=e28]:
+    - generic [ref=e330]:
+      - heading "Runbooks" [level=1] [ref=e331]
+      - generic [ref=e332]: Every child directory of the server root with a playbook.wcl
+    - table [ref=e336]:
+      - rowgroup [ref=e337]:
+        - row "Name" [ref=e338]:
+          - columnheader "Name" [ref=e339]
+          - columnheader [ref=e340]
+      - rowgroup [ref=e341]:
+        - row "sample Open" [ref=e342] [cursor=pointer]:
+          - cell "sample" [ref=e343]
+          - cell "Open" [ref=e344]:
+            - button "Open" [ref=e345]

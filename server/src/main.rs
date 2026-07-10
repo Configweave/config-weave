@@ -270,6 +270,24 @@ async fn main() -> ExitCode {
             post(packages::add_to_runbook),
         )
         .route("/api/packages/{name}/test", post(packages::run_tests))
+        .route("/api/packages/{name}/tree", get(packages::tree))
+        .route(
+            "/api/packages/{name}/file",
+            get(packages::file_get).put(packages::file_put),
+        )
+        .route("/api/packages/{name}/doc/parse", post(packages::doc_parse))
+        .route(
+            "/api/packages/{name}/doc/render",
+            post(packages::doc_render),
+        )
+        .route(
+            "/api/packages/{name}/doc",
+            axum::routing::put(packages::doc_save),
+        )
+        .route(
+            "/api/runbooks/{rb}/packages/{name}",
+            axum::routing::delete(packages::remove_from_runbook),
+        )
         .route("/api/runs", get(runs::list).post(runs::create))
         .route("/api/runs/{id}", get(runs::get))
         .route("/api/runs/{id}/cancel", post(runs::cancel))

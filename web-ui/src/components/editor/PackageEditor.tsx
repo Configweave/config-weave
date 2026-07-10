@@ -23,8 +23,9 @@ import type {
   TestGatherDoc,
   TestStepDoc,
   Val,
+  WorkspaceScope,
 } from "../../api";
-import { getTemplates, readFile, writeFile } from "../../api";
+import { getTemplates } from "../../api";
 import type { ParamSchema } from "./PropertiesEditor";
 import KeyValueEditor from "./KeyValueEditor";
 import PropertiesEditor from "./PropertiesEditor";
@@ -53,7 +54,9 @@ function ScriptField(props: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  runbook: string;
+  scope: WorkspaceScope;
+  /// The package dir inside the workspace ("" when the package is the
+  /// workspace root).
   pkgDir: string;
   template: "resource_script" | "gatherer_script" | "verify_script";
 }) {
@@ -64,15 +67,15 @@ function ScriptField(props: {
       toast("enter a script path first", { tone: "warning" });
       return;
     }
-    const full = `${props.pkgDir}/${rel}`;
+    const full = props.pkgDir ? `${props.pkgDir}/${rel}` : rel;
     setBusy(true);
     try {
-      await readFile(props.runbook, full);
+      await props.scope.read(full);
       toast(`${rel} already exists`, { tone: "info" });
     } catch {
       try {
         const templates = await getTemplates();
-        await writeFile(props.runbook, full, templates[props.template] ?? "");
+        await props.scope.write(full, templates[props.template] ?? "");
         toast(`scaffolded ${rel}`, { tone: "success" });
       } catch (e: any) {
         toast(e?.message ?? "scaffold failed", { tone: "danger" });
@@ -99,8 +102,9 @@ function ScriptField(props: {
 
 export default function PackageEditor(props: {
   doc: PackageDoc;
-  runbook: string;
-  /// The package's directory inside the runbook, e.g. "pkgs/core".
+  scope: WorkspaceScope;
+  /// The package's directory inside the workspace ("" at a package
+  /// root, "pkgs/<name>" inside a runbook workspace).
   pkgDir: string;
   mutate: Mutate;
 }) {
@@ -146,7 +150,7 @@ export default function PackageEditor(props: {
           {(r, i) => (
             <ResourceForm
               resource={r}
-              runbook={props.runbook}
+              scope={props.scope}
               pkgDir={props.pkgDir}
               onRemove={() => props.mutate((d) => d.resources.splice(i(), 1))}
               mutateResource={(fn) => props.mutate((d) => fn(d.resources[i()]))}
@@ -206,7 +210,7 @@ export default function PackageEditor(props: {
                   label="Script"
                   value={g.script}
                   onChange={(v) => props.mutate((d) => (d.gatherers[i()].script = v))}
-                  runbook={props.runbook}
+                  scope={props.scope}
                   pkgDir={props.pkgDir}
                   template="gatherer_script"
                 />
@@ -247,7 +251,7 @@ export default function PackageEditor(props: {
             <TestForm
               test={t}
               doc={props.doc}
-              runbook={props.runbook}
+              scope={props.scope}
               pkgDir={props.pkgDir}
               onRemove={() => props.mutate((d) => d.tests.splice(i(), 1))}
               mutateTest={(fn) => props.mutate((d) => fn(d.tests[i()]))}
@@ -332,7 +336,7 @@ export default function PackageEditor(props: {
 
 function ResourceForm(props: {
   resource: ResourceDoc;
-  runbook: string;
+  scope: WorkspaceScope;
   pkgDir: string;
   onRemove: () => void;
   mutateResource: (fn: (r: ResourceDoc) => void) => void;
@@ -387,7 +391,7 @@ function ResourceForm(props: {
             label="Script"
             value={props.resource.script}
             onChange={(v) => props.mutateResource((r) => (r.script = v))}
-            runbook={props.runbook}
+            scope={props.scope}
             pkgDir={props.pkgDir}
             template="resource_script"
           />
@@ -471,7 +475,7 @@ function ParamsTable(props: {
 function TestForm(props: {
   test: TestDocEd;
   doc: PackageDoc;
-  runbook: string;
+  scope: WorkspaceScope;
   pkgDir: string;
   onRemove: () => void;
   mutateTest: (fn: (t: TestDocEd) => void) => void;
@@ -550,7 +554,7 @@ function TestForm(props: {
             label="Verify script (optional)"
             value={props.test.verify ?? ""}
             onChange={(v) => props.mutateTest((t) => (t.verify = v || undefined))}
-            runbook={props.runbook}
+            scope={props.scope}
             pkgDir={props.pkgDir}
             template="verify_script"
           />

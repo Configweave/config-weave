@@ -34,12 +34,27 @@ export default function Topbar() {
     }
     if (v.kind === "package") {
       items.length = 0;
-      items.push(
-        <a class="crumb-link" onClick={() => setView({ kind: "packages" })}>
-          packages
-        </a>,
-      );
-      items.push(<span>{v.name}</span>);
+      if (v.runbook) {
+        const rb = v.runbook;
+        items.push(
+          <a class="crumb-link" onClick={() => setView({ kind: "runbooks" })}>
+            runbooks
+          </a>,
+        );
+        items.push(
+          <a class="crumb-link" onClick={() => setView({ kind: "runbook", name: rb })}>
+            {rb}
+          </a>,
+        );
+        items.push(<span>pkgs/{v.name}</span>);
+      } else {
+        items.push(
+          <a class="crumb-link" onClick={() => setView({ kind: "packages" })}>
+            packages
+          </a>,
+        );
+        items.push(<span>{v.name}</span>);
+      }
     }
     if (v.kind === "runbook") items.push(<span>{v.name}</span>);
     if (v.kind === "run") {

@@ -1,0 +1,39 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - strong [ref=e6]: config-weave
+      - generic [ref=e47]: packages
+  - navigation [ref=e7]:
+    - generic [ref=e8]:
+      - generic [ref=e9] [cursor=pointer]:
+        - img [ref=e10]
+        - text: Runbooks
+      - generic [ref=e12] [cursor=pointer]: sample
+    - generic [ref=e14] [cursor=pointer]:
+      - img [ref=e15]
+      - text: Systems
+    - generic [ref=e19] [cursor=pointer]:
+      - img [ref=e20]
+      - text: Packages
+    - generic [ref=e25]:
+      - img [ref=e26]
+      - text: Runs
+  - main [ref=e28]:
+    - generic [ref=e49]:
+      - heading "Packages" [level=1] [ref=e50]
+      - generic [ref=e51]: The server's package repository
+    - table [ref=e55]:
+      - rowgroup [ref=e56]:
+        - row "Package Description Resources Tests" [ref=e57]:
+          - columnheader "Package" [ref=e58]
+          - columnheader "Description" [ref=e59]
+          - columnheader "Resources" [ref=e60]
+          - columnheader "Tests" [ref=e61]
+      - rowgroup [ref=e62]:
+        - row "core Core sample package 1 2" [ref=e63] [cursor=pointer]:
+          - cell "core" [ref=e64]
+          - cell "Core sample package" [ref=e65]
+          - cell "1" [ref=e66]:
+            - generic [ref=e67]: "1"
+          - cell "2" [ref=e68]:
+            - generic [ref=e69]: "2"

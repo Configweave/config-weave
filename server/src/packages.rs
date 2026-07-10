@@ -21,7 +21,12 @@ use forge_server::{RequireClaims, err, ok};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::runbooks::{cli_json, runbook_dir, valid_name};
+use axum::extract::Query;
+
+use crate::runbooks::{
+    DocParse, DocRender, DocSave, FileQuery, FileWrite, cli_json, doc_parse_at, doc_render_at,
+    doc_save_at, read_file_at, resolve_in, runbook_dir, tree_node, valid_name, write_file_at,
+};
 use crate::runs::{RunContext, RunRequest};
 use crate::state::SharedState;
 
@@ -131,6 +136,156 @@ pub async fn detail(
             }
         }
         Err(resp) => resp,
+    }
+}
+
+// ------------------------------------------------------ repo editing
+
+/// A repo package dir, guarded by name validity + manifest presence.
+/// Split from state so the check is unit-testable.
+fn package_dir_in(packages_dir: &Path, name: &str) -> Option<PathBuf> {
+    if !valid_name(name) {
+        return None;
+    }
+    let dir = packages_dir.join(name);
+    (dir.is_dir() && dir.join("package.wcl").is_file()).then(|| dir.canonicalize().unwrap_or(dir))
+}
+
+/// Resolve a repo package as an editing workspace root; None covers
+/// both "unconfigured" and "no such package" (the caller 404s).
+fn repo_package_dir(state: &SharedState, name: &str) -> Option<PathBuf> {
+    package_dir_in(state.packages_dir.as_deref()?, name)
+}
+
+/// GET /api/packages/{name}/tree
+pub async fn tree(
+    Extension(state): Extension<SharedState>,
+    UrlPath(name): UrlPath<String>,
+    _claims: RequireClaims,
+) -> Response {
+    let Some(dir) = repo_package_dir(&state, &name) else {
+        return err(StatusCode::NOT_FOUND, "no such package");
+    };
+    match tree_node(&dir, &name) {
+        Some(root) => ok(root["children"].clone()),
+        None => err(StatusCode::INTERNAL_SERVER_ERROR, "cannot read the package"),
+    }
+}
+
+/// GET /api/packages/{name}/file?path=…
+pub async fn file_get(
+    Extension(state): Extension<SharedState>,
+    UrlPath(name): UrlPath<String>,
+    Query(q): Query<FileQuery>,
+    _claims: RequireClaims,
+) -> Response {
+    let Some(dir) = repo_package_dir(&state, &name) else {
+        return err(StatusCode::NOT_FOUND, "no such package");
+    };
+    read_file_at(&dir, &q.path)
+}
+
+/// PUT /api/packages/{name}/file?path=… — edits the repo in place; the
+/// wrapper cache invalidates via the manifest's mtime fingerprint.
+pub async fn file_put(
+    Extension(state): Extension<SharedState>,
+    UrlPath(name): UrlPath<String>,
+    Query(q): Query<FileQuery>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<FileWrite>,
+) -> Response {
+    let Some(dir) = repo_package_dir(&state, &name) else {
+        return err(StatusCode::NOT_FOUND, "no such package");
+    };
+    write_file_at(&dir, &q.path, &body.content)
+}
+
+/// POST /api/packages/{name}/doc/parse
+pub async fn doc_parse(
+    Extension(state): Extension<SharedState>,
+    UrlPath(name): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<DocParse>,
+) -> Response {
+    let Some(dir) = repo_package_dir(&state, &name) else {
+        return err(StatusCode::NOT_FOUND, "no such package");
+    };
+    doc_parse_at(&state, &dir, body).await
+}
+
+/// POST /api/packages/{name}/doc/render
+pub async fn doc_render(
+    Extension(state): Extension<SharedState>,
+    UrlPath(name): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<DocRender>,
+) -> Response {
+    let Some(dir) = repo_package_dir(&state, &name) else {
+        return err(StatusCode::NOT_FOUND, "no such package");
+    };
+    doc_render_at(&state, &dir, body).await
+}
+
+/// PUT /api/packages/{name}/doc
+pub async fn doc_save(
+    Extension(state): Extension<SharedState>,
+    UrlPath(name): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<DocSave>,
+) -> Response {
+    let Some(dir) = repo_package_dir(&state, &name) else {
+        return err(StatusCode::NOT_FOUND, "no such package");
+    };
+    doc_save_at(&state, &dir, body).await
+}
+
+/// DELETE /api/runbooks/{rb}/packages/{name} — remove an installed
+/// package copy (the inverse of add-to-runbook).
+pub async fn remove_from_runbook(
+    Extension(state): Extension<SharedState>,
+    UrlPath((rb, name)): UrlPath<(String, String)>,
+    _claims: RequireClaims,
+) -> Response {
+    let Some(rb_dir) = runbook_dir(&state, &rb) else {
+        return err(StatusCode::NOT_FOUND, "no such runbook");
+    };
+    if !valid_name(&name) {
+        return err(StatusCode::BAD_REQUEST, "invalid package name");
+    }
+    let rb_dir = rb_dir.canonicalize().unwrap_or(rb_dir);
+    // Refuse symlinked entries outright: remove_dir_all through a link
+    // would reach outside the runbook.
+    let raw = rb_dir.join("pkgs").join(&name);
+    if std::fs::symlink_metadata(&raw)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "refusing to remove a symlinked package",
+        );
+    }
+    let target = match resolve_in(&rb_dir, &format!("pkgs/{name}"), true) {
+        Ok(t) => t,
+        Err(_) => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "package not installed in this runbook",
+            );
+        }
+    };
+    if !target.join("package.wcl").is_file() {
+        return err(
+            StatusCode::NOT_FOUND,
+            "package not installed in this runbook",
+        );
+    }
+    match std::fs::remove_dir_all(&target) {
+        Ok(()) => ok(json!({ "removed": name })),
+        Err(e) => err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot remove: {e}"),
+        ),
     }
 }
 
@@ -249,5 +404,20 @@ mod tests {
         let found = scan_repo(tmp.path()).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].0, "linux_files");
+    }
+
+    #[test]
+    fn package_dir_resolution_is_guarded() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("good")).unwrap();
+        std::fs::write(tmp.path().join("good/package.wcl"), "x").unwrap();
+        std::fs::create_dir_all(tmp.path().join("no_manifest")).unwrap();
+
+        assert!(package_dir_in(tmp.path(), "good").is_some());
+        assert!(package_dir_in(tmp.path(), "no_manifest").is_none());
+        assert!(package_dir_in(tmp.path(), "absent").is_none());
+        assert!(package_dir_in(tmp.path(), "../good").is_none());
+        assert!(package_dir_in(tmp.path(), "a/b").is_none());
+        assert!(package_dir_in(tmp.path(), "").is_none());
     }
 }

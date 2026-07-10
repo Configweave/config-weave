@@ -103,19 +103,6 @@ export interface RunSnapshot extends RunSummary {
 }
 
 export const listRunbooks = () => api.request<RunbookEntry[]>("GET", "/api/runbooks");
-export const runbookTree = (rb: string) =>
-  api.request<TreeNode[]>("GET", `/api/runbooks/${encodeURIComponent(rb)}/tree`);
-export const readFile = (rb: string, path: string) =>
-  api.request<{ path: string; content: string }>(
-    "GET",
-    `/api/runbooks/${encodeURIComponent(rb)}/file?path=${encodeURIComponent(path)}`,
-  );
-export const writeFile = (rb: string, path: string, content: string) =>
-  api.request<{ path: string }>(
-    "PUT",
-    `/api/runbooks/${encodeURIComponent(rb)}/file?path=${encodeURIComponent(path)}`,
-    { content },
-  );
 export const validateRunbook = (rb: string) =>
   api.request<ValidateResult>("POST", `/api/runbooks/${encodeURIComponent(rb)}/validate`);
 export const runbookInventory = (rb: string) =>
@@ -273,25 +260,55 @@ export interface DocSaveResult {
   diags?: string[];
 }
 
-export const docParse = (rb: string, path: string, content?: string) =>
-  api.request<DocParseResult>("POST", `/api/runbooks/${encodeURIComponent(rb)}/doc/parse`, {
-    path,
-    content,
-  });
-export const docRender = (rb: string, path: string, doc: any, base_content?: string) =>
-  api.request<DocRenderResult>("POST", `/api/runbooks/${encodeURIComponent(rb)}/doc/render`, {
-    path,
-    doc,
-    base_content,
-  });
-export const docSave = (rb: string, path: string, doc: any, base_hash?: string) =>
-  api.request<DocSaveResult>("PUT", `/api/runbooks/${encodeURIComponent(rb)}/doc`, {
-    path,
-    doc,
-    base_hash,
-  });
 export const getTemplates = () =>
   api.request<Record<string, string>>("GET", "/api/templates");
+
+// --- editing workspaces ------------------------------------------------------
+//
+// Runbook roots and repo-package roots expose identical tree/file/doc
+// endpoint shapes, so one URL-prefixed scope serves both; prefixedScope
+// re-roots a runbook scope at pkgs/<name> for installed package copies.
+
+export interface WorkspaceScope {
+  tree(): Promise<TreeNode[]>;
+  read(path: string): Promise<{ path: string; content: string }>;
+  write(path: string, content: string): Promise<{ path: string }>;
+  docParse(path: string, content?: string): Promise<DocParseResult>;
+  docRender(path: string, doc: any, baseContent?: string): Promise<DocRenderResult>;
+  docSave(path: string, doc: any, baseHash?: string): Promise<DocSaveResult>;
+}
+
+const scopeAt = (base: string): WorkspaceScope => ({
+  tree: () => api.request<TreeNode[]>("GET", `${base}/tree`),
+  read: (path) =>
+    api.request("GET", `${base}/file?path=${encodeURIComponent(path)}`),
+  write: (path, content) =>
+    api.request("PUT", `${base}/file?path=${encodeURIComponent(path)}`, { content }),
+  docParse: (path, content) => api.request("POST", `${base}/doc/parse`, { path, content }),
+  docRender: (path, doc, base_content) =>
+    api.request("POST", `${base}/doc/render`, { path, doc, base_content }),
+  docSave: (path, doc, base_hash) => api.request("PUT", `${base}/doc`, { path, doc, base_hash }),
+});
+
+export const runbookScope = (rb: string) => scopeAt(`/api/runbooks/${encodeURIComponent(rb)}`);
+export const packageScope = (name: string) =>
+  scopeAt(`/api/packages/${encodeURIComponent(name)}`);
+
+/// View a subdirectory of `inner` as the workspace root.
+export const prefixedScope = (inner: WorkspaceScope, prefix: string): WorkspaceScope => ({
+  tree: async () => {
+    let nodes = await inner.tree();
+    for (const seg of prefix.split("/")) {
+      nodes = nodes.find((n) => n.dir && n.name === seg)?.children ?? [];
+    }
+    return nodes;
+  },
+  read: async (p) => ({ ...(await inner.read(`${prefix}/${p}`)), path: p }),
+  write: (p, c) => inner.write(`${prefix}/${p}`, c),
+  docParse: (p, c) => inner.docParse(`${prefix}/${p}`, c),
+  docRender: (p, d, b) => inner.docRender(`${prefix}/${p}`, d, b),
+  docSave: (p, d, h) => inner.docSave(`${prefix}/${p}`, d, h),
+});
 
 // --- systems ---------------------------------------------------------------
 
@@ -388,3 +405,8 @@ export const startPackageTest = (
   name: string,
   req: { test?: string; backend?: string; image?: string; keep?: boolean },
 ) => api.request<{ id: string }>("POST", `/api/packages/${encodeURIComponent(name)}/test`, req);
+export const removePackageFromRunbook = (rb: string, name: string) =>
+  api.request<{ removed: string }>(
+    "DELETE",
+    `/api/runbooks/${encodeURIComponent(rb)}/packages/${encodeURIComponent(name)}`,
+  );

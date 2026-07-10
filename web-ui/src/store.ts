@@ -12,7 +12,7 @@ export type View =
   | { kind: "systems" }
   | { kind: "sysrun"; id: string; system: string; action: string }
   | { kind: "packages" }
-  | { kind: "package"; name: string };
+  | { kind: "package"; name: string; runbook?: string };
 
 export const [view, setView] = createSignal<View>({ kind: "runbooks" });
 export const [ready, setReady] = createSignal(false);

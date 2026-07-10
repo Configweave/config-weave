@@ -1,9 +1,10 @@
-// One repository package: docs rendered natively from the inventory
-// (resources with param tables, gatherers, tests), test running and
-// debugging (debug = keep the instance; the RunView's troubleshoot tabs
-// stay attachable after the run), and add-to-playbook.
+// One package, from either source: the repository (--packages-dir,
+// edited in place) or a runbook's installed copy (edited inside the
+// runbook's pkgs/). Docs rendered natively from the inventory, test
+// running/debugging, the full editing workspace, and add-to-playbook
+// (repo) or remove-from-runbook (installed copy).
 
-import { For, Show, createResource, createSignal } from "solid-js";
+import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import {
   Badge,
   Button,
@@ -14,20 +15,61 @@ import {
   Table,
   toast,
 } from "@forge/ui";
-import { Bug, ChevronDown, ChevronRight, Play, Plus } from "lucide-solid";
-import type { GathererDecl, ParamDecl, ResourceDecl } from "../api";
-import { addPackageToRunbook, getPackage, listRunbooks, startPackageTest } from "../api";
+import { Bug, ChevronDown, ChevronRight, Play, Plus, Trash2 } from "lucide-solid";
+import type { GathererDecl, PackageEntry, ParamDecl, ResourceDecl } from "../api";
+import {
+  addPackageToRunbook,
+  getPackage,
+  listRunbooks,
+  packageScope,
+  prefixedScope,
+  removePackageFromRunbook,
+  runbookInventory,
+  runbookScope,
+  startPackageTest,
+  startRun,
+} from "../api";
 import { setView } from "../store";
+import FileWorkspace from "./FileWorkspace";
 
-export default function PackageView(props: { name: string }) {
-  const [pkg] = createResource(() => props.name, getPackage);
+export default function PackageView(props: { name: string; runbook?: string }) {
+  // Repo source: the package's own inventory entry. Runbook source: the
+  // runbook inventory, filtered.
+  const [repoPkg] = createResource(
+    () => (props.runbook ? undefined : props.name),
+    (name) => getPackage(name).catch(() => null as PackageEntry | null),
+  );
+  const [rbInventory] = createResource(
+    () => props.runbook,
+    (rb) => runbookInventory(rb),
+  );
+
+  const info = (): PackageEntry | undefined | null =>
+    props.runbook
+      ? rbInventory() && (rbInventory()!.packages.find((p) => p.name === props.name) ?? null)
+      : repoPkg();
+
+  const loaded = () => (props.runbook ? rbInventory() !== undefined : repoPkg() !== undefined);
+
+  const scope = createMemo(() =>
+    props.runbook
+      ? prefixedScope(runbookScope(props.runbook), `pkgs/${props.name}`)
+      : packageScope(props.name),
+  );
+
   const [busy, setBusy] = createSignal(false);
 
   const runTest = async (test: string | undefined, keep: boolean) => {
     setBusy(true);
     try {
-      const { id } = await startPackageTest(props.name, { test, keep });
-      setView({ kind: "run", id, runbook: `pkgs:${props.name}` });
+      const { id } = props.runbook
+        ? await startRun({
+            runbook: props.runbook,
+            filter: test ? `${props.name}:${test}` : props.name,
+            keep,
+          })
+        : await startPackageTest(props.name, { test, keep });
+      setView({ kind: "run", id, runbook: props.runbook ?? `pkgs:${props.name}` });
     } catch (e: any) {
       toast(e?.message ?? "cannot start the test run", { tone: "danger" });
     } finally {
@@ -35,37 +77,93 @@ export default function PackageView(props: { name: string }) {
     }
   };
 
+  const removeFromRunbook = async () => {
+    if (!props.runbook) return;
+    if (!confirm(`Remove ${props.name} from ${props.runbook}? Its pkgs/ copy is deleted.`))
+      return;
+    try {
+      await removePackageFromRunbook(props.runbook, props.name);
+      toast(`removed ${props.name}`, { tone: "success" });
+      setView({ kind: "runbook", name: props.runbook });
+    } catch (e: any) {
+      toast(e?.message ?? "remove failed", { tone: "danger" });
+    }
+  };
+
   return (
-    <>
+    <Show
+      when={!loaded() || info()}
+      fallback={
+        <Empty
+          title={props.runbook ? "Package not installed" : "No such package"}
+          action={
+            <Button
+              size="sm"
+              onClick={() =>
+                props.runbook
+                  ? setView({ kind: "runbook", name: props.runbook })
+                  : setView({ kind: "packages" })
+              }
+            >
+              {props.runbook ? `Back to ${props.runbook}` : "Back to packages"}
+            </Button>
+          }
+        >
+          <span class="sub">It may have been removed.</span>
+        </Empty>
+      }
+    >
       <PageHead
         title={props.name}
-        sub={pkg()?.description}
+        sub={
+          <span>
+            {info()?.description}{" "}
+            <Badge tone={props.runbook ? "info" : "neutral"}>
+              {props.runbook ? `installed in ${props.runbook}` : "repository"}
+            </Badge>
+          </span>
+        }
         actions={
-          <Show when={(pkg()?.tests ?? []).length > 0}>
-            <Button size="sm" icon={Play} disabled={busy()} onClick={() => runTest(undefined, false)}>
-              Run all tests
-            </Button>
-          </Show>
+          <div class="head-actions">
+            <Show when={(info()?.tests ?? []).length > 0}>
+              <Button
+                size="sm"
+                icon={Play}
+                disabled={busy()}
+                onClick={() => runTest(undefined, false)}
+              >
+                Run all tests
+              </Button>
+            </Show>
+            <Show when={props.runbook}>
+              <Button size="sm" variant="ghost" icon={Trash2} onClick={removeFromRunbook}>
+                Remove from runbook
+              </Button>
+            </Show>
+          </div>
         }
       />
 
       <Card title="Resources">
         <Show
-          when={(pkg()?.resources ?? []).length > 0}
+          when={(info()?.resources ?? []).length > 0}
           fallback={<Empty title="No resources declared" />}
         >
-          <For each={pkg()?.resources ?? []}>{(r) => <ResourceDocs resource={r} />}</For>
+          <For each={info()?.resources ?? []}>{(r) => <ResourceDocs resource={r} />}</For>
         </Show>
       </Card>
 
-      <Show when={(pkg()?.gatherers ?? []).length > 0}>
+      <Show when={(info()?.gatherers ?? []).length > 0}>
         <Card title="Gatherers">
-          <For each={pkg()?.gatherers ?? []}>{(g) => <GathererDocs gatherer={g} />}</For>
+          <For each={info()?.gatherers ?? []}>{(g) => <GathererDocs gatherer={g} />}</For>
         </Card>
       </Show>
 
       <Card title="Tests">
-        <Show when={(pkg()?.tests ?? []).length > 0} fallback={<Empty title="No tests declared" />}>
+        <Show
+          when={(info()?.tests ?? []).length > 0}
+          fallback={<Empty title="No tests declared" />}
+        >
           <Table>
             <thead>
               <tr>
@@ -76,7 +174,7 @@ export default function PackageView(props: { name: string }) {
               </tr>
             </thead>
             <tbody>
-              <For each={pkg()?.tests ?? []}>
+              <For each={info()?.tests ?? []}>
                 {(t) => (
                   <tr>
                     <td>
@@ -118,8 +216,14 @@ export default function PackageView(props: { name: string }) {
         </Show>
       </Card>
 
-      <AddToPlaybook package={props.name} />
-    </>
+      <Card title="Files">
+        <FileWorkspace scope={scope()} />
+      </Card>
+
+      <Show when={!props.runbook}>
+        <AddToPlaybook package={props.name} />
+      </Show>
+    </Show>
   );
 }
 

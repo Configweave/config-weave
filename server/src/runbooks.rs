@@ -36,9 +36,10 @@ pub(crate) fn runbook_dir(state: &SharedState, name: &str) -> Option<PathBuf> {
     (dir.is_dir() && dir.join("playbook.wcl").is_file()).then_some(dir)
 }
 
-/// Canonicalize `path` and require it stays under `root`. For writes the
-/// file may not exist yet, so the parent is what gets canonicalized.
-fn resolve_in(root: &Path, rel: &str, must_exist: bool) -> Result<PathBuf, String> {
+/// Canonicalize `path` and require it stays under `root` (a runbook or
+/// a repo package dir). For writes the file may not exist yet, so the
+/// parent is what gets canonicalized.
+pub(crate) fn resolve_in(root: &Path, rel: &str, must_exist: bool) -> Result<PathBuf, String> {
     if rel.is_empty() || rel.starts_with('/') || rel.split('/').any(|c| c == "..") {
         return Err("invalid path".into());
     }
@@ -59,7 +60,7 @@ fn resolve_in(root: &Path, rel: &str, must_exist: bool) -> Result<PathBuf, Strin
         )
     };
     if !canonical.starts_with(root) {
-        return Err("path escapes the runbook".into());
+        return Err("path escapes the root".into());
     }
     Ok(canonical)
 }
@@ -88,7 +89,7 @@ pub async fn list(Extension(state): Extension<SharedState>, _claims: RequireClai
 }
 
 /// One node of the file tree.
-fn tree_node(path: &Path, name: &str) -> Option<Value> {
+pub(crate) fn tree_node(path: &Path, name: &str) -> Option<Value> {
     if path.is_dir() {
         if IGNORED_DIRS.contains(&name) || name.starts_with('.') {
             return None;
@@ -134,6 +135,21 @@ pub struct FileQuery {
     pub path: String,
 }
 
+/// Read one file under a canonical workspace root.
+pub(crate) fn read_file_at(root: &Path, rel: &str) -> Response {
+    let file = match resolve_in(root, rel, true) {
+        Ok(f) => f,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e),
+    };
+    match std::fs::read_to_string(&file) {
+        Ok(content) => ok(json!({ "path": rel, "content": content })),
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            err(StatusCode::UNSUPPORTED_MEDIA_TYPE, "not a UTF-8 text file")
+        }
+        Err(e) => err(StatusCode::NOT_FOUND, format!("cannot read: {e}")),
+    }
+}
+
 /// GET /api/runbooks/{rb}/file?path=…
 pub async fn file_get(
     Extension(state): Extension<SharedState>,
@@ -146,17 +162,7 @@ pub async fn file_get(
     };
     // The runbook dir itself is under the canonical root by construction.
     let dir = dir.canonicalize().unwrap_or(dir);
-    let file = match resolve_in(&dir, &q.path, true) {
-        Ok(f) => f,
-        Err(e) => return err(StatusCode::BAD_REQUEST, e),
-    };
-    match std::fs::read_to_string(&file) {
-        Ok(content) => ok(json!({ "path": q.path, "content": content })),
-        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-            err(StatusCode::UNSUPPORTED_MEDIA_TYPE, "not a UTF-8 text file")
-        }
-        Err(e) => err(StatusCode::NOT_FOUND, format!("cannot read: {e}")),
-    }
+    read_file_at(&dir, &q.path)
 }
 
 #[derive(Deserialize)]
@@ -174,6 +180,18 @@ fn write_atomic(file: &Path, content: &str) -> Result<(), String> {
     })
 }
 
+/// Atomically write one file under a canonical workspace root.
+pub(crate) fn write_file_at(root: &Path, rel: &str, content: &str) -> Response {
+    let file = match resolve_in(root, rel, false) {
+        Ok(f) => f,
+        Err(e) => return err(StatusCode::BAD_REQUEST, e),
+    };
+    match write_atomic(&file, content) {
+        Ok(()) => ok(json!({ "path": rel })),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
 /// PUT /api/runbooks/{rb}/file?path=… — body `{content}`; atomic write.
 pub async fn file_put(
     Extension(state): Extension<SharedState>,
@@ -186,14 +204,7 @@ pub async fn file_put(
         return err(StatusCode::NOT_FOUND, "no such runbook");
     };
     let dir = dir.canonicalize().unwrap_or(dir);
-    let file = match resolve_in(&dir, &q.path, false) {
-        Ok(f) => f,
-        Err(e) => return err(StatusCode::BAD_REQUEST, e),
-    };
-    match write_atomic(&file, &body.content) {
-        Ok(()) => ok(json!({ "path": q.path })),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-    }
+    write_file_at(&dir, &q.path, &body.content)
 }
 
 /// Shell out to the config-weave CLI with `--json` and hand back its
@@ -292,30 +303,32 @@ fn content_hash(content: &str) -> String {
     format!("{h:016x}")
 }
 
-/// Resolve + read the file a doc request names. The Err side carries a
-/// ready HTTP response; its size is fine for this cold path.
+/// Resolve + read the file a doc request names under a canonical
+/// workspace root. The Err side carries a ready HTTP response; its size
+/// is fine for this cold path.
 #[allow(clippy::result_large_err)]
-fn doc_target(
-    state: &SharedState,
-    rb: &str,
-    path: &str,
-) -> Result<(PathBuf, String, &'static str), Response> {
+fn doc_target_at(root: &Path, path: &str) -> Result<(PathBuf, String, &'static str), Response> {
     let Some(kind) = doc_kind(path) else {
         return Err(err(
             StatusCode::BAD_REQUEST,
             "only playbook.wcl and package.wcl files have a visual editor",
         ));
     };
-    let Some(dir) = runbook_dir(state, rb) else {
-        return Err(err(StatusCode::NOT_FOUND, "no such runbook"));
-    };
-    let dir = dir.canonicalize().unwrap_or(dir);
-    let file = match resolve_in(&dir, path, false) {
+    let file = match resolve_in(root, path, false) {
         Ok(f) => f,
         Err(e) => return Err(err(StatusCode::BAD_REQUEST, e)),
     };
     let on_disk = std::fs::read_to_string(&file).unwrap_or_default();
     Ok((file, on_disk, kind))
+}
+
+/// The canonical dir of a runbook, as a doc/file workspace root.
+#[allow(clippy::result_large_err)]
+fn runbook_root(state: &SharedState, rb: &str) -> Result<PathBuf, Response> {
+    match runbook_dir(state, rb) {
+        Some(dir) => Ok(dir.canonicalize().unwrap_or(dir)),
+        None => Err(err(StatusCode::NOT_FOUND, "no such runbook")),
+    }
 }
 
 #[derive(Deserialize)]
@@ -325,21 +338,16 @@ pub struct DocParse {
     pub content: Option<String>,
 }
 
-/// POST /api/runbooks/{rb}/doc/parse — source → DocJson (+ the on-disk
-/// content hash the eventual save must present).
-pub async fn doc_parse(
-    Extension(state): Extension<SharedState>,
-    UrlPath(rb): UrlPath<String>,
-    _claims: RequireClaims,
-    axum::Json(body): axum::Json<DocParse>,
-) -> Response {
-    let (_, on_disk, kind) = match doc_target(&state, &rb, &body.path) {
+/// Source → DocJson (+ the on-disk content hash the eventual save must
+/// present), under a canonical workspace root.
+pub(crate) async fn doc_parse_at(state: &SharedState, root: &Path, body: DocParse) -> Response {
+    let (_, on_disk, kind) = match doc_target_at(root, &body.path) {
         Ok(t) => t,
         Err(resp) => return resp,
     };
     let source = body.content.unwrap_or_else(|| on_disk.clone());
     let input = json!({ "kind": kind, "source": source });
-    match cli_stdin_json(&state, "__wcl-inspect", &input).await {
+    match cli_stdin_json(state, "__wcl-inspect", &input).await {
         Ok(mut v) => {
             if let Some(map) = v.as_object_mut() {
                 map.insert("base_hash".into(), content_hash(&on_disk).into());
@@ -347,6 +355,19 @@ pub async fn doc_parse(
             ok(v)
         }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+/// POST /api/runbooks/{rb}/doc/parse
+pub async fn doc_parse(
+    Extension(state): Extension<SharedState>,
+    UrlPath(rb): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<DocParse>,
+) -> Response {
+    match runbook_root(&state, &rb) {
+        Ok(root) => doc_parse_at(&state, &root, body).await,
+        Err(resp) => resp,
     }
 }
 
@@ -358,23 +379,31 @@ pub struct DocRender {
     pub base_content: Option<String>,
 }
 
-/// POST /api/runbooks/{rb}/doc/render — DocJson → canonical WCL,
-/// without writing (mode switches and previews).
+/// DocJson → canonical WCL, without writing (mode switches and
+/// previews), under a canonical workspace root.
+pub(crate) async fn doc_render_at(state: &SharedState, root: &Path, body: DocRender) -> Response {
+    let (_, on_disk, kind) = match doc_target_at(root, &body.path) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    let base = body.base_content.unwrap_or(on_disk);
+    let input = json!({ "kind": kind, "base_source": base, "doc": body.doc });
+    match cli_stdin_json(state, "__wcl-render", &input).await {
+        Ok(v) => ok(v),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+/// POST /api/runbooks/{rb}/doc/render
 pub async fn doc_render(
     Extension(state): Extension<SharedState>,
     UrlPath(rb): UrlPath<String>,
     _claims: RequireClaims,
     axum::Json(body): axum::Json<DocRender>,
 ) -> Response {
-    let (_, on_disk, kind) = match doc_target(&state, &rb, &body.path) {
-        Ok(t) => t,
-        Err(resp) => return resp,
-    };
-    let base = body.base_content.unwrap_or(on_disk);
-    let input = json!({ "kind": kind, "base_source": base, "doc": body.doc });
-    match cli_stdin_json(&state, "__wcl-render", &input).await {
-        Ok(v) => ok(v),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    match runbook_root(&state, &rb) {
+        Ok(root) => doc_render_at(&state, &root, body).await,
+        Err(resp) => resp,
     }
 }
 
@@ -387,16 +416,10 @@ pub struct DocSave {
     pub base_hash: Option<String>,
 }
 
-/// PUT /api/runbooks/{rb}/doc — render against the on-disk file and
-/// write atomically; returns the canonical content so the editor can
-/// sync its text buffer.
-pub async fn doc_save(
-    Extension(state): Extension<SharedState>,
-    UrlPath(rb): UrlPath<String>,
-    _claims: RequireClaims,
-    axum::Json(body): axum::Json<DocSave>,
-) -> Response {
-    let (file, on_disk, kind) = match doc_target(&state, &rb, &body.path) {
+/// Render against the on-disk file and write atomically; returns the
+/// canonical content so the editor can sync its text buffer.
+pub(crate) async fn doc_save_at(state: &SharedState, root: &Path, body: DocSave) -> Response {
+    let (file, on_disk, kind) = match doc_target_at(root, &body.path) {
         Ok(t) => t,
         Err(resp) => return resp,
     };
@@ -409,7 +432,7 @@ pub async fn doc_save(
         );
     }
     let input = json!({ "kind": kind, "base_source": on_disk, "doc": body.doc });
-    let result = match cli_stdin_json(&state, "__wcl-render", &input).await {
+    let result = match cli_stdin_json(state, "__wcl-render", &input).await {
         Ok(v) => v,
         Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e),
     };
@@ -426,6 +449,19 @@ pub async fn doc_save(
             "base_hash": content_hash(&content),
         })),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
+}
+
+/// PUT /api/runbooks/{rb}/doc
+pub async fn doc_save(
+    Extension(state): Extension<SharedState>,
+    UrlPath(rb): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(body): axum::Json<DocSave>,
+) -> Response {
+    match runbook_root(&state, &rb) {
+        Ok(root) => doc_save_at(&state, &root, body).await,
+        Err(resp) => resp,
     }
 }
 
