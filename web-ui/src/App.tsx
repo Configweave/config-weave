@@ -17,6 +17,8 @@ import RunbookView from "./components/RunbookView";
 import RunView from "./components/RunView";
 import SystemsView from "./components/SystemsView";
 import SystemRunView from "./components/SystemRunView";
+import PackagesView from "./components/PackagesView";
+import PackageView from "./components/PackageView";
 
 export default function App() {
   onMount(init);
@@ -38,6 +40,12 @@ export default function App() {
           </Show>
           <Show when={asKind("sysrun")} keyed>
             {(v) => <SystemRunView id={v.id} system={v.system} action={v.action} />}
+          </Show>
+          <Show when={view().kind === "packages"}>
+            <PackagesView />
+          </Show>
+          <Show when={asKind("package")} keyed>
+            {(v) => <PackageView name={v.name} />}
           </Show>
         </AppShell>
       </Show>

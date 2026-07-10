@@ -10,7 +10,9 @@ export type View =
   | { kind: "runbook"; name: string }
   | { kind: "run"; id: string; runbook: string }
   | { kind: "systems" }
-  | { kind: "sysrun"; id: string; system: string; action: string };
+  | { kind: "sysrun"; id: string; system: string; action: string }
+  | { kind: "packages" }
+  | { kind: "package"; name: string };
 
 export const [view, setView] = createSignal<View>({ kind: "runbooks" });
 export const [ready, setReady] = createSignal(false);

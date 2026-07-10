@@ -28,6 +28,19 @@ export default function Topbar() {
         </span>,
       );
     }
+    if (v.kind === "packages") {
+      items.length = 0;
+      items.push(<span>packages</span>);
+    }
+    if (v.kind === "package") {
+      items.length = 0;
+      items.push(
+        <a class="crumb-link" onClick={() => setView({ kind: "packages" })}>
+          packages
+        </a>,
+      );
+      items.push(<span>{v.name}</span>);
+    }
     if (v.kind === "runbook") items.push(<span>{v.name}</span>);
     if (v.kind === "run") {
       items.push(

@@ -207,3 +207,39 @@
   gap: 6px;
   justify-content: flex-end;
 }
+
+/* --- packages ------------------------------------------------------------ */
+.clickable-row {
+  cursor: pointer;
+}
+.clickable-row:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+}
+.doc-block {
+  border-bottom: 1px solid var(--border-muted, rgba(255, 255, 255, 0.08));
+  padding: 6px 0;
+}
+.doc-block:last-child {
+  border-bottom: none;
+}
+.doc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.doc-body {
+  padding: 8px 0 4px 22px;
+}
+.add-to-playbook {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+}
+.report-detail {
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

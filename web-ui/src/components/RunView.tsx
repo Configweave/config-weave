@@ -21,9 +21,9 @@ import {
 import type { StatusTone } from "@forge/ui";
 import { Terminal } from "@forge/term";
 import { DesktopViewer } from "@forge/desktop";
-import { Square } from "lucide-solid";
+import { ChevronDown, ChevronRight, Square, Trash2 } from "lucide-solid";
 import type { InstanceInfo } from "../api";
-import { api, cancelRun, getRun } from "../api";
+import { api, cancelRun, getRun, teardownRun } from "../api";
 
 interface TestState {
   package: string;
@@ -114,6 +114,9 @@ export default function RunView(props: { id: string; runbook: string }) {
         setStatus(e.status);
         void refresh();
         break;
+      case "instances_torn_down":
+        void refresh();
+        break;
       case "raw":
         setLogs(logs.length, { ts: "", test: "", context: "raw", text: e.line });
         break;
@@ -159,6 +162,16 @@ export default function RunView(props: { id: string; runbook: string }) {
       await cancelRun(props.id);
     } catch (e: any) {
       toast(e?.message ?? "cancel failed", { tone: "danger" });
+    }
+  };
+
+  const teardown = async () => {
+    if (!confirm("Tear down the kept instances? Containers/VMs are destroyed.")) return;
+    try {
+      await teardownRun(props.id);
+      void refresh();
+    } catch (e: any) {
+      toast(e?.message ?? "teardown failed", { tone: "danger" });
     }
   };
 
@@ -252,7 +265,16 @@ export default function RunView(props: { id: string; runbook: string }) {
       </Card>
 
       <Show when={attachable().length > 0}>
-        <Card title="Instances — troubleshoot">
+        <Card
+          title="Instances — troubleshoot"
+          action={
+            <Show when={status() !== "running"}>
+              <Button size="sm" variant="danger" icon={Trash2} onClick={teardown}>
+                Tear down
+              </Button>
+            </Show>
+          }
+        >
           <Tabs
             tabs={attachable().map((i) => ({
               id: instanceId(i),
@@ -316,6 +338,7 @@ export default function RunView(props: { id: string; runbook: string }) {
             <Table>
               <thead>
                 <tr>
+                  <th></th>
                   <th>Test</th>
                   <th>Outcome</th>
                   <th>Duration</th>
@@ -323,27 +346,7 @@ export default function RunView(props: { id: string; runbook: string }) {
                 </tr>
               </thead>
               <tbody>
-                <For each={r.tests ?? []}>
-                  {(t: any) => (
-                    <tr>
-                      <td>
-                        {t.package}:{t.name}
-                      </td>
-                      <td>
-                        <Badge tone={OUTCOME_TONE[t.outcome] ?? "neutral"}>{t.outcome}</Badge>
-                      </td>
-                      <td>{fmtSecs(t.duration_secs)}</td>
-                      <td class="sub">
-                        {t.error ??
-                          (t.steps ?? [])
-                            .flatMap((s: any) => s.failures ?? [])
-                            .join("; ") ??
-                          ""}
-                        {t.kept ? ` (kept: ${t.kept})` : ""}
-                      </td>
-                    </tr>
-                  )}
-                </For>
+                <For each={r.tests ?? []}>{(t: any) => <ReportRow test={t} />}</For>
               </tbody>
             </Table>
           </Card>
@@ -352,6 +355,102 @@ export default function RunView(props: { id: string; runbook: string }) {
     </>
   );
 }
+
+/// One report row, expandable into the full per-step three-run status
+/// matrix plus gather and verify results.
+function ReportRow(props: { test: any }) {
+  const [open, setOpen] = createSignal(false);
+  const t = props.test;
+  const statusCell = (s: string | null) => (
+    <Show when={s} fallback={<span class="sub">—</span>}>
+      <Badge tone={STEP_TONE[s!] ?? "neutral"}>{s!.replaceAll("_", " ")}</Badge>
+    </Show>
+  );
+  return (
+    <>
+      <tr class="clickable-row" onClick={() => setOpen(!open())}>
+        <td>{open() ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</td>
+        <td>
+          {t.package}:{t.name}
+        </td>
+        <td>
+          <Badge tone={OUTCOME_TONE[t.outcome] ?? "neutral"}>{t.outcome}</Badge>
+        </td>
+        <td>{fmtSecs(t.duration_secs)}</td>
+        <td class="sub">
+          {t.error ?? (t.steps ?? []).flatMap((s: any) => s.failures ?? []).join("; ")}
+          {t.kept ? ` (kept: ${t.kept})` : ""}
+        </td>
+      </tr>
+      <Show when={open()}>
+        <tr>
+          <td></td>
+          <td colSpan={4}>
+            <div class="report-detail">
+              <Show when={(t.steps ?? []).length > 0}>
+                <Table>
+                  <thead>
+                    <tr>
+                      <th>Step</th>
+                      <th>Expect</th>
+                      <th>Check</th>
+                      <th>Apply</th>
+                      <th>Second apply</th>
+                      <th>Failures</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={t.steps ?? []}>
+                      {(s: any) => (
+                        <tr>
+                          <td class="mono">{s.name}</td>
+                          <td class="mono">{s.expect}</td>
+                          <td>{statusCell(s.check)}</td>
+                          <td>{statusCell(s.apply)}</td>
+                          <td>{statusCell(s.second_apply)}</td>
+                          <td class="sub error-text">{(s.failures ?? []).join("; ")}</td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </Table>
+              </Show>
+              <For each={t.gathers ?? []}>
+                {(g: any) => (
+                  <div class="sub">
+                    gather <span class="mono">{g.name}</span>
+                    {(g.failures ?? []).length ? `: ${g.failures.join("; ")}` : ": ok"}
+                  </div>
+                )}
+              </For>
+              <Show when={t.verify} keyed>
+                {(v: any) => (
+                  <div class="sub">
+                    verify:{" "}
+                    <Badge tone={v.passed ? "success" : "danger"}>
+                      {v.passed ? "passed" : "failed"}
+                    </Badge>{" "}
+                    {v.message ?? ""}
+                  </div>
+                )}
+              </Show>
+            </div>
+          </td>
+        </tr>
+      </Show>
+    </>
+  );
+}
+
+const STEP_TONE: Record<string, StatusTone> = {
+  already_configured: "success",
+  configured: "success",
+  not_configured: "warning",
+  reboot_required: "warning",
+  skipped: "neutral",
+  not_run: "neutral",
+  error: "danger",
+};
 
 function phaseRank(phase: string): number {
   const base = phase.split(" ")[0];

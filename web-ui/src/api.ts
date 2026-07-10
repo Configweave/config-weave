@@ -25,9 +25,32 @@ export interface TestDecl {
   group: string | null;
 }
 
+export interface ParamDecl {
+  name: string;
+  description: string;
+  type: string;
+  required: boolean;
+  default: any | null;
+}
+
+export interface ResourceDecl {
+  name: string;
+  description: string;
+  concurrency: string;
+  params: ParamDecl[];
+}
+
+export interface GathererDecl {
+  name: string;
+  description: string;
+  params: ParamDecl[];
+}
+
 export interface PackageEntry {
   name: string;
   description: string;
+  resources?: ResourceDecl[];
+  gatherers?: GathererDecl[];
   tests: TestDecl[];
   scenarios: { name: string; description: string }[];
 }
@@ -51,6 +74,7 @@ export interface RunSummary {
   filter: string | null;
   status: string;
   exit_code: number | null;
+  kept_alive?: number;
 }
 
 export interface InstanceInfo {
@@ -173,3 +197,22 @@ export const cancelRun = (id: string) =>
     "POST",
     `/api/runs/${encodeURIComponent(id)}/cancel`,
   );
+export const teardownRun = (id: string) =>
+  api.request<RunSnapshot>("POST", `/api/runs/${encodeURIComponent(id)}/teardown`);
+
+// --- package repository ------------------------------------------------------
+
+export const listPackages = () =>
+  api.request<{ packages: PackageEntry[]; error?: string }>("GET", "/api/packages");
+export const getPackage = (name: string) =>
+  api.request<PackageEntry>("GET", `/api/packages/${encodeURIComponent(name)}`);
+export const addPackageToRunbook = (name: string, runbook: string, overwrite = false) =>
+  api.request<{ runbook: string; package: string; path: string }>(
+    "POST",
+    `/api/packages/${encodeURIComponent(name)}/add-to-runbook`,
+    { runbook, overwrite },
+  );
+export const startPackageTest = (
+  name: string,
+  req: { test?: string; backend?: string; image?: string; keep?: boolean },
+) => api.request<{ id: string }>("POST", `/api/packages/${encodeURIComponent(name)}/test`, req);
