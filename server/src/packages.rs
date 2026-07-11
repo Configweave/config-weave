@@ -337,12 +337,12 @@ pub async fn remove_from_runbook(
 
 #[derive(Deserialize)]
 pub struct AddRequest {
-    pub runbook: String,
+    pub playbook: String,
     #[serde(default)]
     pub overwrite: bool,
 }
 
-/// POST /api/packages/{name}/add-to-runbook — copy (never symlink: the
+/// POST /api/packages/{name}/add-to-playbook — copy (never symlink: the
 /// runbook editor refuses symlink escapes) the real repo dir into
 /// `<runbook>/pkgs/<name>`.
 pub async fn add_to_runbook(
@@ -358,13 +358,13 @@ pub async fn add_to_runbook(
     if !valid_name(&name) || !src.join("package.wcl").is_file() {
         return err(StatusCode::NOT_FOUND, "no such package");
     }
-    let Some(rb_dir) = runbook_dir(&state, &req.runbook) else {
-        return err(StatusCode::NOT_FOUND, "no such runbook");
+    let Some(rb_dir) = runbook_dir(&state, &req.playbook) else {
+        return err(StatusCode::NOT_FOUND, "no such playbook");
     };
     let dest = rb_dir.join("pkgs").join(&name);
     if dest.exists() {
         if !req.overwrite {
-            return err(StatusCode::CONFLICT, "package already in the runbook");
+            return err(StatusCode::CONFLICT, "package already in the playbook");
         }
         if let Err(e) = std::fs::remove_dir_all(&dest) {
             return err(
@@ -379,7 +379,7 @@ pub async fn add_to_runbook(
             format!("cannot copy: {e}"),
         );
     }
-    ok(json!({ "runbook": req.runbook, "package": name, "path": format!("pkgs/{name}") }))
+    ok(json!({ "playbook": req.playbook, "package": name, "path": format!("pkgs/{name}") }))
 }
 
 #[derive(Deserialize)]

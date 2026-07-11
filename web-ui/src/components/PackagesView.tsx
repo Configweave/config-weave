@@ -18,7 +18,7 @@ export default function PackagesView() {
 
   return (
     <>
-      <PageHead title="Packages" sub="The server's package repository" />
+      <PageHead title="Packages" sub="Reusable resources, gatherers, and tests in the library" />
       <Show when={repo() === null}>
         <Card>
           <Empty title="No package repository configured">

@@ -8,14 +8,14 @@ export default function RunbooksView() {
   return (
     <>
       <PageHead
-        title="Runbooks"
-        sub="Every child directory of the server root with a playbook.wcl"
+        title="Playbooks"
+        sub="Reusable configuration plans available to services"
       />
       <Card>
         <Show
           when={(runbooks() ?? []).length > 0}
           fallback={
-            <Empty title="No runbooks">
+            <Empty title="No playbooks">
               Point weave-server --dir at a folder of playbook directories.
             </Empty>
           }

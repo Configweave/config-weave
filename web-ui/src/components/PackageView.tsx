@@ -137,7 +137,7 @@ export default function PackageView(props: { name: string; runbook?: string }) {
             </Show>
             <Show when={props.runbook}>
               <Button size="sm" variant="ghost" icon={Trash2} onClick={removeFromRunbook}>
-                Remove from runbook
+                Remove from playbook
               </Button>
             </Show>
           </div>
@@ -309,10 +309,10 @@ function AddToPlaybook(props: { package: string }) {
     setAdding(true);
     try {
       const res = await addPackageToRunbook(props.package, target(), overwrite);
-      toast(`copied to ${res.runbook}/${res.path}`, { tone: "success" });
+      toast(`copied to ${res.playbook}/${res.path}`, { tone: "success" });
     } catch (e: any) {
       const msg: string = e?.message ?? "copy failed";
-      if (!overwrite && msg.includes("already in the runbook")) {
+      if (!overwrite && msg.includes("already in the playbook")) {
         if (confirm(`${props.package} is already in ${target()} — overwrite it?`)) {
           setAdding(false);
           return add(true);
@@ -329,7 +329,7 @@ function AddToPlaybook(props: { package: string }) {
     <Card title="Add to playbook">
       <div class="add-to-playbook">
         <Select
-          placeholder="pick a runbook"
+          placeholder="pick a playbook"
           options={(runbooks() ?? []).map((r) => ({ value: r.name, label: r.name }))}
           value={target()}
           onChange={setTarget}
@@ -339,7 +339,7 @@ function AddToPlaybook(props: { package: string }) {
         </Button>
       </div>
       <div class="sub" style={{ "margin-top": "8px" }}>
-        Copies the package into the runbook's <span class="mono">pkgs/</span> folder.
+        Copies the package into the playbook's <span class="mono">pkgs/</span> folder.
       </div>
     </Card>
   );

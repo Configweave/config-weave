@@ -15,10 +15,11 @@ import Sidebar from "./components/Sidebar";
 import RunbooksView from "./components/RunbooksView";
 import RunbookView from "./components/RunbookView";
 import RunView from "./components/RunView";
-import SystemsView from "./components/SystemsView";
+import ServicesView, { ServiceView } from "./components/ServicesView";
 import SystemRunView from "./components/SystemRunView";
 import PackagesView from "./components/PackagesView";
 import PackageView from "./components/PackageView";
+import ActivityView from "./components/ActivityView";
 
 export default function App() {
   onMount(init);
@@ -35,15 +36,17 @@ export default function App() {
           <Show when={asKind("run")} keyed>
             {(v) => <RunView id={v.id} runbook={v.runbook} />}
           </Show>
-          <Show when={view().kind === "systems"}>
-            <SystemsView />
+          <Show when={view().kind === "services"}>
+            <ServicesView />
           </Show>
+          <Show when={asKind("service")} keyed>{(v) => <ServiceView name={v.name} tab={v.tab} />}</Show>
           <Show when={asKind("sysrun")} keyed>
-            {(v) => <SystemRunView id={v.id} system={v.system} action={v.action} />}
+            {(v) => <SystemRunView id={v.id} service={v.service} system={v.system} action={v.action} playbook={v.playbook} play={v.play} />}
           </Show>
           <Show when={view().kind === "packages"}>
             <PackagesView />
           </Show>
+          <Show when={view().kind === "activity"}><ActivityView /></Show>
           <Show when={asKind("package")} keyed>
             {(v) => <PackageView name={v.name} runbook={v.runbook} />}
           </Show>

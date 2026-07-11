@@ -28,6 +28,8 @@ tempfile = "3"
 wcl_lang = { path = "../../WCL/crates/wcl_lang" }
 # powershell -EncodedCommand payloads for Windows-over-ssh targets.
 base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+cron = "0.15"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -116,7 +116,7 @@ export default function RunbookView(props: { name: string }) {
     <>
       <PageHead
         title={props.name}
-        sub={inventory()?.description || "runbook"}
+        sub={inventory()?.description || "playbook"}
         actions={
           <div class="head-actions">
             <Button size="sm" onClick={validate} disabled={validating()}>

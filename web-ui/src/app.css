@@ -27,6 +27,15 @@
   letter-spacing: 0.08em;
   color: var(--fg-muted, #888);
 }
+.sidebar-toggle {
+  width: 100%;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.sidebar-toggle:hover { color: inherit; }
 .run-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -183,11 +192,68 @@
 }
 
 /* --- systems ------------------------------------------------------------ */
+.service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 14px;
+}
+.service-card-main {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) repeat(3, auto);
+  align-items: center;
+  gap: 16px;
+  padding: 2px;
+  color: inherit;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.service-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--accent, #73a9ff);
+  background: color-mix(in srgb, var(--accent, #73a9ff) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #73a9ff) 25%, transparent);
+}
+.service-card-copy { display: flex; flex-direction: column; gap: 3px; }
+.service-metric { display: flex; flex-direction: column; align-items: flex-end; min-width: 48px; }
+.service-metric strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.service-metric small { color: var(--fg-muted, #888); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.service-card-actions { display: flex; justify-content: flex-end; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-muted, rgba(255,255,255,.08)); }
+.service-tabs { display: flex; align-items: center; gap: 2px; margin: -4px 0 18px; padding-bottom: 8px; border-bottom: 1px solid var(--border-muted, rgba(255,255,255,.08)); }
+.service-tabs button { display: flex; align-items: center; gap: 7px; padding: 8px 12px; color: var(--fg-muted, #888); background: none; border: 0; border-radius: 6px; cursor: pointer; font: inherit; }
+.service-tabs button:hover:not(:disabled), .service-tabs button.active { color: inherit; background: var(--bg-hover, rgba(255,255,255,.06)); }
+.service-tabs button.active { box-shadow: inset 0 -2px var(--accent, #73a9ff); }
+.service-tabs button:disabled { opacity: .45; cursor: not-allowed; }
+.service-tabs button > span:not(.forge-badge) { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+.overview-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.big-number { font-size: 32px; line-height: 1; font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+.system-head { display: flex; align-items: center; gap: 10px; }
+.assignment-list { margin: 14px -2px -2px; border-top: 1px solid var(--border-muted, rgba(255,255,255,.08)); }
+.schedule-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.schedule-history { margin: 14px -2px -2px; border-top: 1px solid var(--border-muted, rgba(255,255,255,.08)); padding-top: 6px; }
+.assignment-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 9px 2px; border-bottom: 1px solid var(--border-muted, rgba(255,255,255,.06)); }
+.assignment-row:last-child { border-bottom: 0; }
+.empty-assignment { padding: 14px 2px 2px; color: var(--fg-muted, #888); font-size: 12px; }
 .system-form {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 480px;
+}
+.assignment-heading { display: flex; align-items: center; justify-content: space-between; }
+.assignment-editor { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 8px; padding: 10px; border: 1px solid var(--border-muted, rgba(255,255,255,.08)); border-radius: 8px; }
+@media (max-width: 760px) {
+  .service-card-main { grid-template-columns: auto 1fr; }
+  .service-metric { display: none; }
+  .overview-strip { grid-template-columns: 1fr; }
+  .assignment-editor { grid-template-columns: 1fr; }
+  .system-form { min-width: 0; }
 }
 .form-grid {
   display: grid;

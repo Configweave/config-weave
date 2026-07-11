@@ -10,6 +10,7 @@ mod desktop;
 mod packages;
 mod runbooks;
 mod runs;
+mod scheduler;
 mod state;
 mod sysruns;
 mod systems;
@@ -193,10 +194,10 @@ async fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
-    // A malformed systems.wcl refuses startup: a later GUI save would
+    // A malformed services.wcl refuses startup: a later GUI save would
     // regenerate (and so clobber) a file we could not fully read.
-    let systems_path = root.join("systems.wcl");
-    let loaded_systems = match systems::load(&systems_path) {
+    let services_path = root.join("services.wcl");
+    let loaded_services = match systems::load(&services_path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("weave-server: {e}");
@@ -247,43 +248,70 @@ async fn main() -> ExitCode {
         test_binary_windows: args.test_binary_windows,
         runs: runs::RunManager::default(),
         events: app.event_bus(),
-        systems_path,
-        systems: std::sync::Mutex::new(loaded_systems),
+        services_path,
+        services: std::sync::Mutex::new(loaded_services),
         deploy_binaries: deploy,
         sysruns: sysruns::SysRunManager::default(),
         packages_dir,
         pkg_wrapper: packages::WrapperCache::default(),
     });
+    scheduler::spawn(state.clone());
 
     app = app
-        .route("/api/runbooks", get(runbooks::list))
-        .route("/api/runbooks/{rb}/tree", get(runbooks::tree))
+        .route("/api/playbooks", get(runbooks::list))
+        .route("/api/playbooks/{rb}/tree", get(runbooks::tree))
         .route(
-            "/api/runbooks/{rb}/file",
+            "/api/playbooks/{rb}/file",
             get(runbooks::file_get).put(runbooks::file_put),
         )
-        .route("/api/runbooks/{rb}/validate", post(runbooks::validate))
-        .route("/api/runbooks/{rb}/inventory", get(runbooks::inventory))
-        .route("/api/runbooks/{rb}/doc/parse", post(runbooks::doc_parse))
-        .route("/api/runbooks/{rb}/doc/render", post(runbooks::doc_render))
+        .route("/api/playbooks/{rb}/validate", post(runbooks::validate))
+        .route("/api/playbooks/{rb}/inventory", get(runbooks::inventory))
+        .route("/api/playbooks/{rb}/doc/parse", post(runbooks::doc_parse))
+        .route("/api/playbooks/{rb}/doc/render", post(runbooks::doc_render))
         .route(
-            "/api/runbooks/{rb}/doc",
+            "/api/playbooks/{rb}/doc",
             axum::routing::put(runbooks::doc_save),
         )
         .route("/api/templates", get(runbooks::templates))
-        .route("/api/systems", get(systems::list).post(systems::create))
         .route(
-            "/api/systems/{name}",
-            axum::routing::put(systems::update).delete(systems::delete),
+            "/api/services",
+            get(systems::list).post(systems::create_service),
         )
-        .route("/api/systems/{name}/runs", post(sysruns::create))
+        .route(
+            "/api/services/{name}",
+            axum::routing::put(systems::update_service).delete(systems::delete_service),
+        )
+        .route(
+            "/api/services/{service}/systems",
+            post(systems::create_system),
+        )
+        .route(
+            "/api/services/{service}/systems/{name}",
+            axum::routing::put(systems::update_system).delete(systems::delete_system),
+        )
+        .route(
+            "/api/services/{service}/systems/{name}/runs",
+            post(sysruns::create),
+        )
+        .route(
+            "/api/services/{service}/schedules",
+            post(systems::create_schedule),
+        )
+        .route(
+            "/api/services/{service}/schedules/{name}",
+            axum::routing::put(systems::update_schedule).delete(systems::delete_schedule),
+        )
+        .route(
+            "/api/services/{service}/schedules/{name}/run",
+            post(scheduler::run_now),
+        )
         .route("/api/system-runs", get(sysruns::list))
         .route("/api/system-runs/{id}", get(sysruns::get))
         .route("/api/system-runs/{id}/cancel", post(sysruns::cancel))
         .route("/api/packages", get(packages::list))
         .route("/api/packages/{name}", get(packages::detail))
         .route(
-            "/api/packages/{name}/add-to-runbook",
+            "/api/packages/{name}/add-to-playbook",
             post(packages::add_to_runbook),
         )
         .route("/api/packages/{name}/test", post(packages::run_tests))
@@ -302,11 +330,11 @@ async fn main() -> ExitCode {
             axum::routing::put(packages::doc_save),
         )
         .route(
-            "/api/runbooks/{rb}/packages/{name}",
+            "/api/playbooks/{rb}/packages/{name}",
             axum::routing::delete(packages::remove_from_runbook),
         )
         .route(
-            "/api/runbooks/{rb}/packages/{name}/import",
+            "/api/playbooks/{rb}/packages/{name}/import",
             post(packages::import_to_repo),
         )
         .route("/api/runs", get(runs::list).post(runs::create))

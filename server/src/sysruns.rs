@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use tokio::io::AsyncReadExt as _;
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 
-use crate::systems::{SystemDef, SystemKind};
+use crate::systems::{AssignmentDef, SystemDef, SystemKind};
 use crate::transport::{ExecSpec, Transport, stage_dir};
 
 /// Same catch-up cap as the test runs.
@@ -54,6 +54,13 @@ pub enum SysRunStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunTrigger {
+    Manual,
+    Scheduled,
+}
+
 fn status_from_exit(code: Option<i32>) -> SysRunStatus {
     match code {
         Some(0) => SysRunStatus::Succeeded,
@@ -67,6 +74,8 @@ fn status_from_exit(code: Option<i32>) -> SysRunStatus {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SysRunRequest {
     pub action: Action,
+    pub playbook: String,
+    pub play: String,
     /// Direct systems: leave the staging dir on the target for debugging.
     #[serde(default)]
     pub keep: bool,
@@ -74,10 +83,15 @@ pub struct SysRunRequest {
 
 pub struct SysRun {
     pub id: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
     pub request: SysRunRequest,
     /// Snapshot of the system at start — later edits don't affect a
     /// running run.
     pub system: SystemDef,
+    pub service: String,
+    pub assignment: AssignmentDef,
+    pub trigger: RunTrigger,
+    pub schedule: Option<String>,
     inner: Mutex<SysRunInner>,
     cancel: tokio::sync::Notify,
 }
@@ -97,12 +111,16 @@ impl SysRun {
         let inner = self.inner.lock().unwrap();
         json!({
             "id": self.id,
+            "started_at": self.started_at,
             "system": self.system.name,
+            "service": self.service,
             "kind": self.system.kind,
             "action": self.request.action,
             "keep": self.request.keep,
-            "playbook": self.system.playbook,
-            "play": self.system.play,
+            "playbook": self.assignment.playbook,
+            "play": self.assignment.play,
+            "trigger": self.trigger,
+            "schedule": self.schedule,
             "status": inner.status,
             "phase": inner.phase,
             "exit_code": inner.exit_code,
@@ -116,7 +134,13 @@ impl SysRun {
         let inner = self.inner.lock().unwrap();
         json!({
             "id": self.id,
+            "started_at": self.started_at,
             "system": self.system.name,
+            "service": self.service,
+            "playbook": self.assignment.playbook,
+            "play": self.assignment.play,
+            "trigger": self.trigger,
+            "schedule": self.schedule,
             "action": self.request.action,
             "status": inner.status,
             "phase": inner.phase,
@@ -157,30 +181,37 @@ impl SysRunManager {
 
     pub fn list(&self) -> Vec<Value> {
         let mut runs: Vec<Arc<SysRun>> = self.runs.lock().unwrap().values().cloned().collect();
-        runs.sort_by(|a, b| a.id.cmp(&b.id));
+        runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
         runs.iter().map(|r| r.summary()).collect()
     }
 
     /// One running run per system: overlapping applies would race.
-    pub fn running_for(&self, system: &str) -> bool {
-        self.runs
-            .lock()
-            .unwrap()
-            .values()
-            .any(|r| r.system.name == system && r.status() == SysRunStatus::Running)
+    pub fn running_for(&self, service: &str, system: &str) -> bool {
+        self.runs.lock().unwrap().values().any(|r| {
+            r.service == service && r.system.name == system && r.status() == SysRunStatus::Running
+        })
     }
 
     pub fn start(
         &self,
         request: SysRunRequest,
+        service: String,
+        assignment: AssignmentDef,
+        trigger: RunTrigger,
+        schedule: Option<String>,
         system: SystemDef,
         ctx: SysRunContext,
     ) -> Result<Arc<SysRun>, String> {
         let id = uuid::Uuid::new_v4().to_string();
         let run = Arc::new(SysRun {
             id: id.clone(),
+            started_at: chrono::Utc::now(),
             request,
             system,
+            service,
+            assignment,
+            trigger,
+            schedule,
             inner: Mutex::new(SysRunInner {
                 status: SysRunStatus::Running,
                 phase: "starting".into(),
@@ -329,7 +360,7 @@ async fn drive_remote(run: &Arc<SysRun>, ctx: &SysRunContext) -> Outcome {
     let mut cmd = tokio::process::Command::new(&ctx.config_weave);
     cmd.arg(run.request.action.as_str())
         .arg(&ctx.runbook_dir)
-        .arg(&run.system.play)
+        .arg(&run.assignment.play)
         .args(["--json", "--events-ndjson", "--continue-on-error"])
         .arg("--var-file")
         .arg(var_file.path());
@@ -442,7 +473,7 @@ async fn drive_direct(run: &Arc<SysRun>, ctx: &SysRunContext) -> Outcome {
             args: vec![
                 run.request.action.as_str().to_string(),
                 playbook_dest.clone(),
-                sys.play.clone(),
+                run.assignment.play.clone(),
                 "--json".into(),
                 "--events-ndjson".into(),
                 "--continue-on-error".into(),
@@ -502,48 +533,80 @@ use forge_server::{RequireClaims, err, ok};
 use crate::runbooks::runbook_dir;
 use crate::state::SharedState;
 
-/// POST /api/systems/{name}/runs — `{action, keep?}` → `{id}`.
+/// POST /api/services/{service}/systems/{name}/runs.
 pub async fn create(
     Extension(state): Extension<SharedState>,
-    UrlPath(name): UrlPath<String>,
+    UrlPath((service, name)): UrlPath<(String, String)>,
     _claims: RequireClaims,
     axum::Json(request): axum::Json<SysRunRequest>,
 ) -> Response {
-    let Some(system) = state
+    match start_system_run(&state, &service, &name, request, RunTrigger::Manual, None) {
+        Ok(run) => ok(json!({ "id": run.id })),
+        Err((status, e)) => err(status, e),
+    }
+}
+
+pub(crate) fn start_system_run(
+    state: &SharedState,
+    service: &str,
+    name: &str,
+    request: SysRunRequest,
+    trigger: RunTrigger,
+    schedule: Option<String>,
+) -> Result<Arc<SysRun>, (StatusCode, String)> {
+    let services = state.services.lock().unwrap();
+    let svc = services
+        .iter()
+        .find(|s| s.name == service)
+        .ok_or((StatusCode::NOT_FOUND, "no such service".into()))?;
+    let system = svc
         .systems
-        .lock()
-        .unwrap()
         .iter()
         .find(|s| s.name == name)
         .cloned()
-    else {
-        return err(StatusCode::NOT_FOUND, "no such system");
+        .ok_or((StatusCode::NOT_FOUND, "no such system".into()))?;
+    let assignment = AssignmentDef {
+        playbook: request.playbook.clone(),
+        play: request.play.clone(),
     };
-    if state.sysruns.running_for(&name) {
-        return err(
-            StatusCode::CONFLICT,
-            "a run against this system is already in progress",
-        );
+    if !system.assignments.contains(&assignment) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "playbook/play is not assigned to this system".into(),
+        ));
     }
-    let Some(dir) = runbook_dir(&state, &system.playbook) else {
-        return err(
+    drop(services);
+    if state.sysruns.running_for(service, name) {
+        return Err((
             StatusCode::CONFLICT,
-            format!(
-                "the system's runbook '{}' no longer exists",
-                system.playbook
-            ),
-        );
-    };
+            "a run against this system is already in progress".into(),
+        ));
+    }
+    let dir = runbook_dir(state, &assignment.playbook).ok_or((
+        StatusCode::CONFLICT,
+        format!(
+            "the assigned playbook '{}' no longer exists",
+            assignment.playbook
+        ),
+    ))?;
     let ctx = SysRunContext {
         config_weave: state.config_weave.clone(),
         runbook_dir: dir,
         deploy_binary: state.deploy_binaries.get(&system.binary_key()).cloned(),
         events: state.events.clone(),
     };
-    match state.sysruns.start(request, system, ctx) {
-        Ok(run) => ok(json!({ "id": run.id })),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
-    }
+    state
+        .sysruns
+        .start(
+            request,
+            service.to_string(),
+            assignment,
+            trigger,
+            schedule,
+            system,
+            ctx,
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))
 }
 
 /// GET /api/system-runs
@@ -589,8 +652,6 @@ mod tests {
         SystemDef {
             name: "edge".into(),
             description: None,
-            playbook: "net".into(),
-            play: "router".into(),
             kind: SystemKind::Remote,
             os: TargetOs::Linux,
             arch: "x86_64".into(),
@@ -603,6 +664,10 @@ mod tests {
                 private_key: None,
                 use_tls: false,
             },
+            assignments: vec![AssignmentDef {
+                playbook: "net".into(),
+                play: "router".into(),
+            }],
         }
     }
 

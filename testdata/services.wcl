@@ -1,0 +1,29 @@
+#  Config Weave services inventory — managed by weave-server.
+#  GUI edits regenerate this file; hand edits survive a reload but
+#  not the next GUI save. Kept at mode 0600 (inline credentials).
+
+service "test" {
+  system "test" {
+    kind = "direct"
+    os = "linux"
+    arch = "x86_64"
+    transport "ssh" {
+      host = "localhost"
+      port = 22
+      user = "user"
+      password = "password"
+    }
+    assignment {
+      playbook = "sample"
+      play = "baseline"
+    }
+  }
+  schedule "hourly-baseline-check" {
+    system = "test"
+    playbook = "sample"
+    play = "baseline"
+    action = "check"
+    cron = "0 0 * * * *"
+    enabled = false
+  }
+}

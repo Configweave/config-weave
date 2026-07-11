@@ -316,15 +316,21 @@ weave-server).
   carries the one final `--json` report. `list --json` now also emits
   each package's `resources`/`gatherers` with full param schemas (the
   GUI's docs pages and schema-aware property editors feed off it).
-- **Systems inventory.** `{server root}/systems.wcl`, schema
-  `<weave/systems.wcl>` (embedded in both crates from
-  `src/vocab/systems.wcl`): `system "name" { playbook, play, kind =
+- **Services inventory.** `{server root}/services.wcl`, schema
+  `<weave/services.wcl>` (embedded in both crates from
+  `src/vocab/services.wcl`): `service "name" { system "name" { kind =
   "direct"|"remote", os, arch, transport "ssh"|"winrm" { host, port?,
-  user, password?, private_key?, use_tls } }`. Credentials are inline
+  user, password?, private_key?, use_tls } assignment { playbook, play } } }`.
+  Systems may have multiple playbook assignments. Credentials are inline
   by explicit choice; the server keeps the file 0600 and regenerates it
   on every GUI edit via wcl_lang's AST builder + canonical printer
-  (hand comments do not survive a GUI save). A malformed systems.wcl
+  (hand comments do not survive a GUI save). A malformed services.wcl
   refuses server startup rather than risk a clobbering save.
+- **Service schedules.** A service can persist named, enabled schedules
+  targeting one system assignment with a `check` or `apply` action and a
+  six-field UTC cron expression. The server evaluates schedules every
+  15 seconds; automatic and “Run now” executions share the system-run
+  manager and carry schedule/trigger metadata for session history.
 - **System runs.** *Remote* systems run the playbook locally on the
   server with the connection details injected as vars via a 0600
   `--var-file`: `system_name/host/port/user/password/private_key/

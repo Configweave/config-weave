@@ -9,12 +9,16 @@ export type View =
   | { kind: "runbooks" }
   | { kind: "runbook"; name: string }
   | { kind: "run"; id: string; runbook: string }
-  | { kind: "systems" }
-  | { kind: "sysrun"; id: string; system: string; action: string }
+  | { kind: "services" }
+  | { kind: "service"; name: string; tab?: "overview" | "systems" | "schedules" }
+  | { kind: "sysrun"; id: string; service: string; system: string; action: string; playbook: string; play: string }
   | { kind: "packages" }
+  | { kind: "activity" }
   | { kind: "package"; name: string; runbook?: string };
 
-export const [view, setView] = createSignal<View>({ kind: "runbooks" });
+export const [view, setView] = createSignal<View>({ kind: "services" });
+export const [servicesRevision, setServicesRevision] = createSignal(1);
+export const notifyServicesChanged = () => setServicesRevision((n) => n + 1);
 export const [ready, setReady] = createSignal(false);
 export const [needsLogin, setNeedsLogin] = createSignal(false);
 

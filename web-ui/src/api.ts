@@ -102,11 +102,11 @@ export interface RunSnapshot extends RunSummary {
   report: any | null;
 }
 
-export const listRunbooks = () => api.request<RunbookEntry[]>("GET", "/api/runbooks");
+export const listRunbooks = () => api.request<RunbookEntry[]>("GET", "/api/playbooks");
 export const validateRunbook = (rb: string) =>
-  api.request<ValidateResult>("POST", `/api/runbooks/${encodeURIComponent(rb)}/validate`);
+  api.request<ValidateResult>("POST", `/api/playbooks/${encodeURIComponent(rb)}/validate`);
 export const runbookInventory = (rb: string) =>
-  api.request<Inventory>("GET", `/api/runbooks/${encodeURIComponent(rb)}/inventory`);
+  api.request<Inventory>("GET", `/api/playbooks/${encodeURIComponent(rb)}/inventory`);
 
 // --- graphical editors (DocJson) --------------------------------------------
 
@@ -290,7 +290,7 @@ const scopeAt = (base: string): WorkspaceScope => ({
   docSave: (path, doc, base_hash) => api.request("PUT", `${base}/doc`, { path, doc, base_hash }),
 });
 
-export const runbookScope = (rb: string) => scopeAt(`/api/runbooks/${encodeURIComponent(rb)}`);
+export const runbookScope = (rb: string) => scopeAt(`/api/playbooks/${encodeURIComponent(rb)}`);
 export const packageScope = (name: string) =>
   scopeAt(`/api/packages/${encodeURIComponent(name)}`);
 
@@ -325,17 +325,44 @@ export interface TransportConfig {
 export interface SystemDef {
   name: string;
   description: string | null;
-  playbook: string;
-  play: string;
   kind: "direct" | "remote";
   os: "linux" | "windows";
   arch: string;
   transport: TransportConfig;
+  assignments: AssignmentDef[];
+}
+
+export interface AssignmentDef {
+  playbook: string;
+  play: string;
+}
+
+export interface ServiceDef {
+  name: string;
+  description: string | null;
+  systems: SystemDef[];
+  schedules: ScheduleDef[];
+}
+
+export interface ScheduleDef {
+  name: string;
+  system: string;
+  playbook: string;
+  play: string;
+  action: "check" | "apply";
+  cron: string;
+  enabled: boolean;
 }
 
 export interface SysRunSummary {
   id: string;
+  started_at: string;
   system: string;
+  service: string;
+  playbook: string;
+  play: string;
+  trigger: "manual" | "scheduled";
+  schedule: string | null;
   action: "check" | "apply";
   status: string;
   phase: string;
@@ -352,16 +379,20 @@ export interface SysRunSnapshot extends SysRunSummary {
   report: any | null;
 }
 
-export const listSystems = () => api.request<SystemDef[]>("GET", "/api/systems");
-export const createSystem = (def: SystemDef) =>
-  api.request<SystemDef>("POST", "/api/systems", def);
-export const updateSystem = (name: string, def: SystemDef) =>
-  api.request<SystemDef>("PUT", `/api/systems/${encodeURIComponent(name)}`, def);
-export const deleteSystem = (name: string) =>
-  api.request<{ deleted: string }>("DELETE", `/api/systems/${encodeURIComponent(name)}`);
+export const listServices = () => api.request<ServiceDef[]>("GET", "/api/services");
+export const createService = (def: ServiceDef) => api.request<ServiceDef>("POST", "/api/services", def);
+export const updateService = (name: string, def: ServiceDef) => api.request<ServiceDef>("PUT", `/api/services/${encodeURIComponent(name)}`, def);
+export const deleteService = (name: string) => api.request<{ deleted: string }>("DELETE", `/api/services/${encodeURIComponent(name)}`);
+export const createSystem = (service: string, def: SystemDef) => api.request<SystemDef>("POST", `/api/services/${encodeURIComponent(service)}/systems`, def);
+export const updateSystem = (service: string, name: string, def: SystemDef) => api.request<SystemDef>("PUT", `/api/services/${encodeURIComponent(service)}/systems/${encodeURIComponent(name)}`, def);
+export const deleteSystem = (service: string, name: string) => api.request<{ deleted: string }>("DELETE", `/api/services/${encodeURIComponent(service)}/systems/${encodeURIComponent(name)}`);
+export const createSchedule = (service: string, def: ScheduleDef) => api.request<ScheduleDef>("POST", `/api/services/${encodeURIComponent(service)}/schedules`, def);
+export const updateSchedule = (service: string, name: string, def: ScheduleDef) => api.request<ScheduleDef>("PUT", `/api/services/${encodeURIComponent(service)}/schedules/${encodeURIComponent(name)}`, def);
+export const deleteSchedule = (service: string, name: string) => api.request<{ deleted: string }>("DELETE", `/api/services/${encodeURIComponent(service)}/schedules/${encodeURIComponent(name)}`);
+export const runScheduleNow = (service: string, name: string) => api.request<{ id: string }>("POST", `/api/services/${encodeURIComponent(service)}/schedules/${encodeURIComponent(name)}/run`);
 
-export const startSystemRun = (name: string, req: { action: "check" | "apply"; keep?: boolean }) =>
-  api.request<{ id: string }>("POST", `/api/systems/${encodeURIComponent(name)}/runs`, req);
+export const startSystemRun = (service: string, name: string, req: { action: "check" | "apply"; playbook: string; play: string; keep?: boolean }) =>
+  api.request<{ id: string }>("POST", `/api/services/${encodeURIComponent(service)}/systems/${encodeURIComponent(name)}/runs`, req);
 export const listSystemRuns = () => api.request<SysRunSummary[]>("GET", "/api/system-runs");
 export const getSystemRun = (id: string) =>
   api.request<SysRunSnapshot>("GET", `/api/system-runs/${encodeURIComponent(id)}`);
@@ -396,10 +427,10 @@ export const listPackages = () =>
 export const getPackage = (name: string) =>
   api.request<PackageEntry>("GET", `/api/packages/${encodeURIComponent(name)}`);
 export const addPackageToRunbook = (name: string, runbook: string, overwrite = false) =>
-  api.request<{ runbook: string; package: string; path: string }>(
+  api.request<{ playbook: string; package: string; path: string }>(
     "POST",
-    `/api/packages/${encodeURIComponent(name)}/add-to-runbook`,
-    { runbook, overwrite },
+    `/api/packages/${encodeURIComponent(name)}/add-to-playbook`,
+    { playbook: runbook, overwrite },
   );
 export const startPackageTest = (
   name: string,
@@ -408,10 +439,10 @@ export const startPackageTest = (
 export const removePackageFromRunbook = (rb: string, name: string) =>
   api.request<{ removed: string }>(
     "DELETE",
-    `/api/runbooks/${encodeURIComponent(rb)}/packages/${encodeURIComponent(name)}`,
+    `/api/playbooks/${encodeURIComponent(rb)}/packages/${encodeURIComponent(name)}`,
   );
 export const importPackageToRepo = (rb: string, name: string) =>
   api.request<{ imported: string }>(
     "POST",
-    `/api/runbooks/${encodeURIComponent(rb)}/packages/${encodeURIComponent(name)}/import`,
+    `/api/playbooks/${encodeURIComponent(rb)}/packages/${encodeURIComponent(name)}/import`,
   );

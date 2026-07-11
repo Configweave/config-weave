@@ -1,6 +1,6 @@
-//! The systems inventory: `{root}/systems.wcl` — machines configuration
-//! is applied to. Loaded through the embedded systems vocab (the same
-//! file the CLI serves as `<weave/systems.wcl>`) and regenerated from
+//! The services inventory: `{root}/services.wcl` — services own systems,
+//! and systems own playbook assignments. Loaded through the embedded
+//! vocabulary and regenerated from
 //! structs on every GUI edit via wcl_lang's AST builder + printer, so
 //! the file is always schema-valid canonical WCL. Credentials are stored
 //! inline by explicit choice; the file is kept at mode 0600.
@@ -19,8 +19,8 @@ use crate::runbooks::runbook_dir;
 use crate::state::SharedState;
 
 /// One source of truth: the vocab embedded in the CLI crate.
-const SYSTEMS_VOCAB: &str = include_str!("../../src/vocab/systems.wcl");
-const SYSTEMS_IMPORT: &str = "weave/systems.wcl";
+const SYSTEMS_VOCAB: &str = include_str!("../../src/vocab/services.wcl");
+const SYSTEMS_IMPORT: &str = "weave/services.wcl";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -131,13 +131,45 @@ pub struct SystemDef {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    /// Runbook (immediate child dir of the server root) and play to run.
-    pub playbook: String,
-    pub play: String,
     pub kind: SystemKind,
     pub os: TargetOs,
     pub arch: String,
     pub transport: TransportConfig,
+    #[serde(default)]
+    pub assignments: Vec<AssignmentDef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssignmentDef {
+    pub playbook: String,
+    pub play: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServiceDef {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub systems: Vec<SystemDef>,
+    #[serde(default)]
+    pub schedules: Vec<ScheduleDef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScheduleDef {
+    pub name: String,
+    pub system: String,
+    pub playbook: String,
+    pub play: String,
+    pub action: String,
+    pub cron: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl SystemDef {
@@ -155,10 +187,10 @@ fn systems_loader() -> wcl_lang::FileLoader {
     reg.loader(disk_loader())
 }
 
-/// Read and schema-validate `systems.wcl`. A missing file is an empty
+/// Read and schema-validate `services.wcl`. A missing file is an empty
 /// inventory; a malformed one is an error (the caller must not risk a
 /// later save clobbering a file we could not fully read).
-pub fn load(path: &Path) -> Result<Vec<SystemDef>, String> {
+pub fn load(path: &Path) -> Result<Vec<ServiceDef>, String> {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -176,7 +208,7 @@ pub fn load(path: &Path) -> Result<Vec<SystemDef>, String> {
     let env = Environment::new();
     let doc = Document::open_at_with_loader(
         &with_import,
-        "systems.wcl",
+        "services.wcl",
         path.parent().map(|p| p.to_path_buf()),
         &env,
         systems_loader(),
@@ -189,25 +221,81 @@ pub fn load(path: &Path) -> Result<Vec<SystemDef>, String> {
         return Err(format!("{}: {}", path.display(), msgs.join("; ")));
     }
 
-    let mut systems = Vec::new();
+    let mut services = Vec::new();
     for block in doc.blocks() {
-        if block.kind() != "system" {
+        if block.kind() != "service" {
             continue;
         }
-        systems.push(read_system(&block).map_err(|e| format!("{}: {e}", path.display()))?);
+        services.push(read_service(&block).map_err(|e| format!("{}: {e}", path.display()))?);
     }
 
     let mut seen = std::collections::HashSet::new();
-    for s in &systems {
-        if !seen.insert(s.name.as_str()) {
+    for service in &services {
+        if !seen.insert(service.name.as_str()) {
             return Err(format!(
-                "{}: duplicate system name '{}'",
+                "{}: duplicate service name '{}'",
                 path.display(),
-                s.name
+                service.name
             ));
         }
+        let mut systems = std::collections::HashSet::new();
+        for system in &service.systems {
+            if !systems.insert(system.name.as_str()) {
+                return Err(format!(
+                    "{}: duplicate system name '{}' in service '{}'",
+                    path.display(),
+                    system.name,
+                    service.name
+                ));
+            }
+        }
     }
-    Ok(systems)
+    Ok(services)
+}
+
+fn read_service(block: &wcl_lang::Block<'_>) -> Result<ServiceDef, String> {
+    let name = label_of(block)?;
+    let systems = block
+        .blocks()
+        .filter(|b| b.kind() == "system")
+        .map(|b| read_system(&b))
+        .collect::<Result<Vec<_>, _>>()?;
+    let schedules = block
+        .blocks()
+        .filter(|b| b.kind() == "schedule")
+        .map(|b| read_schedule(&b))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ServiceDef {
+        name,
+        description: str_field(block, "description")?,
+        systems,
+        schedules,
+    })
+}
+
+fn read_schedule(block: &wcl_lang::Block<'_>) -> Result<ScheduleDef, String> {
+    let name = label_of(block)?;
+    let enabled = match block.fields().find(|f| f.name() == "enabled") {
+        None => true,
+        Some(f) => match f.value().map_err(|e| e.to_string())?.clone() {
+            wcl_lang::Value::Bool(v) => v,
+            other => {
+                return Err(format!(
+                    "schedule '{name}': enabled must be a bool, got {other:?}"
+                ));
+            }
+        },
+    };
+    let ctx = format!("schedule '{name}'");
+    Ok(ScheduleDef {
+        name,
+        system: req_str_field(block, "system", &ctx)?,
+        playbook: req_str_field(block, "playbook", &ctx)?,
+        play: req_str_field(block, "play", &ctx)?,
+        action: req_str_field(block, "action", &ctx)?,
+        cron: req_str_field(block, "cron", &ctx)?,
+        enabled,
+    })
 }
 
 fn label_of(block: &wcl_lang::Block<'_>) -> Result<String, String> {
@@ -259,12 +347,20 @@ fn read_system(block: &wcl_lang::Block<'_>) -> Result<SystemDef, String> {
 
     Ok(SystemDef {
         description: str_field(block, "description")?,
-        playbook: req_str_field(block, "playbook", &ctx)?,
-        play: req_str_field(block, "play", &ctx)?,
         kind,
         os,
         arch: str_field(block, "arch")?.unwrap_or_else(|| "x86_64".into()),
         transport,
+        assignments: block
+            .blocks()
+            .filter(|b| b.kind() == "assignment")
+            .map(|b| {
+                Ok(AssignmentDef {
+                    playbook: req_str_field(&b, "playbook", &ctx)?,
+                    play: req_str_field(&b, "play", &ctx)?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
         name,
     })
 }
@@ -305,19 +401,19 @@ fn read_transport(block: &wcl_lang::Block<'_>, ctx: &str) -> Result<TransportCon
 
 // ------------------------------------------------------------------ save
 
-/// Regenerate `systems.wcl` from the inventory: fresh AST through the
+/// Regenerate `services.wcl` from the inventory: fresh AST through the
 /// canonical printer, written atomically at mode 0600.
-pub fn save(path: &Path, systems: &[SystemDef]) -> Result<(), String> {
+pub fn save(path: &Path, services: &[ServiceDef]) -> Result<(), String> {
     let mut src = ast::Source {
         items: Vec::new(),
         trailing_trivia: Vec::new(),
     };
-    for sys in systems {
-        edit::append_top_level_block(&mut src, system_block(sys));
+    for service in services {
+        edit::append_top_level_block(&mut src, service_block(service));
     }
 
     let header = [
-        " Config Weave systems inventory — managed by weave-server.",
+        " Config Weave services inventory — managed by weave-server.",
         " GUI edits regenerate this file; hand edits survive a reload but",
         " not the next GUI save. Kept at mode 0600 (inline credentials).",
     ];
@@ -358,13 +454,41 @@ fn str_expr(s: &str) -> ast::Expr {
     edit::string_literal_expr(s)
 }
 
+fn service_block(service: &ServiceDef) -> ast::Block {
+    let mut fields = Vec::new();
+    if let Some(d) = &service.description {
+        fields.push(("description".into(), str_expr(d)));
+    }
+    let mut block = edit::build_block("service", &[], vec![str_expr(&service.name)], fields);
+    for system in &service.systems {
+        block.items.push(ast::Item::Block(system_block(system)));
+    }
+    for schedule in &service.schedules {
+        let mut fields = vec![
+            ("system".into(), str_expr(&schedule.system)),
+            ("playbook".into(), str_expr(&schedule.playbook)),
+            ("play".into(), str_expr(&schedule.play)),
+            ("action".into(), str_expr(&schedule.action)),
+            ("cron".into(), str_expr(&schedule.cron)),
+        ];
+        if !schedule.enabled {
+            fields.push(("enabled".into(), ast::Expr::Bool(false)));
+        }
+        block.items.push(ast::Item::Block(edit::build_block(
+            "schedule",
+            &[],
+            vec![str_expr(&schedule.name)],
+            fields,
+        )));
+    }
+    block
+}
+
 fn system_block(sys: &SystemDef) -> ast::Block {
     let mut fields: Vec<(String, ast::Expr)> = Vec::new();
     if let Some(d) = &sys.description {
         fields.push(("description".into(), str_expr(d)));
     }
-    fields.push(("playbook".into(), str_expr(&sys.playbook)));
-    fields.push(("play".into(), str_expr(&sys.play)));
     fields.push(("kind".into(), str_expr(sys.kind.as_str())));
     fields.push(("os".into(), str_expr(sys.os.as_str())));
     fields.push(("arch".into(), str_expr(&sys.arch)));
@@ -388,20 +512,25 @@ fn system_block(sys: &SystemDef) -> ast::Block {
     }
     let tblock = edit::build_block("transport", &[], vec![str_expr(t.kind.as_str())], tfields);
     block.items.push(ast::Item::Block(tblock));
+    for assignment in &sys.assignments {
+        block.items.push(ast::Item::Block(edit::build_block(
+            "assignment",
+            &[],
+            vec![],
+            vec![
+                ("playbook".into(), str_expr(&assignment.playbook)),
+                ("play".into(), str_expr(&assignment.play)),
+            ],
+        )));
+    }
     block
 }
 
 // ------------------------------------------------------------- handlers
 
-fn validate_def(state: &SharedState, def: &SystemDef) -> Result<(), String> {
+fn validate_system(state: &SharedState, def: &SystemDef) -> Result<(), String> {
     if def.name.is_empty() || def.name.len() > 128 {
         return Err("system name must be 1-128 characters".into());
-    }
-    if runbook_dir(state, &def.playbook).is_none() {
-        return Err(format!("no such runbook '{}'", def.playbook));
-    }
-    if def.play.is_empty() {
-        return Err("play must not be empty".into());
     }
     if def.arch.is_empty() {
         return Err("arch must not be empty".into());
@@ -412,95 +541,348 @@ fn validate_def(state: &SharedState, def: &SystemDef) -> Result<(), String> {
     if def.transport.user.is_empty() {
         return Err("transport user must not be empty".into());
     }
+    let mut seen = std::collections::HashSet::new();
+    for assignment in &def.assignments {
+        if runbook_dir(state, &assignment.playbook).is_none() {
+            return Err(format!("no such playbook '{}'", assignment.playbook));
+        }
+        if assignment.play.is_empty() {
+            return Err("play must not be empty".into());
+        }
+        if !seen.insert((assignment.playbook.as_str(), assignment.play.as_str())) {
+            return Err(format!(
+                "duplicate assignment '{}:{}'",
+                assignment.playbook, assignment.play
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_service(state: &SharedState, def: &ServiceDef) -> Result<(), String> {
+    if def.name.is_empty() || def.name.len() > 128 {
+        return Err("service name must be 1-128 characters".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for system in &def.systems {
+        if !seen.insert(system.name.as_str()) {
+            return Err(format!("duplicate system name '{}'", system.name));
+        }
+        validate_system(state, system)?;
+    }
+    let mut schedule_names = std::collections::HashSet::new();
+    for schedule in &def.schedules {
+        validate_schedule(def, schedule)?;
+        if !schedule_names.insert(schedule.name.as_str()) {
+            return Err(format!("duplicate schedule name '{}'", schedule.name));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_schedule(
+    service: &ServiceDef,
+    schedule: &ScheduleDef,
+) -> Result<(), String> {
+    use std::str::FromStr as _;
+    if schedule.name.is_empty() || schedule.name.len() > 128 {
+        return Err("schedule name must be 1-128 characters".into());
+    }
+    if !matches!(schedule.action.as_str(), "check" | "apply") {
+        return Err("schedule action must be check or apply".into());
+    }
+    cron::Schedule::from_str(&schedule.cron)
+        .map_err(|e| format!("invalid cron expression: {e}"))?;
+    let system = service
+        .systems
+        .iter()
+        .find(|s| s.name == schedule.system)
+        .ok_or_else(|| format!("no such system '{}' in service", schedule.system))?;
+    let assignment = AssignmentDef {
+        playbook: schedule.playbook.clone(),
+        play: schedule.play.clone(),
+    };
+    if !system.assignments.contains(&assignment) {
+        return Err(format!(
+            "{}:{} is not assigned to system '{}'",
+            schedule.playbook, schedule.play, schedule.system
+        ));
+    }
     Ok(())
 }
 
 /// Persist the inventory, restoring `previous` in memory on failure.
 fn persist(
     state: &SharedState,
-    systems: &mut Vec<SystemDef>,
-    previous: Vec<SystemDef>,
+    services: &mut Vec<ServiceDef>,
+    previous: Vec<ServiceDef>,
 ) -> Option<String> {
-    match save(&state.systems_path, systems) {
+    match save(&state.services_path, services) {
         Ok(()) => None,
         Err(e) => {
-            *systems = previous;
+            *services = previous;
             Some(e)
         }
     }
 }
 
-/// GET /api/systems
+/// GET /api/services
 pub async fn list(Extension(state): Extension<SharedState>, _claims: RequireClaims) -> Response {
-    let systems = state.systems.lock().unwrap().clone();
-    ok(systems)
+    ok(state.services.lock().unwrap().clone())
 }
 
-/// POST /api/systems — body `SystemDef`.
-pub async fn create(
+/// POST /api/services — body `ServiceDef`.
+pub async fn create_service(
     Extension(state): Extension<SharedState>,
     _claims: RequireClaims,
-    axum::Json(def): axum::Json<SystemDef>,
+    axum::Json(def): axum::Json<ServiceDef>,
 ) -> Response {
-    if let Err(e) = validate_def(&state, &def) {
+    if let Err(e) = validate_service(&state, &def) {
         return err(StatusCode::BAD_REQUEST, e);
     }
-    let mut systems = state.systems.lock().unwrap();
-    if systems.iter().any(|s| s.name == def.name) {
+    let mut services = state.services.lock().unwrap();
+    if services.iter().any(|s| s.name == def.name) {
         return err(
             StatusCode::CONFLICT,
-            "a system with that name already exists",
+            "a service with that name already exists",
         );
     }
-    let previous = systems.clone();
-    systems.push(def.clone());
-    if let Some(e) = persist(&state, &mut systems, previous) {
+    let previous = services.clone();
+    services.push(def.clone());
+    if let Some(e) = persist(&state, &mut services, previous) {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e);
     }
     ok(def)
 }
 
-/// PUT /api/systems/{name} — body `SystemDef`; rename allowed via body.
-pub async fn update(
+/// PUT /api/services/{name} — body `ServiceDef`; rename allowed.
+pub async fn update_service(
     Extension(state): Extension<SharedState>,
     UrlPath(name): UrlPath<String>,
     _claims: RequireClaims,
-    axum::Json(def): axum::Json<SystemDef>,
+    axum::Json(def): axum::Json<ServiceDef>,
 ) -> Response {
-    if let Err(e) = validate_def(&state, &def) {
+    if let Err(e) = validate_service(&state, &def) {
         return err(StatusCode::BAD_REQUEST, e);
     }
-    let mut systems = state.systems.lock().unwrap();
-    let Some(idx) = systems.iter().position(|s| s.name == name) else {
-        return err(StatusCode::NOT_FOUND, "no such system");
+    let mut services = state.services.lock().unwrap();
+    let Some(idx) = services.iter().position(|s| s.name == name) else {
+        return err(StatusCode::NOT_FOUND, "no such service");
     };
-    if def.name != name && systems.iter().any(|s| s.name == def.name) {
+    if def.name != name && services.iter().any(|s| s.name == def.name) {
         return err(
             StatusCode::CONFLICT,
-            "a system with that name already exists",
+            "a service with that name already exists",
         );
     }
-    let previous = systems.clone();
-    systems[idx] = def.clone();
-    if let Some(e) = persist(&state, &mut systems, previous) {
+    let previous = services.clone();
+    services[idx] = def.clone();
+    if let Some(e) = persist(&state, &mut services, previous) {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e);
     }
     ok(def)
 }
 
-/// DELETE /api/systems/{name}
-pub async fn delete(
+/// DELETE /api/services/{name}
+pub async fn delete_service(
     Extension(state): Extension<SharedState>,
     UrlPath(name): UrlPath<String>,
     _claims: RequireClaims,
 ) -> Response {
-    let mut systems = state.systems.lock().unwrap();
-    let Some(idx) = systems.iter().position(|s| s.name == name) else {
+    let mut services = state.services.lock().unwrap();
+    let Some(idx) = services.iter().position(|s| s.name == name) else {
+        return err(StatusCode::NOT_FOUND, "no such service");
+    };
+    let previous = services.clone();
+    let removed = services.remove(idx);
+    if let Some(e) = persist(&state, &mut services, previous) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok(serde_json::json!({ "deleted": removed.name }))
+}
+
+pub async fn create_system(
+    Extension(state): Extension<SharedState>,
+    UrlPath(service): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(def): axum::Json<SystemDef>,
+) -> Response {
+    if let Err(e) = validate_system(&state, &def) {
+        return err(StatusCode::BAD_REQUEST, e);
+    }
+    let mut services = state.services.lock().unwrap();
+    let Some(idx) = services.iter().position(|s| s.name == service) else {
+        return err(StatusCode::NOT_FOUND, "no such service");
+    };
+    if services[idx].systems.iter().any(|s| s.name == def.name) {
+        return err(
+            StatusCode::CONFLICT,
+            "a system with that name already exists in this service",
+        );
+    }
+    let previous = services.clone();
+    services[idx].systems.push(def.clone());
+    if let Some(e) = persist(&state, &mut services, previous) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok(def)
+}
+
+pub async fn update_system(
+    Extension(state): Extension<SharedState>,
+    UrlPath((service, name)): UrlPath<(String, String)>,
+    _claims: RequireClaims,
+    axum::Json(def): axum::Json<SystemDef>,
+) -> Response {
+    if let Err(e) = validate_system(&state, &def) {
+        return err(StatusCode::BAD_REQUEST, e);
+    }
+    let mut services = state.services.lock().unwrap();
+    let Some(svc_idx) = services.iter().position(|s| s.name == service) else {
+        return err(StatusCode::NOT_FOUND, "no such service");
+    };
+    let Some(sys_idx) = services[svc_idx]
+        .systems
+        .iter()
+        .position(|s| s.name == name)
+    else {
         return err(StatusCode::NOT_FOUND, "no such system");
     };
-    let previous = systems.clone();
-    let removed = systems.remove(idx);
-    if let Some(e) = persist(&state, &mut systems, previous) {
+    if def.name != name && services[svc_idx].systems.iter().any(|s| s.name == def.name) {
+        return err(
+            StatusCode::CONFLICT,
+            "a system with that name already exists in this service",
+        );
+    }
+    let previous = services.clone();
+    services[svc_idx].systems[sys_idx] = def.clone();
+    if def.name != name {
+        for schedule in &mut services[svc_idx].schedules {
+            if schedule.system == name {
+                schedule.system = def.name.clone();
+            }
+        }
+    }
+    if let Err(e) = validate_service(&state, &services[svc_idx]) {
+        *services = previous;
+        return err(StatusCode::BAD_REQUEST, e);
+    }
+    if let Some(e) = persist(&state, &mut services, previous) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok(def)
+}
+
+pub async fn delete_system(
+    Extension(state): Extension<SharedState>,
+    UrlPath((service, name)): UrlPath<(String, String)>,
+    _claims: RequireClaims,
+) -> Response {
+    let mut services = state.services.lock().unwrap();
+    let Some(svc_idx) = services.iter().position(|s| s.name == service) else {
+        return err(StatusCode::NOT_FOUND, "no such service");
+    };
+    let Some(sys_idx) = services[svc_idx]
+        .systems
+        .iter()
+        .position(|s| s.name == name)
+    else {
+        return err(StatusCode::NOT_FOUND, "no such system");
+    };
+    let previous = services.clone();
+    let removed = services[svc_idx].systems.remove(sys_idx);
+    services[svc_idx].schedules.retain(|s| s.system != name);
+    if let Some(e) = persist(&state, &mut services, previous) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok(serde_json::json!({ "deleted": removed.name }))
+}
+
+pub async fn create_schedule(
+    Extension(state): Extension<SharedState>,
+    UrlPath(service): UrlPath<String>,
+    _claims: RequireClaims,
+    axum::Json(def): axum::Json<ScheduleDef>,
+) -> Response {
+    let mut services = state.services.lock().unwrap();
+    let Some(idx) = services.iter().position(|s| s.name == service) else {
+        return err(StatusCode::NOT_FOUND, "no such service");
+    };
+    if let Err(e) = validate_schedule(&services[idx], &def) {
+        return err(StatusCode::BAD_REQUEST, e);
+    }
+    if services[idx].schedules.iter().any(|s| s.name == def.name) {
+        return err(
+            StatusCode::CONFLICT,
+            "a schedule with that name already exists",
+        );
+    }
+    let previous = services.clone();
+    services[idx].schedules.push(def.clone());
+    if let Some(e) = persist(&state, &mut services, previous) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok(def)
+}
+
+pub async fn update_schedule(
+    Extension(state): Extension<SharedState>,
+    UrlPath((service, name)): UrlPath<(String, String)>,
+    _claims: RequireClaims,
+    axum::Json(def): axum::Json<ScheduleDef>,
+) -> Response {
+    let mut services = state.services.lock().unwrap();
+    let Some(svc_idx) = services.iter().position(|s| s.name == service) else {
+        return err(StatusCode::NOT_FOUND, "no such service");
+    };
+    if let Err(e) = validate_schedule(&services[svc_idx], &def) {
+        return err(StatusCode::BAD_REQUEST, e);
+    }
+    let Some(idx) = services[svc_idx]
+        .schedules
+        .iter()
+        .position(|s| s.name == name)
+    else {
+        return err(StatusCode::NOT_FOUND, "no such schedule");
+    };
+    if def.name != name
+        && services[svc_idx]
+            .schedules
+            .iter()
+            .any(|s| s.name == def.name)
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "a schedule with that name already exists",
+        );
+    }
+    let previous = services.clone();
+    services[svc_idx].schedules[idx] = def.clone();
+    if let Some(e) = persist(&state, &mut services, previous) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok(def)
+}
+
+pub async fn delete_schedule(
+    Extension(state): Extension<SharedState>,
+    UrlPath((service, name)): UrlPath<(String, String)>,
+    _claims: RequireClaims,
+) -> Response {
+    let mut services = state.services.lock().unwrap();
+    let Some(svc_idx) = services.iter().position(|s| s.name == service) else {
+        return err(StatusCode::NOT_FOUND, "no such service");
+    };
+    let Some(idx) = services[svc_idx]
+        .schedules
+        .iter()
+        .position(|s| s.name == name)
+    else {
+        return err(StatusCode::NOT_FOUND, "no such schedule");
+    };
+    let previous = services.clone();
+    let removed = services[svc_idx].schedules.remove(idx);
+    if let Some(e) = persist(&state, &mut services, previous) {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e);
     }
     ok(serde_json::json!({ "deleted": removed.name }))
@@ -510,13 +892,13 @@ pub async fn delete(
 mod tests {
     use super::*;
 
-    fn sample() -> Vec<SystemDef> {
-        vec![
-            SystemDef {
+    fn sample() -> Vec<ServiceDef> {
+        vec![ServiceDef {
+            name: "storefront".into(),
+            description: Some("Customer-facing storefront".into()),
+            systems: vec![SystemDef {
                 name: "web-01".into(),
                 description: Some("Primary web host".into()),
-                playbook: "baseline".into(),
-                play: "web".into(),
                 kind: SystemKind::Direct,
                 os: TargetOs::Linux,
                 arch: "x86_64".into(),
@@ -529,54 +911,37 @@ mod tests {
                     private_key: Some("/home/wil/.ssh/id_ed25519".into()),
                     use_tls: false,
                 },
-            },
-            SystemDef {
-                name: "edge-router".into(),
-                description: None,
-                playbook: "network".into(),
-                play: "router".into(),
-                kind: SystemKind::Remote,
-                os: TargetOs::Linux,
-                arch: "x86_64".into(),
-                transport: TransportConfig {
-                    kind: TransportKind::Ssh,
-                    host: "10.0.0.1".into(),
-                    port: None,
-                    user: "admin".into(),
-                    password: Some("hunter2 with spaces \"and quotes\"".into()),
-                    private_key: None,
-                    use_tls: false,
-                },
-            },
-            SystemDef {
-                name: "win-svc".into(),
-                description: None,
-                playbook: "windows".into(),
-                play: "base".into(),
-                kind: SystemKind::Direct,
-                os: TargetOs::Windows,
-                arch: "x86_64".into(),
-                transport: TransportConfig {
-                    kind: TransportKind::Winrm,
-                    host: "192.168.1.50".into(),
-                    port: None,
-                    user: "Administrator".into(),
-                    password: Some("p@ss".into()),
-                    private_key: None,
-                    use_tls: true,
-                },
-            },
-        ]
+                assignments: vec![
+                    AssignmentDef {
+                        playbook: "baseline".into(),
+                        play: "web".into(),
+                    },
+                    AssignmentDef {
+                        playbook: "security".into(),
+                        play: "harden".into(),
+                    },
+                ],
+            }],
+            schedules: vec![ScheduleDef {
+                name: "hourly-check".into(),
+                system: "web-01".into(),
+                playbook: "baseline".into(),
+                play: "web".into(),
+                action: "check".into(),
+                cron: "0 0 * * * *".into(),
+                enabled: true,
+            }],
+        }]
     }
 
     #[test]
     fn save_load_round_trips() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("systems.wcl");
-        let systems = sample();
-        save(&path, &systems).unwrap();
+        let path = tmp.path().join("services.wcl");
+        let services = sample();
+        save(&path, &services).unwrap();
         let loaded = load(&path).unwrap();
-        assert_eq!(loaded, systems);
+        assert_eq!(loaded, services);
 
         #[cfg(unix)]
         {
@@ -589,32 +954,33 @@ mod tests {
     #[test]
     fn missing_file_is_empty_inventory() {
         let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(load(&tmp.path().join("systems.wcl")).unwrap(), Vec::new());
+        assert_eq!(load(&tmp.path().join("services.wcl")).unwrap(), Vec::new());
     }
 
     #[test]
     fn empty_inventory_writes_a_commented_file() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("systems.wcl");
+        let path = tmp.path().join("services.wcl");
         save(&path, &[]).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("systems inventory"));
+        assert!(text.contains("services inventory"));
         assert_eq!(load(&path).unwrap(), Vec::new());
     }
 
     #[test]
     fn duplicate_names_are_rejected_on_load() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("systems.wcl");
-        let mut systems = sample();
-        systems[1].name = systems[0].name.clone();
-        save(&path, &systems).unwrap();
-        assert!(load(&path).unwrap_err().contains("duplicate system name"));
+        let path = tmp.path().join("services.wcl");
+        let mut services = sample();
+        services.push(services[0].clone());
+        save(&path, &services).unwrap();
+        assert!(load(&path).unwrap_err().contains("duplicate service name"));
     }
 
     #[test]
     fn effective_ports_follow_transport_defaults() {
-        let mut t = sample()[1].transport.clone();
+        let mut t = sample()[0].systems[0].transport.clone();
+        t.port = None;
         assert_eq!(t.effective_port(), 22);
         t.kind = TransportKind::Winrm;
         assert_eq!(t.effective_port(), 5985);
@@ -622,5 +988,25 @@ mod tests {
         assert_eq!(t.effective_port(), 5986);
         t.port = Some(1234);
         assert_eq!(t.effective_port(), 1234);
+    }
+
+    #[test]
+    fn schedules_must_target_an_assigned_playbook() {
+        let service = sample().remove(0);
+        assert!(validate_schedule(&service, &service.schedules[0]).is_ok());
+        let mut invalid = service.schedules[0].clone();
+        invalid.play = "missing".into();
+        assert!(
+            validate_schedule(&service, &invalid)
+                .unwrap_err()
+                .contains("not assigned")
+        );
+        invalid = service.schedules[0].clone();
+        invalid.cron = "not cron".into();
+        assert!(
+            validate_schedule(&service, &invalid)
+                .unwrap_err()
+                .contains("invalid cron")
+        );
     }
 }

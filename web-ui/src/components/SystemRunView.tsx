@@ -50,7 +50,7 @@ const DEPLOY_PHASES = [
   "cleanup",
 ];
 
-export default function SystemRunView(props: { id: string; system: string; action: string }) {
+export default function SystemRunView(props: { id: string; service: string; system: string; action: string; playbook: string; play: string }) {
   const [steps, setSteps] = createStore<StepState[]>([]);
   const [logs, setLogs] = createStore<{ ts: string; text: string }[]>([]);
   const [status, setStatus] = createSignal("running");
@@ -215,7 +215,7 @@ export default function SystemRunView(props: { id: string; system: string; actio
       <PageHead
         title={`${props.system} — ${props.action}`}
         sub={
-          <span class="run-status">
+          <span class="run-status"><span class="mono">{props.playbook}:{props.play}</span>
             <StatusDot tone={statusTone()} /> {status().replace("_", " ")}
           </span>
         }
