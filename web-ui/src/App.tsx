@@ -19,7 +19,6 @@ import ServicesView, { ServiceView } from "./components/ServicesView";
 import SystemRunView from "./components/SystemRunView";
 import PackagesView from "./components/PackagesView";
 import PackageView from "./components/PackageView";
-import ActivityView from "./components/ActivityView";
 
 export default function App() {
   onMount(init);
@@ -46,7 +45,6 @@ export default function App() {
           <Show when={view().kind === "packages"}>
             <PackagesView />
           </Show>
-          <Show when={view().kind === "activity"}><ActivityView /></Show>
           <Show when={asKind("package")} keyed>
             {(v) => <PackageView name={v.name} runbook={v.runbook} />}
           </Show>

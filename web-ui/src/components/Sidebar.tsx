@@ -1,6 +1,6 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { NavLink, NavSection } from "@forge/ui";
-import { Activity, BookOpen, Boxes, ChevronDown, ChevronRight, Library, PackageOpen, Server } from "lucide-solid";
+import { BookOpen, Boxes, ChevronDown, ChevronRight, Library, PackageOpen, Server } from "lucide-solid";
 import { listServices } from "../api";
 import { servicesRevision, setView, view } from "../store";
 
@@ -17,7 +17,6 @@ export default function Sidebar() {
       <Show when={libraryOpen()}>
         <NavLink icon={BookOpen} active={view().kind === "runbooks" || view().kind === "runbook"} onClick={() => setView({ kind: "runbooks" })}>Playbooks</NavLink>
         <NavLink icon={PackageOpen} active={view().kind === "packages" || view().kind === "package"} onClick={() => setView({ kind: "packages" })}>Packages</NavLink>
-        <NavLink icon={Activity} active={view().kind === "activity" || view().kind === "run"} onClick={() => setView({ kind: "activity" })}>Activity</NavLink>
       </Show>
     </NavSection>
   </>;

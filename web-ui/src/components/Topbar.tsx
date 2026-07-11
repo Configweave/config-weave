@@ -14,8 +14,7 @@ export default function Topbar() {
     if (v.kind === "runbook") return [<span>library</span>, link("playbooks", { kind: "runbooks" }), <span>{v.name}</span>];
     if (v.kind === "packages") return [<span>library</span>, <span>packages</span>];
     if (v.kind === "package") return [<span>library</span>, link("packages", { kind: "packages" }), ...(v.runbook ? [link(v.runbook, { kind: "runbook", name: v.runbook })] : []), <span>{v.name}</span>];
-    if (v.kind === "activity") return [<span>library</span>, <span>activity</span>];
-    if (v.kind === "run") return [<span>library</span>, link("activity", { kind: "activity" }), <span>run {v.id.slice(0, 8)}</span>];
+    if (v.kind === "run") return [<span>library</span>, v.runbook.startsWith("pkgs:") ? link(v.runbook.slice(5), { kind: "package", name: v.runbook.slice(5) }) : link(v.runbook, { kind: "runbook", name: v.runbook }), <span>run {v.id.slice(0, 8)}</span>];
     return [];
   };
   return <div class="topbar-inner"><strong>config-weave</strong><Crumbs items={crumbs()} /></div>;

@@ -357,7 +357,7 @@ async fn main() -> ExitCode {
             "/api/playbooks/{rb}/packages/{name}/import",
             post(packages::import_to_repo),
         )
-        .route("/api/runs", get(runs::list).post(runs::create))
+        .route("/api/runs", post(runs::create))
         .route("/api/runs/{id}", get(runs::get))
         .route("/api/runs/{id}/cancel", post(runs::cancel))
         .route("/api/runs/{id}/teardown", post(runs::teardown))

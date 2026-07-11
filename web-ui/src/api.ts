@@ -456,7 +456,6 @@ export const startRun = (req: {
   image?: string;
   keep?: boolean;
 }) => api.request<{ id: string }>("POST", "/api/runs", req);
-export const listRuns = () => api.request<RunSummary[]>("GET", "/api/runs");
 export const getRun = (id: string) =>
   api.request<RunSnapshot>("GET", `/api/runs/${encodeURIComponent(id)}`);
 export const cancelRun = (id: string) =>

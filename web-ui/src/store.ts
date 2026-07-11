@@ -13,7 +13,6 @@ export type View =
   | { kind: "service"; name: string; tab?: "overview" | "systems" | "schedules" | "monitoring" | "logs" }
   | { kind: "sysrun"; id: string; service: string; system: string; action: string; playbook: string; play: string }
   | { kind: "packages" }
-  | { kind: "activity" }
   | { kind: "package"; name: string; runbook?: string };
 
 export const [view, setView] = createSignal<View>({ kind: "services" });

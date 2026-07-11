@@ -115,19 +115,6 @@ impl Run {
         })
     }
 
-    pub fn summary(&self) -> Value {
-        let inner = self.inner.lock().unwrap();
-        json!({
-            "id": self.id,
-            "runbook": self.request.runbook,
-            "filter": self.request.filter,
-            "status": inner.status,
-            "exit_code": inner.exit_code,
-            // Live (not torn down) instances — kept ones show a badge.
-            "kept_alive": inner.instances.iter().filter(|i| !i.torn_down).count(),
-        })
-    }
-
     pub fn status(&self) -> RunStatus {
         self.inner.lock().unwrap().status
     }
@@ -155,12 +142,6 @@ pub struct RunManager {
 impl RunManager {
     pub fn get(&self, id: &str) -> Option<Arc<Run>> {
         self.runs.lock().unwrap().get(id).cloned()
-    }
-
-    pub fn list(&self) -> Vec<Value> {
-        let mut runs: Vec<Arc<Run>> = self.runs.lock().unwrap().values().cloned().collect();
-        runs.sort_by(|a, b| a.id.cmp(&b.id));
-        runs.iter().map(|r| r.summary()).collect()
     }
 
     /// The docker attach info for `container_id`, if any run produced it.
@@ -431,11 +412,6 @@ pub async fn create(
         Ok(run) => ok(json!({ "id": run.id })),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e),
     }
-}
-
-/// GET /api/runs
-pub async fn list(Extension(state): Extension<SharedState>, _claims: RequireClaims) -> Response {
-    ok(state.runs.list())
 }
 
 /// GET /api/runs/{id} — status, buffered events, report.
