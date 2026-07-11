@@ -1,0 +1,9 @@
+#  Config Weave package repositories — managed by weave-server.
+#  GUI edits regenerate this file; hand edits survive a reload but
+#  not the next GUI save. Delete an entry to stop syncing it (the
+#  stdlib is only seeded when this file is missing).
+
+repo "stdlib" {
+  url = "https://github.com/Configweave/config-weave-pkgs.git"
+  subdir = "pkgs"
+}

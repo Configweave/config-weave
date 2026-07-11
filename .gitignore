@@ -4,3 +4,4 @@ dist/
 web-ui/node_modules/
 web-ui/dist/
 .playwright-cli/
+.repo-cache/
