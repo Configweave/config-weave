@@ -7,7 +7,9 @@
 #    the testlab copies into test containers,
 #  - dist/weave-server — the GUI server with the frontend embedded,
 #  - a static docker CLI for the testlab's docker backend (the socket is
-#    mounted at runtime; test containers are siblings on the host daemon).
+#    mounted at runtime; test containers are siblings on the host daemon),
+#  - git + ca-certificates for the remote package repositories
+#    (repos.wcl clones, e.g. the stdlib seeded on first start).
 #
 # vmlab-backed tests and VNC are unavailable inside the container (they
 # need host KVM + vmlab daemons); the UI degrades to docker + terminal.
@@ -25,6 +27,10 @@
 # glibc must be at least the host's (rolling-release hosts: prefer the
 # newest debian). The CLI is static musl and doesn't care.
 FROM debian:13-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG DOCKER_CLI_VERSION=27.4.1
 ADD https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz /tmp/docker.tgz
