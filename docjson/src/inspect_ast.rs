@@ -12,7 +12,7 @@
 use wcl_lang::ast::{Block, Expr, Item, Source};
 use wcl_lang::format::to_source_expr;
 
-use super::docjson::*;
+use crate::docjson::*;
 
 type Diags = Vec<String>;
 

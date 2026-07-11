@@ -1,0 +1,11 @@
+[package]
+name = "weave-docjson"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "DocJson: AST-level extraction and comment-preserving sync for playbook.wcl / package.wcl"
+
+[dependencies]
+wcl_lang = { path = "../../WCL/crates/wcl_lang" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -335,6 +335,7 @@ async fn main() -> ExitCode {
             post(packages::add_to_runbook),
         )
         .route("/api/packages/{name}/test", post(packages::run_tests))
+        .route("/api/packages/{name}/docs", get(packages::docs))
         .route("/api/packages/{name}/tree", get(packages::tree))
         .route(
             "/api/packages/{name}/file",
@@ -356,6 +357,10 @@ async fn main() -> ExitCode {
         .route(
             "/api/playbooks/{rb}/packages/{name}/import",
             post(packages::import_to_repo),
+        )
+        .route(
+            "/api/playbooks/{rb}/packages/{name}/docs",
+            get(packages::runbook_docs),
         )
         .route("/api/runs", post(runs::create))
         .route("/api/runs/{id}", get(runs::get))

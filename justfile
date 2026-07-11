@@ -14,10 +14,12 @@ main:
 build:
 	cargo build
 
-# Run the full test suite
+# Run the full test suite (the CLI + the weave-docjson crate; the
+# default-members setting would otherwise skip the latter).
 [group('test')]
 test:
 	cargo test
+	cargo test -p weave-docjson
 
 # Lint and format checks
 [group('test')]

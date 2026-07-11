@@ -300,6 +300,45 @@
 .doc-body {
   padding: 8px 0 4px 22px;
 }
+.api-doc {
+  border-bottom: 1px solid var(--border-muted, rgba(255, 255, 255, 0.08));
+  padding: 12px 0 16px;
+}
+.api-doc:last-child {
+  border-bottom: none;
+  padding-bottom: 4px;
+}
+.api-doc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.api-doc-name {
+  font-weight: 600;
+}
+.api-doc-desc {
+  margin: 4px 0 10px;
+}
+.wcl-snippet {
+  position: relative;
+  margin: 10px 0 2px;
+}
+.wcl-snippet pre {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--bg-inset, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-muted, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.wcl-snippet > button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
 .add-to-playbook {
   display: flex;
   align-items: center;

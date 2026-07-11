@@ -26,6 +26,8 @@ tempfile = "3"
 # systems.wcl store: schema-validated load + AST-built regeneration
 # (same path-dep convention as the main crate's ../WCL).
 wcl_lang = { path = "../../WCL/crates/wcl_lang" }
+# package API docs: in-process package.wcl → PackageDoc extraction.
+weave-docjson = { path = "../docjson" }
 # powershell -EncodedCommand payloads for Windows-over-ssh targets.
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }

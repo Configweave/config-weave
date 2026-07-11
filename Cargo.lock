@@ -450,6 +450,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "wcl_lang",
+ "weave-docjson",
  "windows 0.62.2",
  "wscript",
  "wscript-std",
@@ -3442,6 +3443,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "weave-docjson"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wcl_lang",
+]
+
+[[package]]
 name = "weave-server"
 version = "0.1.0"
 dependencies = [
@@ -3468,6 +3478,7 @@ dependencies = [
  "url",
  "uuid",
  "wcl_lang",
+ "weave-docjson",
 ]
 
 [[package]]

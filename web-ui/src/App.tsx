@@ -46,7 +46,7 @@ export default function App() {
             <PackagesView />
           </Show>
           <Show when={asKind("package")} keyed>
-            {(v) => <PackageView name={v.name} runbook={v.runbook} />}
+            {(v) => <PackageView name={v.name} runbook={v.runbook} tab={v.tab} />}
           </Show>
         </AppShell>
       </Show>

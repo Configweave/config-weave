@@ -31,8 +31,14 @@ import {
 } from "../api";
 import { setView } from "../store";
 import FileWorkspace from "./FileWorkspace";
+import PackageDocs from "./PackageDocs";
 
-export default function PackageView(props: { name: string; runbook?: string }) {
+export default function PackageView(props: {
+  name: string;
+  runbook?: string;
+  tab?: "overview" | "docs";
+}) {
+  const tab = () => props.tab ?? "overview";
   // Repo source: the package's own inventory entry. Runbook source: the
   // runbook inventory, filtered.
   const [repoPkg] = createResource(
@@ -144,90 +150,115 @@ export default function PackageView(props: { name: string; runbook?: string }) {
         }
       />
 
-      <Card title="Resources">
-        <Show
-          when={(info()?.resources ?? []).length > 0}
-          fallback={<Empty title="No resources declared" />}
+      <nav class="service-tabs" aria-label="Package sections">
+        <button
+          classList={{ active: tab() === "overview" }}
+          onClick={() =>
+            setView({ kind: "package", name: props.name, runbook: props.runbook, tab: "overview" })
+          }
         >
-          <For each={info()?.resources ?? []}>{(r) => <ResourceDocs resource={r} />}</For>
-        </Show>
-      </Card>
+          Overview
+        </button>
+        <button
+          classList={{ active: tab() === "docs" }}
+          onClick={() =>
+            setView({ kind: "package", name: props.name, runbook: props.runbook, tab: "docs" })
+          }
+        >
+          Docs
+        </button>
+      </nav>
 
-      <Show when={(info()?.gatherers ?? []).length > 0}>
-        <Card title="Gatherers">
-          <For each={info()?.gatherers ?? []}>{(g) => <GathererDocs gatherer={g} />}</For>
-        </Card>
+      <Show when={tab() === "docs"}>
+        <PackageDocs name={props.name} runbook={props.runbook} />
       </Show>
 
-      <Card title="Tests">
-        <Show
-          when={(info()?.tests ?? []).length > 0}
-          fallback={<Empty title="No tests declared" />}
-        >
-          <Table>
-            <thead>
-              <tr>
-                <th>Test</th>
-                <th>Backend</th>
-                <th>Image</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <For each={info()?.tests ?? []}>
-                {(t) => (
-                  <tr>
-                    <td>
-                      <div>{t.name}</div>
-                      <div class="sub">{t.description}</div>
-                    </td>
-                    <td>
-                      <Badge tone={t.backend === "vmlab" ? "info" : "neutral"}>{t.backend}</Badge>
-                    </td>
-                    <td class="mono">{t.image}</td>
-                    <td>
-                      <div class="row-actions">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={Play}
-                          disabled={busy()}
-                          onClick={() => runTest(t.name, false)}
-                        >
-                          Run
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={Bug}
-                          disabled={busy()}
-                          title="Run and keep the instance for troubleshooting"
-                          onClick={() => runTest(t.name, true)}
-                        >
-                          Debug
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </For>
-            </tbody>
-          </Table>
+      <Show when={tab() === "overview"}>
+        <Card title="Resources">
+          <Show
+            when={(info()?.resources ?? []).length > 0}
+            fallback={<Empty title="No resources declared" />}
+          >
+            <For each={info()?.resources ?? []}>{(r) => <ResourceDocs resource={r} />}</For>
+          </Show>
+        </Card>
+
+        <Show when={(info()?.gatherers ?? []).length > 0}>
+          <Card title="Gatherers">
+            <For each={info()?.gatherers ?? []}>{(g) => <GathererDocs gatherer={g} />}</For>
+          </Card>
         </Show>
-      </Card>
 
-      <Card title="Files">
-        <FileWorkspace scope={scope()} />
-      </Card>
+        <Card title="Tests">
+          <Show
+            when={(info()?.tests ?? []).length > 0}
+            fallback={<Empty title="No tests declared" />}
+          >
+            <Table>
+              <thead>
+                <tr>
+                  <th>Test</th>
+                  <th>Backend</th>
+                  <th>Image</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <For each={info()?.tests ?? []}>
+                  {(t) => (
+                    <tr>
+                      <td>
+                        <div>{t.name}</div>
+                        <div class="sub">{t.description}</div>
+                      </td>
+                      <td>
+                        <Badge tone={t.backend === "vmlab" ? "info" : "neutral"}>{t.backend}</Badge>
+                      </td>
+                      <td class="mono">{t.image}</td>
+                      <td>
+                        <div class="row-actions">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={Play}
+                            disabled={busy()}
+                            onClick={() => runTest(t.name, false)}
+                          >
+                            Run
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={Bug}
+                            disabled={busy()}
+                            title="Run and keep the instance for troubleshooting"
+                            onClick={() => runTest(t.name, true)}
+                          >
+                            Debug
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </For>
+              </tbody>
+            </Table>
+          </Show>
+        </Card>
 
-      <Show when={!props.runbook}>
-        <AddToPlaybook package={props.name} />
+        <Card title="Files">
+          <FileWorkspace scope={scope()} />
+        </Card>
+
+        <Show when={!props.runbook}>
+          <AddToPlaybook package={props.name} />
+        </Show>
       </Show>
     </Show>
   );
 }
 
-function ParamsTable(props: { params: ParamDecl[] }) {
+export function ParamsTable(props: { params: ParamDecl[] }) {
   return (
     <Show when={props.params.length > 0} fallback={<div class="sub">No parameters.</div>}>
       <Table>

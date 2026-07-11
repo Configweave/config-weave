@@ -157,6 +157,75 @@ fn repo_package_dir(state: &SharedState, name: &str) -> Option<PathBuf> {
     package_dir_in(state.packages_dir.as_deref()?, name)
 }
 
+// ------------------------------------------------------- API docs
+
+/// Read and extract a package dir's package.wcl in-process
+/// (parse_for_edit into DocJson, never the CLI). Split from the
+/// handlers so it is unit-testable. Extraction fails closed, so a
+/// manifest the editors cannot represent is a 422 with the diags, not
+/// a blank doc.
+fn package_doc_at(dir: &Path) -> Result<weave_docjson::docjson::PackageDoc, (StatusCode, String)> {
+    let manifest = dir.join("package.wcl");
+    let source = std::fs::read_to_string(&manifest).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("cannot read package.wcl: {e}"),
+        )
+    })?;
+    let ast = wcl_lang::parse_for_edit(&source, "package.wcl").map_err(|e| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("package.wcl does not parse: {e}"),
+        )
+    })?;
+    weave_docjson::inspect_ast::extract_package(&ast)
+        .map_err(|diags| (StatusCode::UNPROCESSABLE_ENTITY, diags.join("; ")))
+}
+
+/// GET /api/packages/{name}/docs — a repo package's API docs.
+pub async fn docs(
+    Extension(state): Extension<SharedState>,
+    UrlPath(name): UrlPath<String>,
+    _claims: RequireClaims,
+) -> Response {
+    let Some(dir) = repo_package_dir(&state, &name) else {
+        return err(StatusCode::NOT_FOUND, "no such package");
+    };
+    match package_doc_at(&dir) {
+        Ok(doc) => ok(json!({ "doc": doc })),
+        Err((code, msg)) => err(code, msg),
+    }
+}
+
+/// GET /api/playbooks/{rb}/packages/{name}/docs — an installed copy's
+/// API docs.
+pub async fn runbook_docs(
+    Extension(state): Extension<SharedState>,
+    UrlPath((rb, name)): UrlPath<(String, String)>,
+    _claims: RequireClaims,
+) -> Response {
+    let Some(rb_dir) = runbook_dir(&state, &rb) else {
+        return err(StatusCode::NOT_FOUND, "no such runbook");
+    };
+    if !valid_name(&name) {
+        return err(StatusCode::BAD_REQUEST, "invalid package name");
+    }
+    let rb_dir = rb_dir.canonicalize().unwrap_or(rb_dir);
+    let dir = match resolve_in(&rb_dir, &format!("pkgs/{name}"), true) {
+        Ok(d) if d.join("package.wcl").is_file() => d,
+        _ => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "package not installed in this runbook",
+            );
+        }
+    };
+    match package_doc_at(&dir) {
+        Ok(doc) => ok(json!({ "doc": doc })),
+        Err((code, msg)) => err(code, msg),
+    }
+}
+
 /// GET /api/packages/{name}/tree
 pub async fn tree(
     Extension(state): Extension<SharedState>,
@@ -450,6 +519,57 @@ mod tests {
         let found = scan_repo(tmp.path()).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].0, "linux_files");
+    }
+
+    #[test]
+    fn package_doc_extracts_from_the_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("package.wcl"),
+            r#"package "demo" {
+  description = "d"
+  gatherer "os_info" {
+    description = "facts"
+    script = "gatherers/os_info.wscript"
+  }
+  resource "file_present" {
+    description = "r"
+    script = "resources/f.wscript"
+    param "path" {
+      description = "p"
+      type = "string"
+      required = true
+    }
+    param "content" {
+      description = "c"
+      type = "string"
+      default = ""
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let doc = package_doc_at(tmp.path()).unwrap();
+        assert_eq!(doc.name, "demo");
+        assert_eq!(doc.gatherers[0].name, "os_info");
+        let r = &doc.resources[0];
+        assert_eq!(r.script, "resources/f.wscript");
+        assert_eq!(r.params[0].required, Some(true));
+        assert_eq!(r.params[1].required, None);
+    }
+
+    #[test]
+    fn package_doc_reports_broken_manifests() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let (code, _) = package_doc_at(tmp.path()).unwrap_err();
+        assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR);
+
+        std::fs::write(tmp.path().join("package.wcl"), "package {{{").unwrap();
+        let (code, msg) = package_doc_at(tmp.path()).unwrap_err();
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(msg.contains("does not parse"), "{msg}");
     }
 
     #[test]

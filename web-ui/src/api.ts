@@ -472,6 +472,14 @@ export const listPackages = () =>
   api.request<{ packages: PackageEntry[]; error?: string }>("GET", "/api/packages");
 export const getPackage = (name: string) =>
   api.request<PackageEntry>("GET", `/api/packages/${encodeURIComponent(name)}`);
+// API docs: the server extracts the DocJson from package.wcl in-process.
+export const getPackageDocs = (name: string, runbook?: string) =>
+  api.request<{ doc: PackageDoc }>(
+    "GET",
+    runbook
+      ? `/api/playbooks/${encodeURIComponent(runbook)}/packages/${encodeURIComponent(name)}/docs`
+      : `/api/packages/${encodeURIComponent(name)}/docs`,
+  );
 export const addPackageToRunbook = (name: string, runbook: string, overwrite = false) =>
   api.request<{ playbook: string; package: string; path: string }>(
     "POST",

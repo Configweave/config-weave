@@ -391,6 +391,25 @@ weave-server).
   guard (409 on concurrent change). Formatting canonicalizes on first
   visual save (one-line `param` blocks expand; printer is idempotent
   after).
+- **Package API docs (Docs tab).** The package page grew an
+  Overview/Docs tab bar (tab in the `View` union, ServicesView idiom).
+  The DocJson pipeline moved out of `src/model/` into the shared
+  workspace crate `docjson/` (`weave-docjson`: docjson + inspect_ast +
+  emit, wcl_lang-only deps; the CLI keeps its `model::docjson` paths
+  via re-exports, `just test` runs the crate's suite explicitly since
+  `default-members` would skip it). weave-server consumes it directly:
+  `GET /api/packages/{name}/docs` and `GET
+  /api/playbooks/{rb}/packages/{name}/docs` read package.wcl and run
+  `parse_for_edit` + `extract_package` **in-process** — the docs path
+  never shells out (extraction fails closed ⇒ 422 with the diags, which
+  the tab surfaces). The tab renders per-resource/per-gatherer sections
+  (description, concurrency, script, param table) plus copyable WCL
+  usage snippets generated client-side from the param schemas: a `step`
+  block per resource and a `gather` block per gatherer, required params
+  filled with defaults or type placeholders, optional ones
+  `#`-commented, and `pkg.member` references built from the package
+  *directory* name (what step `resource =` strings resolve against),
+  not the manifest's declared name.
 - **SSE has no replay.** EventSource connections miss events published
   while connecting, so both run views treat the server's per-run event
   buffer as authoritative: seed from the snapshot, then poll until one

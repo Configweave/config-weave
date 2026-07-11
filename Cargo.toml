@@ -2,7 +2,7 @@
 # `default-members` keeps plain `cargo build`/`cross build` on the CLI only,
 # so the release flow never drags the server's async web stack along.
 [workspace]
-members = [".", "server"]
+members = [".", "server", "docjson"]
 default-members = ["."]
 
 [package]
@@ -14,6 +14,7 @@ description = "Single-binary configuration management driven by WCL playbooks an
 
 [dependencies]
 wcl_lang = { path = "../WCL/crates/wcl_lang" }
+weave-docjson = { path = "docjson" }
 wscript = { path = "../wscript/wscript" }
 wscript-std = { path = "../wscript/wscript-std" }
 

@@ -14,8 +14,8 @@ use wcl_lang::edit::{build_block, set_label, set_or_insert_field, string_literal
 use wcl_lang::format::to_source;
 use wcl_lang::parse_for_edit;
 
-use super::docjson::*;
-use super::inspect_ast::find_top_block;
+use crate::docjson::*;
+use crate::inspect_ast::find_top_block;
 
 type Diags = Vec<String>;
 
@@ -471,10 +471,13 @@ fn sync_kvs(map: &mut Block, kvs: &[Kv], diags: &mut Diags) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::inspect_ast::{extract_package, extract_playbook};
+    use crate::inspect_ast::{extract_package, extract_playbook};
 
+    // Fixtures live in the workspace root's testdata/, one level up.
     fn fixture(rel: &str) -> String {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(rel);
         std::fs::read_to_string(path).unwrap()
     }
 
