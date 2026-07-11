@@ -53,6 +53,8 @@ export interface PackageEntry {
   gatherers?: GathererDecl[];
   tests: TestDecl[];
   scenarios: { name: string; description: string }[];
+  /// "local" or the remote repository's name (repo listings only).
+  source?: string;
 }
 
 export interface Inventory {
@@ -468,8 +470,19 @@ export const teardownRun = (id: string) =>
 
 // --- package repository ------------------------------------------------------
 
+/// A remote package shadowed by a same-named package from an earlier
+/// source (local wins over remotes, remotes follow repos.wcl order).
+export interface ShadowedPackage {
+  name: string;
+  by: string;
+  source: string;
+}
+
 export const listPackages = () =>
-  api.request<{ packages: PackageEntry[]; error?: string }>("GET", "/api/packages");
+  api.request<{ packages: PackageEntry[]; shadowed?: ShadowedPackage[]; error?: string }>(
+    "GET",
+    "/api/packages",
+  );
 export const getPackage = (name: string) =>
   api.request<PackageEntry>("GET", `/api/packages/${encodeURIComponent(name)}`);
 // API docs: the server extracts the DocJson from package.wcl in-process.
@@ -500,3 +513,75 @@ export const importPackageToRepo = (rb: string, name: string) =>
     "POST",
     `/api/playbooks/${encodeURIComponent(rb)}/packages/${encodeURIComponent(name)}/import`,
   );
+
+// --- remote repositories -----------------------------------------------------
+
+export interface RepoDef {
+  name: string;
+  url: string;
+  subdir: string | null;
+  branch: string | null;
+  cloned: boolean;
+  packages: number | null;
+  /// Set when the initial clone failed (the entry still persists; Sync
+  /// retries).
+  error?: string;
+}
+
+export const listRepos = () => api.request<RepoDef[]>("GET", "/api/repos");
+export const addRepo = (def: { name: string; url: string; subdir?: string; branch?: string }) =>
+  api.request<RepoDef>("POST", "/api/repos", def);
+export const removeRepo = (name: string) =>
+  api.request<{ deleted: string }>("DELETE", `/api/repos/${encodeURIComponent(name)}`);
+export const syncRepo = (name: string) =>
+  api.request<RepoDef>("POST", `/api/repos/${encodeURIComponent(name)}/sync`);
+export const syncAllRepos = () =>
+  api.request<{ name: string; ok: boolean; error?: string }[]>("POST", "/api/repos/sync");
+
+// --- playbook zip transfer ---------------------------------------------------
+//
+// Raw fetch, not api.request: the download is a binary body and the
+// upload posts zip bytes — neither fits the JSON envelope helper.
+
+const authHeaders = (): Record<string, string> => {
+  const token = api.auth.token();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+const envelopeError = async (res: Response, fallback: string): Promise<Error> => {
+  let message = `${fallback} (${res.status})`;
+  try {
+    const body = await res.json();
+    if (typeof body?.error === "string") message = body.error;
+  } catch {
+    // non-JSON body: keep the fallback
+  }
+  const e: any = new Error(message);
+  e.status = res.status;
+  return e;
+};
+
+export async function downloadRunbookZip(rb: string): Promise<void> {
+  const res = await fetch(`/api/playbooks/${encodeURIComponent(rb)}/download`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw await envelopeError(res, "download failed");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${rb}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function uploadRunbookZip(file: File, name?: string): Promise<{ name: string }> {
+  const query = name ? `?name=${encodeURIComponent(name)}` : "";
+  const res = await fetch(`/api/playbooks/upload${query}`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/zip" },
+    body: file,
+  });
+  if (!res.ok) throw await envelopeError(res, "upload failed");
+  const body = await res.json();
+  return body?.data ?? body;
+}

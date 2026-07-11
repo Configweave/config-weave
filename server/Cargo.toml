@@ -41,6 +41,9 @@ metrics = "0.24"
 tracing-loki = { version = "0.2.7", default-features = false, features = ["compat-0-2-1", "rustls"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 url = "2"
+# playbook download/upload archives (5.1 is already in the lockfile as a
+# transitive dep, so this unifies at zero extra compile cost).
+zip = { version = "5", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

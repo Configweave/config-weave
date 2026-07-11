@@ -9,6 +9,7 @@
 mod desktop;
 mod monitoring;
 mod packages;
+mod repos;
 mod runbooks;
 mod runs;
 mod scheduler;
@@ -17,6 +18,7 @@ mod sysruns;
 mod systems;
 mod term;
 mod transport;
+mod zips;
 
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -218,6 +220,33 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // repos.wcl follows the same rule; a *missing* file is seeded with
+    // the stdlib so a fresh server has packages out of the box (a present
+    // file — even empty — is respected, so deleting the stdlib sticks).
+    let repos_path = root.join("repos.wcl");
+    let loaded_repos = match repos::load(&repos_path) {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            let seeded = vec![repos::stdlib_default()];
+            match repos::save(&repos_path, &seeded) {
+                Ok(()) => seeded,
+                Err(e) => {
+                    eprintln!("weave-server: cannot seed {}: {e}", repos_path.display());
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("weave-server: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let repo_cache = root.join(".repo-cache");
+    if let Err(e) = std::fs::create_dir_all(&repo_cache) {
+        eprintln!("weave-server: cannot create {}: {e}", repo_cache.display());
+        return ExitCode::from(2);
+    }
+
     let deploy = match deploy_binaries(&args) {
         Ok(d) => d,
         Err(e) => {
@@ -268,6 +297,10 @@ async fn main() -> ExitCode {
         sysruns: sysruns::SysRunManager::default(),
         packages_dir,
         pkg_wrapper: packages::WrapperCache::default(),
+        repos_path,
+        repos: std::sync::Mutex::new(loaded_repos),
+        repo_cache,
+        repo_git_lock: tokio::sync::Mutex::new(()),
         prometheus_url: args.prometheus_url,
         loki_url: args.loki_url,
         http: reqwest::Client::builder()
@@ -276,6 +309,7 @@ async fn main() -> ExitCode {
             .expect("reqwest client"),
     });
     scheduler::spawn(state.clone());
+    repos::spawn_initial_clones(state.clone());
 
     app = app
         .route("/api/playbooks", get(runbooks::list))
@@ -328,6 +362,15 @@ async fn main() -> ExitCode {
         .route("/api/system-runs", get(sysruns::list))
         .route("/api/system-runs/{id}", get(sysruns::get))
         .route("/api/system-runs/{id}/cancel", post(sysruns::cancel))
+        .route("/api/repos", get(repos::list).post(repos::create))
+        .route("/api/repos/sync", post(repos::sync_all))
+        .route("/api/repos/{name}", axum::routing::delete(repos::remove))
+        .route("/api/repos/{name}/sync", post(repos::sync_one))
+        .route("/api/playbooks/{rb}/download", get(zips::download))
+        .route(
+            "/api/playbooks/upload",
+            post(zips::upload).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .route("/api/packages", get(packages::list))
         .route("/api/packages/{name}", get(packages::detail))
         .route(

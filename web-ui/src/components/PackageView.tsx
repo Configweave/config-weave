@@ -63,6 +63,12 @@ export default function PackageView(props: {
       : packageScope(props.name),
   );
 
+  // Remote-repo packages are read-only in the library (the cache would
+  // be clobbered by the next sync); copies installed in runbooks and
+  // local repo packages edit normally.
+  const source = () => (props.runbook ? undefined : info()?.source);
+  const readOnly = () => !!source() && source() !== "local";
+
   const [busy, setBusy] = createSignal(false);
 
   const runTest = async (test: string | undefined, keep: boolean) => {
@@ -127,6 +133,10 @@ export default function PackageView(props: {
             <Badge tone={props.runbook ? "info" : "neutral"}>
               {props.runbook ? `installed in ${props.runbook}` : "repository"}
             </Badge>
+            <Show when={readOnly()}>
+              {" "}
+              <Badge tone="info">{`from ${source()} (read-only)`}</Badge>
+            </Show>
           </span>
         }
         actions={
@@ -247,7 +257,7 @@ export default function PackageView(props: {
         </Card>
 
         <Card title="Files">
-          <FileWorkspace scope={scope()} />
+          <FileWorkspace scope={scope()} readOnly={readOnly()} />
         </Card>
 
         <Show when={!props.runbook}>

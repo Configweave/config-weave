@@ -30,8 +30,11 @@ test-lab-vm` for a vmlab smoke. `weave-server` (`server/` + SolidJS
 browsing/editing with visual playbook/package editors (DocJson pipeline
 in `src/model/{docjson,inspect_ast,emit}.rs`), a systems inventory
 (`systems.wcl`, ssh/winrm deployment of direct systems, remote systems
-via injected `system_*` vars), a package repository (`--packages-dir`),
-live test/system runs with docker-terminal/VNC debugging, and
+via injected `system_*` vars), a package repository (`--packages-dir`,
+merged with remote git repos from `repos.wcl` — the public
+config-weave-pkgs stdlib is seeded by default, remote packages are
+read-only), playbook zip download/upload, live test/system runs with
+docker-terminal/VNC debugging, and
 per-service Monitoring/Logs tabs backed by an optional Prometheus + Loki
 pair (`--prometheus-url`/`--loki-url`; `just stack-up` runs the compose
 test stack).

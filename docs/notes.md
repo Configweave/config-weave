@@ -361,6 +361,41 @@ weave-server).
   escapes). Debug-a-test = a kept single-test run; kept instances stay
   attachable after completion and `POST /api/runs/{id}/teardown` reuses
   the orphan cleanup to destroy them on demand.
+- **Remote repositories.** `{server root}/repos.wcl`, schema
+  `<weave/repos.wcl>` (embedded from `src/vocab/repos.wcl`, same
+  one-source-of-truth pattern as services): `repo "name" { url,
+  subdir?, branch? }`. Git repos cloned shallow (`--depth 1`) into
+  `{root}/.repo-cache/<name>` — a dot-dir, invisible to the runbook
+  listing and the local scan. A *missing* repos.wcl is seeded with the
+  stdlib (`github.com/Configweave/config-weave-pkgs.git`, subdir
+  `pkgs`); a present file — even empty — is respected, so deleting the
+  stdlib sticks. Startup clones only *absent* caches, in the background
+  (the server must start offline / without git and keep serving local
+  packages); updating is the explicit `POST /api/repos/{name}/sync`
+  (fetch `--depth 1` + `reset --hard FETCH_HEAD` — robust with shallow
+  clones, discards stray cache edits) or `/api/repos/sync` for all.
+  CRUD via `GET|POST /api/repos` + `DELETE /api/repos/{name}`; adding
+  clones synchronously and persists the entry even when the clone fails
+  (the git stderr rides back in `error`, Sync retries later). The
+  package scan merges sources — local packages dir first, then each
+  repo's cache in repos.wcl order; first name wins (local shadows
+  remote, collisions reported in the inventory's `shadowed` array) —
+  and the wrapper symlinks whichever real dir won. Every inventory
+  entry carries a `source` tag (`"local"` is reserved; repo names may
+  not use it). Remote packages are **read-only**: `file_put`/`doc_save`
+  403 (the UI greys out saving), while docs/tree/tests/add-to-playbook
+  work identically — add-to-playbook copies out of the cache like any
+  local package, which is also the editing escape hatch.
+- **Playbook zip transfer.** `GET /api/playbooks/{rb}/download` streams
+  a self-contained zip (entries under a `<rb>/` top folder, `pkgs/`
+  included, copy_dir_filtered's skip list + symlinks excluded);
+  `POST /api/playbooks/upload?name=…` (raw zip body, 64 MB cap) creates
+  a runbook from one. Accepted layouts: playbook.wcl at the zip root
+  (needs `?name=`) or inside exactly one top-level folder (its name is
+  the default; `__MACOSX`/`.DS_Store` junk ignored). Zip-slip guarded
+  via `enclosed_name()` (unsafe entries refuse the whole upload),
+  symlink entries skipped, extraction staged in a dot-tempdir inside
+  the root and renamed into place; name conflicts 409.
 - **Packages are the editing hub.** The runbook file tree hides `pkgs/`
   (client-side only — paths stay reachable by the file API); runbooks
   show an installed-packages card instead, and `DELETE

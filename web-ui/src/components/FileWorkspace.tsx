@@ -6,7 +6,7 @@
 
 import { For, Show, createResource, createSignal } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import { Empty, SplitPane, Tabs, ToggleGroup, toast } from "@forge/ui";
+import { Badge, Empty, SplitPane, Tabs, ToggleGroup, toast } from "@forge/ui";
 import { Button } from "@forge/ui";
 import { CodeEditor } from "@forge/code";
 import { ChevronDown, ChevronRight, FileText } from "lucide-solid";
@@ -96,6 +96,9 @@ export default function FileWorkspace(props: {
   hideTopLevel?: string[];
   /// Bump to refetch the tree (e.g. after a package remove).
   reloadKey?: unknown;
+  /// Viewing a remote repository's package: saving is hidden and the
+  /// editor rejects input (the server 403s writes as the backstop).
+  readOnly?: boolean;
   height?: string;
 }) {
   const [tree] = createResource(
@@ -306,7 +309,8 @@ export default function FileWorkspace(props: {
                     fallback={
                       <CodeEditor
                         value={file.content}
-                        onChange={edit}
+                        onChange={props.readOnly ? undefined : edit}
+                        readOnly={props.readOnly}
                         language={languageFor(file.path)}
                         height={props.height ?? "52vh"}
                       />
@@ -338,21 +342,26 @@ export default function FileWorkspace(props: {
                       Close
                     </Button>
                     <Show
-                      when={file.mode === "visual"}
-                      fallback={
-                        <Button size="sm" variant="primary" onClick={save} disabled={!file.dirty}>
+                      when={!props.readOnly}
+                      fallback={<Badge tone="neutral">read-only</Badge>}
+                    >
+                      <Show
+                        when={file.mode === "visual"}
+                        fallback={
+                          <Button size="sm" variant="primary" onClick={save} disabled={!file.dirty}>
+                            Save
+                          </Button>
+                        }
+                      >
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={saveVisual}
+                          disabled={!file.docDirty && !file.dirty}
+                        >
                           Save
                         </Button>
-                      }
-                    >
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={saveVisual}
-                        disabled={!file.docDirty && !file.dirty}
-                      >
-                        Save
-                      </Button>
+                      </Show>
                     </Show>
                   </div>
                 </>

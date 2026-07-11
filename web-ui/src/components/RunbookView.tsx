@@ -5,10 +5,11 @@
 
 import { For, Show, createResource, createSignal } from "solid-js";
 import { Alert, Badge, Button, Card, Checkbox, Empty, PageHead, Select, toast } from "@forge/ui";
-import { Download, Pencil, Play, Plus, Trash2 } from "lucide-solid";
+import { Download, FileDown, Pencil, Play, Plus, Trash2 } from "lucide-solid";
 import type { ValidateResult } from "../api";
 import {
   addPackageToRunbook,
+  downloadRunbookZip,
   importPackageToRepo,
   listPackages,
   removePackageFromRunbook,
@@ -119,6 +120,18 @@ export default function RunbookView(props: { name: string }) {
         sub={inventory()?.description || "playbook"}
         actions={
           <div class="head-actions">
+            <Button
+              size="sm"
+              icon={FileDown}
+              title="Download the playbook (pkgs/ included) as a zip"
+              onClick={() =>
+                downloadRunbookZip(props.name).catch((e: any) =>
+                  toast(e?.message ?? "download failed", { tone: "danger" }),
+                )
+              }
+            >
+              Download
+            </Button>
             <Button size="sm" onClick={validate} disabled={validating()}>
               {validating() ? "Validating…" : "Validate"}
             </Button>

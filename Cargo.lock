@@ -3479,6 +3479,7 @@ dependencies = [
  "uuid",
  "wcl_lang",
  "weave-docjson",
+ "zip",
 ]
 
 [[package]]
