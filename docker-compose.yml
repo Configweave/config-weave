@@ -1,0 +1,46 @@
+# The monitoring test stack: weave-server + Prometheus (metrics) + Loki
+# (logs). `just stack-up` / `just stack-down`; build the weave-server
+# image first with `just docker-build` (compose can't build it — the
+# Dockerfile assembles host-prebuilt dist/ artifacts).
+#
+# The per-service Monitoring/Logs tabs query these backends through the
+# server (PROMETHEUS_URL / LOKI_URL below); Prometheus scrapes
+# weave-server's /metrics, weave-server pushes its logs to Loki.
+services:
+  weave-server:
+    image: weave-server
+    # Test stack on a trusted host — no login. The Dockerfile entrypoint
+    # already binds 0.0.0.0.
+    command: ["--no-auth"]
+    ports:
+      - "8765:8765"
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      LOKI_URL: http://loki:3100
+    volumes:
+      # Testlab containers are siblings on the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./testdata:/runbooks
+    depends_on:
+      - prometheus
+      - loki
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+
+  loki:
+    image: grafana/loki:3.5.3
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./deploy/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+
+volumes:
+  prom-data:
+  loki-data:

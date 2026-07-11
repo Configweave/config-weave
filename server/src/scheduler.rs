@@ -53,16 +53,26 @@ pub fn spawn(state: SharedState) {
                             RunTrigger::Scheduled,
                             Some(schedule.name.clone()),
                         );
+                        metrics::counter!(
+                            crate::monitoring::SCHEDULE_DISPATCH_TOTAL,
+                            "service" => service.name.clone(),
+                            "schedule" => schedule.name.clone(),
+                            "outcome" => if result.is_ok() { "started" } else { "skipped" },
+                        )
+                        .increment(1);
                         if let Err((_, message)) = result {
-                            eprintln!(
-                                "weave-server: schedule {}/{} skipped: {message}",
-                                service.name, schedule.name
+                            tracing::warn!(
+                                service = %service.name,
+                                schedule = %schedule.name,
+                                %message,
+                                "schedule skipped"
                             );
                         }
                     }
                 }
             }
             previous = now;
+            metrics::gauge!(crate::monitoring::SCHEDULER_LAST_TICK).set(now.timestamp() as f64);
         }
     });
 }

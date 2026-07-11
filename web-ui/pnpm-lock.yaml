@@ -17,6 +17,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.38.0
         version: 6.43.6
+      '@forge/charts':
+        specifier: link:../../forge/packages/charts
+        version: link:../../forge/packages/charts
       '@forge/client':
         specifier: link:../../forge/packages/client
         version: link:../../forge/packages/client

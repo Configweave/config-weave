@@ -14,6 +14,7 @@
     "@codemirror/language": "^6.11.0",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.0",
+    "@forge/charts": "link:../../forge/packages/charts",
     "@forge/client": "link:../../forge/packages/client",
     "@forge/code": "link:../../forge/packages/code",
     "@forge/desktop": "link:../../forge/packages/desktop",

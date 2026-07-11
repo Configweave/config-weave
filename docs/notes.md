@@ -395,3 +395,63 @@ weave-server).
   while connecting, so both run views treat the server's per-run event
   buffer as authoritative: seed from the snapshot, then poll until one
   final reseed of a finished run has happened.
+
+## weave-server: Prometheus metrics + Loki logs (post-v1)
+
+The per-service Monitoring/Logs tabs, backed by an optional
+Prometheus + Loki pair (`just stack-up` runs the compose test stack:
+weave-server image + prom/prometheus + grafana/loki, configs under
+`deploy/`).
+
+- **Flags.** `--prometheus-url` (env `PROMETHEUS_URL`) and `--loki-url`
+  (env `LOKI_URL`), both optional and independent. Unset ⇒ the proxy
+  endpoints answer 503 and the tabs render a "not configured" empty
+  state. `--loki-url` additionally turns on log shipping: a
+  tracing-loki layer pushed from the server itself (no promtail).
+- **Metrics** (`server/src/monitoring.rs::setup`, axum-prometheus with
+  prefix `weave`; `/metrics` is on the open surface — no claims — so
+  Prometheus can scrape; a future `--metrics-token` could gate it):
+  - `weave_http_requests_{total,duration_seconds,pending}` —
+    method/endpoint/status, endpoint = matched route template (the
+    layer sits on the built router, after routing).
+  - `weave_system_runs_total{service,system,action,trigger,status}`,
+    `weave_system_run_duration_seconds{service,system,action}`
+    (buckets 1s–30m), `weave_system_runs_active{service,system}` —
+    settled in `sysruns::settle`/`start`.
+  - `weave_schedule_dispatch_total{service,schedule,outcome=started|skipped}`
+    and `weave_scheduler_last_tick_timestamp_seconds` (alert on a
+    wedged scheduler) — `scheduler.rs` tick loop.
+  - `weave_test_runs_total{status}`, `weave_test_runs_active` —
+    `runs.rs`. Label cardinality is bounded by the inventory size
+    (service/system/schedule names).
+  - PromQL counter-birth caveat: the summary/timeseries use
+    `increase()`, which can't see a label-set's first-ever increment
+    (nothing→1 has no in-window delta), so the very first run of a
+    given service/system/action/trigger/status combination reads 0;
+    every run after that counts normally. Standard Prometheus
+    behavior; not worth pre-registering ~24 zero series per system.
+- **Loki binding.** Static stream labels only: `{app="weave-server"}`
+  plus tracing-loki's own `level` — zero label-cardinality risk.
+  Everything dynamic (`service`, `system`, `run_id`, `playbook`,
+  `play`, `action`, `trigger`) rides as tracing fields, which
+  tracing-loki flattens into the JSON log line ⇒ LogQL filters via
+  `| json | service=\`x\``. Engine output lines are mirrored to
+  tracing target `weave::runlog` in `sysruns::relay_line`/
+  `deploy_phase` — that target is `off` on the console filter (the
+  fmt layer keeps its old signal) and `info` on the Loki layer.
+  tracing-loki drops events under backpressure; very chatty runs may
+  lose lines.
+- **Proxy endpoints** (browser never talks to the backends; queries
+  are composed server-side from structured params — raw PromQL/LogQL
+  is never accepted, label values are escaped): `GET
+  /api/monitoring/status` (capability probe), `GET
+  /api/services/{s}/monitoring/summary?range=`, `…/timeseries?range=
+  &step=&system=`, and `GET /api/services/{s}/logs?range=&limit=
+  &system=&run=&level=&search=&source=runs|systems`.
+- **Forward convention for managed systems.** Agents on targets
+  (node_exporter relabeling, Grafana Alloy, promtail) must attach
+  `service=<name>` and `system=<name>` **labels** matching the
+  services.wcl names. The Logs tab's `source=systems` selector is
+  exactly `{service="X"[,system="Y"]}`, so labeled streams appear
+  with no server change; future node-metric queries key off the same
+  pair.

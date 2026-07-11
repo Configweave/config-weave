@@ -35,6 +35,12 @@ pub struct ServerState {
     /// dirs, each with a package.wcl. None = feature hidden.
     pub packages_dir: Option<PathBuf>,
     pub pkg_wrapper: crate::packages::WrapperCache,
+    /// Query backends for the per-service Monitoring/Logs tabs; None =
+    /// the proxy endpoints answer 503 and the tabs show "not configured".
+    pub prometheus_url: Option<url::Url>,
+    pub loki_url: Option<url::Url>,
+    /// Shared client for the Prometheus/Loki proxy queries.
+    pub http: reqwest::Client,
 }
 
 pub type SharedState = Arc<ServerState>;

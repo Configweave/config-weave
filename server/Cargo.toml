@@ -15,7 +15,7 @@ forge-core = { path = "../../forge/crates/forge-core", features = ["term", "vnc"
 
 axum = { version = "0.8", features = ["ws", "macros"] }
 tokio = { version = "1", features = ["full"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rust-embed = { version = "8", features = ["mime-guess"] }
@@ -30,6 +30,15 @@ wcl_lang = { path = "../../WCL/crates/wcl_lang" }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 cron = "0.15"
+# Prometheus /metrics + HTTP metrics layer; `metrics` must stay on the same
+# minor as axum-prometheus's recorder or app metrics silently vanish.
+axum-prometheus = "0.10"
+metrics = "0.24"
+# Loki push layer; caps reqwest <0.13, so the proxy client stays on 0.12
+# to share one copy.
+tracing-loki = { version = "0.2.7", default-features = false, features = ["compat-0-2-1", "rustls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+url = "2"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

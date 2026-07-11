@@ -7,6 +7,7 @@
 //! `--json --events-ndjson` and relays the event stream to the bus.
 
 mod desktop;
+mod monitoring;
 mod packages;
 mod runbooks;
 mod runs;
@@ -80,6 +81,14 @@ struct Args {
     /// (dev: point at web-ui/dist while iterating, or use `pnpm dev`).
     #[arg(long)]
     frontend_dir: Option<PathBuf>,
+    /// Prometheus base URL: enables the per-service Monitoring tab
+    /// (queries are proxied server-side, never from the browser).
+    #[arg(long, env = "PROMETHEUS_URL")]
+    prometheus_url: Option<url::Url>,
+    /// Loki base URL: ships server + run logs to Loki and enables the
+    /// per-service Logs tab (also proxied server-side).
+    #[arg(long, env = "LOKI_URL")]
+    loki_url: Option<url::Url>,
 }
 
 /// The deploy-binary registry: explicit --deploy-binary pairs win, then
@@ -165,6 +174,11 @@ fn default_config_weave() -> String {
 #[tokio::main]
 async fn main() -> ExitCode {
     let args = Args::parse();
+
+    // Tracing first (so startup + scheduler logs ship to Loki too), then
+    // the metrics recorder (metrics! calls before install are dropped).
+    init_tracing(args.loki_url.as_ref());
+    let (prom_layer, prom_handle) = monitoring::setup();
 
     let root = match args.dir.canonicalize() {
         Ok(r) if r.is_dir() => r,
@@ -254,6 +268,12 @@ async fn main() -> ExitCode {
         sysruns: sysruns::SysRunManager::default(),
         packages_dir,
         pkg_wrapper: packages::WrapperCache::default(),
+        prometheus_url: args.prometheus_url,
+        loki_url: args.loki_url,
+        http: reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .expect("reqwest client"),
     });
     scheduler::spawn(state.clone());
 
@@ -342,7 +362,22 @@ async fn main() -> ExitCode {
         .route("/api/runs/{id}/cancel", post(runs::cancel))
         .route("/api/runs/{id}/teardown", post(runs::teardown))
         .route("/api/term/docker/{container}", get(term::docker_term))
-        .route("/api/desktop/vnc/{run}/{machine}", get(desktop::vnc));
+        .route("/api/desktop/vnc/{run}/{machine}", get(desktop::vnc))
+        // Open (no claims) so Prometheus can scrape.
+        .route(
+            "/metrics",
+            get(move || std::future::ready(prom_handle.render())),
+        )
+        .route("/api/monitoring/status", get(monitoring::status))
+        .route(
+            "/api/services/{service}/monitoring/summary",
+            get(monitoring::summary),
+        )
+        .route(
+            "/api/services/{service}/monitoring/timeseries",
+            get(monitoring::timeseries),
+        )
+        .route("/api/services/{service}/logs", get(monitoring::logs));
 
     app = match &args.frontend_dir {
         Some(dir) => app.frontend_dir(dir),
@@ -350,14 +385,15 @@ async fn main() -> ExitCode {
     };
 
     let router = match app.try_router() {
-        Ok(r) => r.layer(Extension(state)),
+        // Router::layer runs after routing, so the metrics layer sees
+        // MatchedPath and groups by route template.
+        Ok(r) => r.layer(Extension(state)).layer(prom_layer),
         Err(e) => {
             eprintln!("weave-server: {e}");
             return ExitCode::from(2);
         }
     };
 
-    init_tracing();
     println!(
         "weave-server: serving runbooks from {} on http://{}:{} (auth {})",
         root.display(),
@@ -383,13 +419,40 @@ async fn main() -> ExitCode {
 }
 
 /// forge-server's `serve()` normally initializes tracing; we serve the
-/// router ourselves, so do the minimal equivalent here.
-fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,tower_http=warn")),
-        )
+/// router ourselves, so build the subscriber here: the usual console
+/// fmt layer, plus a Loki push layer when --loki-url is set. Run-output
+/// events (target `weave::runlog`, one per engine line) go to Loki only —
+/// the console keeps its existing signal.
+fn init_tracing(loki: Option<&url::Url>) {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+    use tracing_subscriber::{EnvFilter, Layer as _};
+
+    let fmt_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,tower_http=warn"))
+        .add_directive("weave::runlog=off".parse().expect("static directive"));
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(fmt_filter);
+
+    // Static labels only ({app, level}); service/system/run_id etc. ride
+    // as JSON fields — label cardinality stays flat.
+    let loki_layer = loki.and_then(|url| {
+        let built = tracing_loki::builder()
+            .label("app", "weave-server")
+            .and_then(|b| b.build_url(url.clone()));
+        match built {
+            Ok((layer, task)) => {
+                tokio::spawn(task);
+                Some(layer.with_filter(EnvFilter::new("info")))
+            }
+            Err(e) => {
+                eprintln!("weave-server: loki logging disabled: {e}");
+                None
+            }
+        }
+    });
+
+    let _ = tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(loki_layer)
         .try_init();
 }

@@ -31,6 +31,18 @@ pub enum RunStatus {
     Cancelled,
 }
 
+impl RunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RunStatus::Running => "running",
+            RunStatus::Passed => "passed",
+            RunStatus::Failed => "failed",
+            RunStatus::Error => "error",
+            RunStatus::Cancelled => "cancelled",
+        }
+    }
+}
+
 /// Mirror of the CLI's `AttachInfo` payload in `instance_ready` events.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -238,6 +250,7 @@ impl RunManager {
             cancel: tokio::sync::Notify::new(),
         });
         self.runs.lock().unwrap().insert(id, run.clone());
+        metrics::gauge!(crate::monitoring::TEST_RUNS_ACTIVE).increment(1.0);
 
         // The final report arrives on stdout when the child exits; read it
         // concurrently so a large report can never deadlock the pipe.
@@ -304,6 +317,12 @@ async fn drive_run(
         };
         inner.status
     };
+    metrics::gauge!(crate::monitoring::TEST_RUNS_ACTIVE).decrement(1.0);
+    metrics::counter!(
+        crate::monitoring::TEST_RUNS_TOTAL,
+        "status" => status.as_str(),
+    )
+    .increment(1);
 
     // A killed child never tears its instances down (Drop does not run on
     // SIGKILL) — clean up what we saw come up, unless the user asked to

@@ -5,6 +5,8 @@ import { Activity, CalendarClock, CheckCircle2, Eye, EyeOff, Pencil, Play, Plus,
 import type { AssignmentDef, ScheduleDef, ServiceDef, SystemDef } from "../api";
 import { createSchedule, createService, createSystem, deleteSchedule, deleteService, deleteSystem, listRunbooks, listServices, listSystemRuns, runScheduleNow, runbookInventory, startSystemRun, updateSchedule, updateService, updateSystem } from "../api";
 import { notifyServicesChanged, setView } from "../store";
+import ServiceLogs from "./ServiceLogs";
+import ServiceMonitoring from "./ServiceMonitoring";
 
 const emptyService = (): ServiceDef => ({ name: "", description: null, systems: [], schedules: [] });
 const emptySystem = (): SystemDef => ({
@@ -46,7 +48,7 @@ export default function ServicesView() {
   </>;
 }
 
-export function ServiceView(props: { name: string; tab?: "overview" | "systems" | "schedules" }) {
+export function ServiceView(props: { name: string; tab?: "overview" | "systems" | "schedules" | "monitoring" | "logs" }) {
   const [services, { refetch }] = createResource(listServices);
   const [runs, { refetch: refetchRuns }] = createResource(listSystemRuns);
   const [editing, setEditing] = createSignal<string | null | undefined>(undefined);
@@ -90,7 +92,8 @@ export function ServiceView(props: { name: string; tab?: "overview" | "systems" 
         <button classList={{ active: tab() === "overview" }} onClick={() => setView({ kind: "service", name: props.name, tab: "overview" })}>Overview</button>
         <button classList={{ active: tab() === "systems" }} onClick={() => setView({ kind: "service", name: props.name, tab: "systems" })}>Systems <Badge tone="neutral">{svc.systems.length}</Badge></button>
         <button classList={{ active: tab() === "schedules" }} onClick={() => setView({ kind: "service", name: props.name, tab: "schedules" })}>Schedules <Badge tone="neutral">{svc.schedules.length}</Badge></button>
-        <button disabled>Monitoring <span>planned</span></button><button disabled>Logs <span>planned</span></button>
+        <button classList={{ active: tab() === "monitoring" }} onClick={() => setView({ kind: "service", name: props.name, tab: "monitoring" })}>Monitoring</button>
+        <button classList={{ active: tab() === "logs" }} onClick={() => setView({ kind: "service", name: props.name, tab: "logs" })}>Logs</button>
       </nav>
       <Show when={tab() === "overview"}>
         <div class="overview-strip"><Card title="Systems"><div class="big-number">{svc.systems.length}</div><span class="sub">managed targets</span></Card><Card title="Assignments"><div class="big-number">{svc.systems.reduce((n, s) => n + s.assignments.length, 0)}</div><span class="sub">configuration paths</span></Card><Card title="Schedules"><div class="big-number">{svc.schedules.length}</div><span class="sub">automated actions</span></Card><Card title="Activity"><div class="big-number">{serviceRuns().length}</div><span class="sub">runs this session</span></Card></div>
@@ -116,6 +119,12 @@ export function ServiceView(props: { name: string; tab?: "overview" | "systems" 
             </Card>;
           }}
         </For>
+      </Show>
+      <Show when={tab() === "monitoring"}>
+        <ServiceMonitoring service={props.name} systems={svc.systems.map((s) => s.name)} />
+      </Show>
+      <Show when={tab() === "logs"}>
+        <ServiceLogs service={props.name} systems={svc.systems.map((s) => s.name)} />
       </Show>
       <Show when={editing() !== undefined}><SystemForm service={props.name} original={editing() ?? ""} initial={editing() ? svc.systems.find((s) => s.name === editing()) ?? emptySystem() : emptySystem()} onDone={(saved) => { setEditing(undefined); if (saved) void refetch(); }} /></Show>
       <Show when={editingSchedule() !== undefined}><ScheduleForm service={props.name} systems={svc.systems} original={editingSchedule() ?? ""} initial={editingSchedule() ? svc.schedules.find((s) => s.name === editingSchedule())! : null} onDone={(saved) => { setEditingSchedule(undefined); if (saved) void refetch(); }} /></Show>

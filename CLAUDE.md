@@ -31,7 +31,10 @@ browsing/editing with visual playbook/package editors (DocJson pipeline
 in `src/model/{docjson,inspect_ast,emit}.rs`), a systems inventory
 (`systems.wcl`, ssh/winrm deployment of direct systems, remote systems
 via injected `system_*` vars), a package repository (`--packages-dir`),
-and live test/system runs with docker-terminal/VNC debugging.
+live test/system runs with docker-terminal/VNC debugging, and
+per-service Monitoring/Logs tabs backed by an optional Prometheus + Loki
+pair (`--prometheus-url`/`--loki-url`; `just stack-up` runs the compose
+test stack).
 `docs/notes.md` records how the PRD's illustrative
 sketches were bound to the real WCL and wscript APIs, plus the testlab's
 and weave-server's bindings — read it before changing the vocabulary,

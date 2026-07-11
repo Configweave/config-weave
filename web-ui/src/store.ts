@@ -10,7 +10,7 @@ export type View =
   | { kind: "runbook"; name: string }
   | { kind: "run"; id: string; runbook: string }
   | { kind: "services" }
-  | { kind: "service"; name: string; tab?: "overview" | "systems" | "schedules" }
+  | { kind: "service"; name: string; tab?: "overview" | "systems" | "schedules" | "monitoring" | "logs" }
   | { kind: "sysrun"; id: string; service: string; system: string; action: string; playbook: string; play: string }
   | { kind: "packages" }
   | { kind: "activity" }

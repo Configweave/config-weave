@@ -1,0 +1,10 @@
+# Prometheus config for the compose test stack (docker-compose.yml):
+# one job, weave-server's /metrics.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: weave-server
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["weave-server:8765"]

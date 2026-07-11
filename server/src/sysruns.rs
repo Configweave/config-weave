@@ -54,11 +54,33 @@ pub enum SysRunStatus {
     Cancelled,
 }
 
+impl SysRunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SysRunStatus::Running => "running",
+            SysRunStatus::Succeeded => "succeeded",
+            SysRunStatus::Failed => "failed",
+            SysRunStatus::RebootRequired => "reboot_required",
+            SysRunStatus::Error => "error",
+            SysRunStatus::Cancelled => "cancelled",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunTrigger {
     Manual,
     Scheduled,
+}
+
+impl RunTrigger {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RunTrigger::Manual => "manual",
+            RunTrigger::Scheduled => "scheduled",
+        }
+    }
 }
 
 fn status_from_exit(code: Option<i32>) -> SysRunStatus {
@@ -223,6 +245,23 @@ impl SysRunManager {
             cancel: tokio::sync::Notify::new(),
         });
         self.runs.lock().unwrap().insert(id, run.clone());
+        metrics::gauge!(
+            crate::monitoring::SYSTEM_RUNS_ACTIVE,
+            "service" => run.service.clone(),
+            "system" => run.system.name.clone(),
+        )
+        .increment(1.0);
+        tracing::info!(
+            target: "weave::runlog",
+            service = %run.service,
+            system = %run.system.name,
+            run_id = %run.id,
+            playbook = %run.assignment.playbook,
+            play = %run.assignment.play,
+            action = run.request.action.as_str(),
+            trigger = run.trigger.as_str(),
+            "system run started"
+        );
 
         let task_run = run.clone();
         tokio::spawn(async move {
@@ -261,6 +300,17 @@ fn settle(run: &Arc<SysRun>, bus: &EventBus, outcome: Outcome) {
             Outcome::Cancelled => inner.status = SysRunStatus::Cancelled,
             Outcome::Failed(message) => {
                 inner.status = SysRunStatus::Error;
+                tracing::warn!(
+                    target: "weave::runlog",
+                    service = %run.service,
+                    system = %run.system.name,
+                    run_id = %run.id,
+                    playbook = %run.assignment.playbook,
+                    play = %run.assignment.play,
+                    action = run.request.action.as_str(),
+                    phase = %inner.phase,
+                    "{message}"
+                );
                 error_event = Some(json!({
                     "event": "deploy_error",
                     "phase": inner.phase,
@@ -270,6 +320,45 @@ fn settle(run: &Arc<SysRun>, bus: &EventBus, outcome: Outcome) {
         }
         (inner.status, inner.exit_code)
     };
+    let duration_s = (chrono::Utc::now() - run.started_at)
+        .to_std()
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    metrics::gauge!(
+        crate::monitoring::SYSTEM_RUNS_ACTIVE,
+        "service" => run.service.clone(),
+        "system" => run.system.name.clone(),
+    )
+    .decrement(1.0);
+    metrics::counter!(
+        crate::monitoring::SYSTEM_RUNS_TOTAL,
+        "service" => run.service.clone(),
+        "system" => run.system.name.clone(),
+        "action" => run.request.action.as_str(),
+        "trigger" => run.trigger.as_str(),
+        "status" => status.as_str(),
+    )
+    .increment(1);
+    metrics::histogram!(
+        crate::monitoring::SYSTEM_RUN_DURATION,
+        "service" => run.service.clone(),
+        "system" => run.system.name.clone(),
+        "action" => run.request.action.as_str(),
+    )
+    .record(duration_s);
+    tracing::info!(
+        target: "weave::runlog",
+        service = %run.service,
+        system = %run.system.name,
+        run_id = %run.id,
+        playbook = %run.assignment.playbook,
+        play = %run.assignment.play,
+        action = run.request.action.as_str(),
+        trigger = run.trigger.as_str(),
+        status = status.as_str(),
+        duration_s,
+        "system run finished"
+    );
     if let Some(event) = error_event {
         push_event(run, event.clone());
         bus.publish(&topic, event);
@@ -288,8 +377,19 @@ fn push_event(run: &Arc<SysRun>, event: Value) {
     inner.events.push_back(event);
 }
 
-/// Parse-or-wrap one output line, buffer it, publish it.
+/// Parse-or-wrap one output line, buffer it, publish it — and mirror it
+/// to Loki (target weave::runlog is off on the console).
 fn relay_line(run: &Arc<SysRun>, bus: &EventBus, topic: &str, line: &str) {
+    tracing::info!(
+        target: "weave::runlog",
+        service = %run.service,
+        system = %run.system.name,
+        run_id = %run.id,
+        playbook = %run.assignment.playbook,
+        play = %run.assignment.play,
+        action = run.request.action.as_str(),
+        "{line}"
+    );
     let event = serde_json::from_str::<Value>(line)
         .ok()
         .filter(|v| v.is_object())
@@ -301,6 +401,16 @@ fn relay_line(run: &Arc<SysRun>, bus: &EventBus, topic: &str, line: &str) {
 /// Server-synthesized deploy progress marker.
 fn deploy_phase(run: &Arc<SysRun>, bus: &EventBus, topic: &str, phase: &str) {
     run.set_phase(phase);
+    tracing::info!(
+        target: "weave::runlog",
+        service = %run.service,
+        system = %run.system.name,
+        run_id = %run.id,
+        playbook = %run.assignment.playbook,
+        play = %run.assignment.play,
+        action = run.request.action.as_str(),
+        "deploy phase: {phase}"
+    );
     let event = json!({ "event": "deploy_phase", "phase": phase });
     push_event(run, event.clone());
     bus.publish(topic, event);

@@ -6,6 +6,7 @@ import "@forge/ui/styles.css";
 import "@forge/code/styles.css";
 import "@forge/term/styles.css";
 import "@forge/desktop/styles.css";
+import "@forge/charts/styles.css";
 import "./app.css";
 import App from "./App";
 

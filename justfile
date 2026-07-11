@@ -137,13 +137,18 @@ serve dir='testdata' *ARGS: build web-build
 		cargo run -p weave-server -- --dir {{dir}} \
 		--config-weave target/debug/config-weave {{ARGS}}
 
+# Assemble the runtime image from already-built artifacts (release CLI
+# in dist/, server binary in target/release).
+[private]
+docker-image-assemble:
+	cp target/release/weave-server dist/weave-server
+	docker build -t weave-server .
+
 # Build the weave-server docker image. Cross-builds the static CLI (it
 # doubles as the in-container test binary), builds the server + frontend,
 # then assembles a slim runtime image with a static docker CLI.
 [group('web'), doc("Build the weave-server docker image (cross CLI + server + frontend)")]
-docker-build: release server-build
-	cp target/release/weave-server dist/weave-server
-	docker build -t weave-server .
+docker-build: release server-build docker-image-assemble
 
 # Run the containerized GUI: mounts the docker socket (testlab containers
 # are siblings on the host daemon) and a runbooks folder. vmlab-backed
@@ -155,6 +160,28 @@ docker-run dir='.' *ARGS:
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v $(realpath {{dir}}):/runbooks \
 		weave-server {{ARGS}}
+
+# Start the compose monitoring test stack (docker-compose.yml): the
+# weave-server image (build it first with `just docker-build` when
+# stale) against testdata/, plus Prometheus (:9090) scraping /metrics
+# and Loki (:3100) receiving the server + run logs — backs the
+# per-service Monitoring/Logs tabs at http://localhost:8765.
+[group('web'), doc("Start the compose test stack: weave-server + Prometheus (:9090) + Loki (:3100)")]
+stack-up:
+	docker compose up -d
+
+# The dev loop for the stack: rebuild the server + frontend, reassemble
+# the weave-server image (reuses the cross-built CLI already in dist/ —
+# run `just docker-build` instead when the CLI itself changed), then
+# (re)start the stack; compose recreates containers whose image changed.
+[group('web'), doc("Rebuild the weave-server image (server + frontend, no cross build) and restart the stack")]
+stack-rebuild: server-build docker-image-assemble stack-up
+
+# Stop the compose monitoring test stack and remove its containers
+# (named volumes with metric/log history are kept).
+[group('web'), doc("Stop the compose test stack (keeps the data volumes)")]
+stack-down:
+	docker compose down
 
 # Release artifacts for both PRD targets plus a checksums file.
 # Requires `cross` and a container runtime; path deps are mounted into

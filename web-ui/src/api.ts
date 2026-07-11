@@ -402,6 +402,53 @@ export const cancelSystemRun = (id: string) =>
     `/api/system-runs/${encodeURIComponent(id)}/cancel`,
   );
 
+// Monitoring/Logs tabs: the server proxies PromQL/LogQL to the backends
+// named by --prometheus-url/--loki-url; unconfigured backends 503.
+export interface MonitoringStatus {
+  prometheus: boolean;
+  loki: boolean;
+}
+
+export interface MonitoringSummary {
+  range: string;
+  run_counts: Record<string, number>;
+  active: number;
+  p95_duration_s: number | null;
+}
+
+export interface TimeseriesResponse {
+  step: number;
+  series: { name: string; points: [number, number][] }[];
+}
+
+export interface LogEntry {
+  ts: number;
+  level: string | null;
+  message: string;
+  target?: string | null;
+  service?: string | null;
+  system?: string | null;
+  run_id?: string | null;
+  playbook?: string | null;
+  play?: string | null;
+  action?: string | null;
+}
+
+const queryString = (params: Record<string, string | number | undefined>) => {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") q.set(k, String(v));
+  const s = q.toString();
+  return s ? `?${s}` : "";
+};
+
+export const getMonitoringStatus = () => api.request<MonitoringStatus>("GET", "/api/monitoring/status");
+export const getServiceMonitoringSummary = (service: string, range: string) =>
+  api.request<MonitoringSummary>("GET", `/api/services/${encodeURIComponent(service)}/monitoring/summary${queryString({ range })}`);
+export const getServiceMonitoringTimeseries = (service: string, range: string, system?: string) =>
+  api.request<TimeseriesResponse>("GET", `/api/services/${encodeURIComponent(service)}/monitoring/timeseries${queryString({ range, system })}`);
+export const getServiceLogs = (service: string, params: { range?: string; limit?: number; system?: string; run?: string; level?: string; search?: string; source?: string }) =>
+  api.request<{ entries: LogEntry[] }>("GET", `/api/services/${encodeURIComponent(service)}/logs${queryString(params)}`);
+
 export const startRun = (req: {
   runbook: string;
   filter?: string;
