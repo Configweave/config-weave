@@ -169,6 +169,10 @@ docker-run dir='.' *ARGS:
 [group('web'), doc("Start the compose test stack: weave-server + Prometheus (:9090) + Loki (:3100)")]
 stack-up:
 	docker compose up -d
+	@echo
+	@echo "weave-server:  http://localhost:8765"
+	@echo "prometheus:    http://localhost:9090"
+	@echo "loki:          http://localhost:3100"
 
 # The dev loop for the stack: rebuild the server + frontend, reassemble
 # the weave-server image (reuses the cross-built CLI already in dist/ —
