@@ -9,6 +9,7 @@
 mod desktop;
 mod monitoring;
 mod packages;
+mod pipeline_proxy;
 mod repos;
 mod runbooks;
 mod runs;
@@ -17,7 +18,7 @@ mod state;
 mod sysruns;
 mod systems;
 mod term;
-mod transport;
+mod webhooks;
 mod zips;
 
 use std::net::IpAddr;
@@ -91,6 +92,32 @@ struct Args {
     /// per-service Logs tab (also proxied server-side).
     #[arg(long, env = "LOKI_URL")]
     loki_url: Option<url::Url>,
+    /// user.name stamped onto commit-and-push commits to remote repos.
+    #[arg(long, default_value = "weave-server")]
+    git_user_name: String,
+    /// user.email stamped onto commit-and-push commits.
+    #[arg(long, default_value = "weave-server@localhost")]
+    git_user_email: String,
+    /// config-weave-pipeline daemon base URL: enables the Pipelines section
+    /// (calls are proxied server-side with a forge-auth machine token).
+    #[arg(long, env = "PIPELINE_URL")]
+    pipeline_url: Option<url::Url>,
+    /// A static forge-auth machine token forwarded to the pipeline daemon.
+    #[arg(long, env = "PIPELINE_TOKEN")]
+    pipeline_token: Option<String>,
+    /// Auto-refresh the pipeline machine token via forge-auth's
+    /// `refresh_token` grant (needs --pipeline-token-url + --pipeline-client-id).
+    #[arg(long, env = "PIPELINE_REFRESH_TOKEN")]
+    pipeline_refresh_token: Option<String>,
+    /// forge-auth token endpoint for the refresh grant.
+    #[arg(long, env = "PIPELINE_TOKEN_URL")]
+    pipeline_token_url: Option<String>,
+    /// forge-auth client id for the refresh grant.
+    #[arg(long, env = "PIPELINE_CLIENT_ID")]
+    pipeline_client_id: Option<String>,
+    /// forge-auth client secret for the refresh grant (confidential clients).
+    #[arg(long, env = "PIPELINE_CLIENT_SECRET")]
+    pipeline_client_secret: Option<String>,
 }
 
 /// The deploy-binary registry: explicit --deploy-binary pairs win, then
@@ -301,12 +328,33 @@ async fn main() -> ExitCode {
         repos: std::sync::Mutex::new(loaded_repos),
         repo_cache,
         repo_git_lock: tokio::sync::Mutex::new(()),
+        git_identity: (args.git_user_name, args.git_user_email),
         prometheus_url: args.prometheus_url,
         loki_url: args.loki_url,
         http: reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .expect("reqwest client"),
+        pipeline: {
+            // A refresh config needs the refresh token, its endpoint, and a
+            // client id; otherwise fall back to the static token.
+            let refresh = match (
+                args.pipeline_refresh_token,
+                args.pipeline_token_url,
+                args.pipeline_client_id,
+            ) {
+                (Some(refresh_token), Some(token_url), Some(client_id)) => {
+                    Some(pipeline_proxy::RefreshConfig {
+                        token_url,
+                        client_id,
+                        client_secret: args.pipeline_client_secret,
+                        refresh_token,
+                    })
+                }
+                _ => None,
+            };
+            pipeline_proxy::PipelineProxy::new(args.pipeline_url, args.pipeline_token, refresh)
+        },
     });
     scheduler::spawn(state.clone());
     repos::spawn_initial_clones(state.clone());
@@ -364,8 +412,15 @@ async fn main() -> ExitCode {
         .route("/api/system-runs/{id}/cancel", post(sysruns::cancel))
         .route("/api/repos", get(repos::list).post(repos::create))
         .route("/api/repos/sync", post(repos::sync_all))
-        .route("/api/repos/{name}", axum::routing::delete(repos::remove))
+        .route(
+            "/api/repos/{name}",
+            get(repos::get_one).put(repos::update).delete(repos::remove),
+        )
         .route("/api/repos/{name}/sync", post(repos::sync_one))
+        .route("/api/repos/{name}/commit", post(repos::commit))
+        .route("/api/repos/{name}/discard", post(repos::discard))
+        // Open (no claims): authenticated per repo by webhook_secret.
+        .route("/api/webhooks/repos/{name}", post(webhooks::webhook))
         .route("/api/playbooks/{rb}/download", get(zips::download))
         .route(
             "/api/playbooks/upload",
@@ -425,7 +480,19 @@ async fn main() -> ExitCode {
             "/api/services/{service}/monitoring/timeseries",
             get(monitoring::timeseries),
         )
-        .route("/api/services/{service}/logs", get(monitoring::logs));
+        .route("/api/services/{service}/logs", get(monitoring::logs))
+        // Pipelines section: a capability probe + a catch-all reverse proxy
+        // to the config-weave-pipeline daemon (machine token attached
+        // server-side). The browser calls /api/pipeline/pipelines,
+        // /api/pipeline/runs/{id}, etc.
+        .route("/api/pipeline-config", get(pipeline_proxy::config))
+        .route(
+            "/api/pipeline/{*rest}",
+            get(pipeline_proxy::proxy)
+                .post(pipeline_proxy::proxy)
+                .put(pipeline_proxy::proxy)
+                .delete(pipeline_proxy::proxy),
+        );
 
     app = match &args.frontend_dir {
         Some(dir) => app.frontend_dir(dir),

@@ -393,14 +393,10 @@ pub async fn create(
     _claims: RequireClaims,
     axum::Json(request): axum::Json<RunRequest>,
 ) -> Response {
-    // Same runbook resolution as the file routes: children of root only.
-    let dir = state.root.join(&request.runbook);
-    if request.runbook.contains('/')
-        || request.runbook.starts_with('.')
-        || !dir.join("playbook.wcl").is_file()
-    {
+    // Same runbook resolution as the file routes (local + repo sources).
+    let Some(dir) = crate::runbooks::runbook_dir(&state, &request.runbook) else {
         return err(StatusCode::NOT_FOUND, "no such runbook");
-    }
+    };
     let ctx = RunContext {
         config_weave: state.config_weave.clone(),
         runbook_dir: dir,

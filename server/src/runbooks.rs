@@ -1,7 +1,10 @@
 //! Runbook browsing and editing: a runbook is an immediate child
-//! directory of the server's root that contains a `playbook.wcl`.
-//! Every file path from a client resolves against the runbook root and
-//! is prefix-checked after canonicalization — the traversal guard.
+//! directory of the server's root that contains a `playbook.wcl`, or a
+//! playbook dir under a remote repository's `runbooks_subdir` (merged
+//! in repos.wcl order, local names shadowing remote ones — the same
+//! policy as packages). Every file path from a client resolves against
+//! the runbook root and is prefix-checked after canonicalization — the
+//! traversal guard.
 
 use std::path::{Path, PathBuf};
 
@@ -27,13 +30,37 @@ pub(crate) fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-/// Resolve a runbook by name; `None` when it does not exist under root.
-pub(crate) fn runbook_dir(state: &SharedState, name: &str) -> Option<PathBuf> {
+/// A runbook dir under `root`, guarded by name validity + manifest
+/// presence.
+fn runbook_dir_in(root: &Path, name: &str) -> Option<PathBuf> {
     if !valid_name(name) {
         return None;
     }
-    let dir = state.root.join(name);
-    (dir.is_dir() && dir.join("playbook.wcl").is_file()).then_some(dir)
+    let dir = root.join(name);
+    (dir.is_dir() && dir.join("playbook.wcl").is_file()).then(|| dir.canonicalize().unwrap_or(dir))
+}
+
+/// A runbook dir from any source, with its source tag; a local runbook
+/// wins over remote copies of the same name (mirror of
+/// `packages::resolve_package`).
+pub(crate) fn resolve_runbook(state: &SharedState, name: &str) -> Option<(PathBuf, String)> {
+    if let Some(dir) = runbook_dir_in(&state.root, name) {
+        return Some((dir, crate::repos::LOCAL_SOURCE.into()));
+    }
+    let repos = state.repos.lock().unwrap().clone();
+    for repo in &repos {
+        if let Some(dir) =
+            crate::repos::runbooks_root(state, repo).and_then(|root| runbook_dir_in(&root, name))
+        {
+            return Some((dir, repo.name.clone()));
+        }
+    }
+    None
+}
+
+/// Resolve a runbook by name; `None` when no source provides it.
+pub(crate) fn runbook_dir(state: &SharedState, name: &str) -> Option<PathBuf> {
+    resolve_runbook(state, name).map(|(dir, _)| dir)
 }
 
 /// Canonicalize `path` and require it stays under `root` (a runbook or
@@ -65,27 +92,41 @@ pub(crate) fn resolve_in(root: &Path, rel: &str, must_exist: bool) -> Result<Pat
     Ok(canonical)
 }
 
-/// GET /api/runbooks — every child dir of root with a playbook.wcl.
-pub async fn list(Extension(state): Extension<SharedState>, _claims: RequireClaims) -> Response {
-    let mut runbooks = Vec::new();
-    let entries = match std::fs::read_dir(&state.root) {
-        Ok(e) => e,
-        Err(e) => {
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("cannot read root: {e}"),
-            );
-        }
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if path.is_dir() && !name.starts_with('.') && path.join("playbook.wcl").is_file() {
-            runbooks.push(json!({ "name": name }));
+/// Merge every runbook source: the local root first, then each remote
+/// repo's runbooks root in repos.wcl order (so local runbooks shadow
+/// remote ones). A repo whose cache is missing or unreadable is
+/// skipped — the view must not die because one remote is broken.
+pub(crate) fn scan_runbook_sources(state: &SharedState) -> crate::packages::ScanResult {
+    let local = crate::packages::scan_dir_for(&state.root, "playbook.wcl").unwrap_or_default();
+    let mut sources = vec![(crate::repos::LOCAL_SOURCE.to_string(), local)];
+    let repos = state.repos.lock().unwrap().clone();
+    for repo in &repos {
+        let Some(root) = crate::repos::runbooks_root(state, repo) else {
+            continue;
+        };
+        match crate::packages::scan_dir_for(&root, "playbook.wcl") {
+            Ok(found) => sources.push((repo.name.clone(), found)),
+            Err(e) => tracing::warn!(repo = %repo.name, "skipping repository runbooks: {e}"),
         }
     }
-    runbooks.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    ok(runbooks)
+    crate::packages::merge_sources(sources)
+}
+
+/// GET /api/runbooks — the merged runbook list, each entry tagged with
+/// its source, plus the shadowed-name collisions.
+pub async fn list(Extension(state): Extension<SharedState>, _claims: RequireClaims) -> Response {
+    let scan = scan_runbook_sources(&state);
+    let runbooks: Vec<Value> = scan
+        .entries
+        .iter()
+        .map(|e| json!({ "name": e.name, "source": e.source }))
+        .collect();
+    let shadowed: Vec<Value> = scan
+        .shadowed
+        .iter()
+        .map(|(name, by, source)| json!({ "name": name, "by": by, "source": source }))
+        .collect();
+    ok(json!({ "runbooks": runbooks, "shadowed": shadowed }))
 }
 
 /// One node of the file tree.
@@ -516,5 +557,48 @@ mod tests {
         assert!(!valid_name("a/b"));
         assert!(!valid_name(".hidden"));
         assert!(!valid_name(""));
+    }
+
+    #[test]
+    fn runbook_scan_finds_only_playbook_dirs_and_merge_shadows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join("real")).unwrap();
+        std::fs::write(root.join("real/playbook.wcl"), "x").unwrap();
+        std::fs::create_dir(root.join("not-a-runbook")).unwrap();
+        std::fs::create_dir(root.join(".hidden")).unwrap();
+        std::fs::write(root.join(".hidden/playbook.wcl"), "x").unwrap();
+
+        let found = crate::packages::scan_dir_for(root, "playbook.wcl").unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "real");
+
+        // Local shadows remote on a name collision, first repo wins next.
+        let merged = crate::packages::merge_sources(vec![
+            ("local".into(), found.clone()),
+            ("repo-a".into(), found.clone()),
+            ("repo-b".into(), found),
+        ]);
+        assert_eq!(merged.entries.len(), 1);
+        assert_eq!(merged.entries[0].source, "local");
+        assert_eq!(
+            merged.shadowed,
+            vec![
+                ("real".into(), "local".into(), "repo-a".into()),
+                ("real".into(), "local".into(), "repo-b".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn runbook_dir_in_requires_a_manifest_and_canonicalizes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join("rb")).unwrap();
+        assert!(runbook_dir_in(root, "rb").is_none());
+        std::fs::write(root.join("rb/playbook.wcl"), "x").unwrap();
+        let dir = runbook_dir_in(root, "rb").unwrap();
+        assert_eq!(dir, root.join("rb").canonicalize().unwrap());
+        assert!(runbook_dir_in(root, "../rb").is_none());
     }
 }

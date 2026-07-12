@@ -28,8 +28,9 @@ tempfile = "3"
 wcl_lang = { path = "../../WCL/crates/wcl_lang" }
 # package API docs: in-process package.wcl → PackageDoc extraction.
 weave-docjson = { path = "../docjson" }
-# powershell -EncodedCommand payloads for Windows-over-ssh targets.
-base64 = "0.22"
+# shared ssh/winrm transport (direct-system runs; also used by the
+# config-weave-pipeline daemon, so it lives in its own crate).
+weave-remote = { path = "../transport" }
 chrono = { version = "0.4", features = ["serde"] }
 cron = "0.15"
 # Prometheus /metrics + HTTP metrics layer; `metrics` must stay on the same
@@ -44,6 +45,9 @@ url = "2"
 # playbook download/upload archives (5.1 is already in the lockfile as a
 # transitive dep, so this unifies at zero extra compile cost).
 zip = { version = "5", default-features = false, features = ["deflate"] }
+# webhook signature verification (GitHub/Gitea X-Hub-Signature-256).
+hmac = "0.12"
+sha2 = "0.10"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

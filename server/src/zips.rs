@@ -152,6 +152,9 @@ fn extract_runbook(
     root: &Path,
     bytes: &[u8],
     name: Option<&str>,
+    // The source of a remote repo already providing this name, if any:
+    // extracting over it would silently shadow the repo runbook.
+    repo_conflict: impl Fn(&str) -> Option<String>,
 ) -> Result<String, (StatusCode, String)> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
         .map_err(|_| (StatusCode::BAD_REQUEST, "not a zip archive".to_string()))?;
@@ -193,6 +196,12 @@ fn extract_runbook(
         return Err((
             StatusCode::CONFLICT,
             format!("a playbook named '{name}' already exists"),
+        ));
+    }
+    if let Some(source) = repo_conflict(&name) {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("a playbook named '{name}' already exists (from repository '{source}')"),
         ));
     }
 
@@ -260,7 +269,12 @@ pub async fn upload(
     _claims: RequireClaims,
     body: axum::body::Bytes,
 ) -> Response {
-    match extract_runbook(&state.root, &body, q.name.as_deref()) {
+    let repo_conflict = |name: &str| {
+        crate::runbooks::resolve_runbook(&state, name)
+            .map(|(_, source)| source)
+            .filter(|s| s != crate::repos::LOCAL_SOURCE)
+    };
+    match extract_runbook(&state.root, &body, q.name.as_deref(), repo_conflict) {
         Ok(name) => ok(json!({ "name": name })),
         Err((code, msg)) => err(code, msg),
     }
@@ -302,7 +316,7 @@ mod tests {
 
         let bytes = zip_dir(&rb, "demo").unwrap();
         let root = tempfile::tempdir().unwrap();
-        let name = extract_runbook(root.path(), &bytes, None).unwrap();
+        let name = extract_runbook(root.path(), &bytes, None, |_| None).unwrap();
         assert_eq!(name, "demo");
         let out = root.path().join("demo");
         assert_eq!(
@@ -327,11 +341,11 @@ mod tests {
     fn root_level_layout_needs_an_explicit_name() {
         let bytes = build_zip(&[("playbook.wcl", Some("playbook \"x\" {}\n"))]);
         let root = tempfile::tempdir().unwrap();
-        let e = extract_runbook(root.path(), &bytes, None).unwrap_err();
+        let e = extract_runbook(root.path(), &bytes, None, |_| None).unwrap_err();
         assert_eq!(e.0, StatusCode::BAD_REQUEST);
         assert!(e.1.contains("?name="), "{}", e.1);
 
-        let name = extract_runbook(root.path(), &bytes, Some("uploaded")).unwrap();
+        let name = extract_runbook(root.path(), &bytes, Some("uploaded"), |_| None).unwrap();
         assert_eq!(name, "uploaded");
         assert!(root.path().join("uploaded/playbook.wcl").is_file());
     }
@@ -341,7 +355,7 @@ mod tests {
         let bytes = build_zip(&[("demo/playbook.wcl", Some("x"))]);
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("demo")).unwrap();
-        let e = extract_runbook(root.path(), &bytes, None).unwrap_err();
+        let e = extract_runbook(root.path(), &bytes, None, |_| None).unwrap_err();
         assert_eq!(e.0, StatusCode::CONFLICT);
     }
 
@@ -349,11 +363,11 @@ mod tests {
     fn archives_without_a_playbook_are_rejected() {
         let bytes = build_zip(&[("demo/readme.md", Some("x"))]);
         let root = tempfile::tempdir().unwrap();
-        let e = extract_runbook(root.path(), &bytes, None).unwrap_err();
+        let e = extract_runbook(root.path(), &bytes, None, |_| None).unwrap_err();
         assert_eq!(e.0, StatusCode::BAD_REQUEST);
         assert!(e.1.contains("playbook.wcl"), "{}", e.1);
 
-        let not_a_zip = extract_runbook(root.path(), b"nope", None).unwrap_err();
+        let not_a_zip = extract_runbook(root.path(), b"nope", None, |_| None).unwrap_err();
         assert_eq!(not_a_zip.0, StatusCode::BAD_REQUEST);
     }
 
@@ -364,7 +378,7 @@ mod tests {
             ("../evil.txt", Some("boom")),
         ]);
         let root = tempfile::tempdir().unwrap();
-        let e = extract_runbook(root.path(), &evil, None).unwrap_err();
+        let e = extract_runbook(root.path(), &evil, None, |_| None).unwrap_err();
         assert_eq!(e.0, StatusCode::BAD_REQUEST);
         assert!(e.1.contains("unsafe path"), "{}", e.1);
 
@@ -373,7 +387,7 @@ mod tests {
             ("demo/playbook.wcl", Some("x")),
             ("__MACOSX/demo/._playbook.wcl", Some("junk")),
         ]);
-        let name = extract_runbook(root.path(), &mac, None).unwrap();
+        let name = extract_runbook(root.path(), &mac, None, |_| None).unwrap();
         assert_eq!(name, "demo");
         assert!(!root.path().join("demo/__MACOSX").exists());
     }

@@ -10,5 +10,8 @@ type WeaveRepo {
   @inline(0) name: utf8
   url: utf8
   subdir: utf8?
+  runbooks_subdir: utf8?
   branch: utf8?
+  sync_cron: utf8?
+  webhook_secret: utf8?
 }

@@ -21,12 +21,17 @@ pub const SERVICES_VOCAB: &str = include_str!("vocab/services.wcl");
 /// Schema for `repos.wcl` (weave-server's remote package repositories).
 pub const REPOS_VOCAB: &str = include_str!("vocab/repos.wcl");
 
+/// Schema for `pipeline.wcl` (the config-weave-pipeline daemon; the CLI
+/// only serves the vocab so there is one source of truth).
+pub const PIPELINE_VOCAB: &str = include_str!("vocab/pipeline.wcl");
+
 /// Registry-relative names the engine appends as imports.
 pub const PLAYBOOK_IMPORT: &str = "weave/playbook.wcl";
 pub const PACKAGE_IMPORT: &str = "weave/package.wcl";
 pub const VARS_IMPORT: &str = "weave/vars.wcl";
 pub const SERVICES_IMPORT: &str = "weave/services.wcl";
 pub const REPOS_IMPORT: &str = "weave/repos.wcl";
+pub const PIPELINE_IMPORT: &str = "weave/pipeline.wcl";
 
 /// Build the system-import loader. `vars` is the generated variables file
 /// (gatherer results and overrides as `let` declarations); pass `None`
@@ -37,6 +42,7 @@ pub fn loader(vars: Option<String>) -> FileLoader {
     reg.register(PACKAGE_IMPORT, PACKAGE_VOCAB);
     reg.register(SERVICES_IMPORT, SERVICES_VOCAB);
     reg.register(REPOS_IMPORT, REPOS_VOCAB);
+    reg.register(PIPELINE_IMPORT, PIPELINE_VOCAB);
     if let Some(v) = vars {
         reg.register(VARS_IMPORT, v);
     }
@@ -96,6 +102,7 @@ mod tests {
         assert_eq!(l(&sys(PACKAGE_IMPORT)).unwrap(), PACKAGE_VOCAB);
         assert_eq!(l(&sys(SERVICES_IMPORT)).unwrap(), SERVICES_VOCAB);
         assert_eq!(l(&sys(REPOS_IMPORT)).unwrap(), REPOS_VOCAB);
+        assert_eq!(l(&sys(PIPELINE_IMPORT)).unwrap(), PIPELINE_VOCAB);
         assert_eq!(l(&sys(VARS_IMPORT)).unwrap(), "let x = 1\n");
         let no_vars = loader(None);
         assert!(no_vars(&sys(VARS_IMPORT)).is_err());

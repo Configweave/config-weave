@@ -1,11 +1,13 @@
 import { For, Show, createResource, createSignal } from "solid-js";
-import { Button, Card, Empty, PageHead, Table, toast } from "@forge/ui";
+import { Alert, Badge, Button, Card, Empty, PageHead, Table, toast } from "@forge/ui";
 import { FileUp } from "lucide-solid";
 import { listRunbooks, uploadRunbookZip } from "../api";
 import { setView } from "../store";
 
 export default function RunbooksView() {
-  const [runbooks, { refetch }] = createResource(listRunbooks);
+  const [listing, { refetch }] = createResource(listRunbooks);
+  const runbooks = () => listing()?.runbooks;
+  const shadowed = () => listing()?.shadowed ?? [];
   const [uploading, setUploading] = createSignal(false);
   let fileInput!: HTMLInputElement;
 
@@ -67,12 +69,25 @@ export default function RunbooksView() {
           </>
         }
       />
+      <Show when={shadowed().length > 0}>
+        <Alert tone="warning" title="Shadowed playbooks">
+          <For each={shadowed()}>
+            {(s) => (
+              <div class="sub">
+                <span class="mono">{s.name}</span> from <span class="mono">{s.source}</span> is
+                hidden by the copy in <span class="mono">{s.by}</span>.
+              </div>
+            )}
+          </For>
+        </Alert>
+      </Show>
       <Card>
         <Show
           when={(runbooks() ?? []).length > 0}
           fallback={
             <Empty title="No playbooks">
-              Point weave-server --dir at a folder of playbook directories.
+              Point weave-server --dir at a folder of playbook directories, or add a remote
+              repository with a playbooks subdir.
             </Empty>
           }
         >
@@ -80,6 +95,7 @@ export default function RunbooksView() {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Source</th>
                 <th />
               </tr>
             </thead>
@@ -88,6 +104,9 @@ export default function RunbooksView() {
                 {(rb) => (
                   <tr>
                     <td>{rb.name}</td>
+                    <td>
+                      <Badge tone={rb.source !== "local" ? "info" : "neutral"}>{rb.source}</Badge>
+                    </td>
                     <td style={{ "text-align": "right" }}>
                       <Button
                         size="sm"

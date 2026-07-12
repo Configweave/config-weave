@@ -1,0 +1,43 @@
+[package]
+name = "config-weave-pipeline"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "CI/CD primitives daemon for config-weave: triggered pipeline.wcl runs of scripts and plays"
+
+[[bin]]
+name = "config-weave-pipeline"
+path = "src/main.rs"
+
+[dependencies]
+# The forge stack (path deps, same convention as the server crate). No
+# term/vnc — the daemon is headless.
+forge-server = { path = "../../forge/crates/forge-server" }
+forge-core = { path = "../../forge/crates/forge-core" }
+
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+chrono = { version = "0.4", features = ["serde"] }
+cron = "0.15"
+# pipeline.wcl load + regeneration (schema-validated, AST-built save).
+wcl_lang = { path = "../../WCL/crates/wcl_lang" }
+# shared ssh/winrm transport (remote script steps).
+weave-remote = { path = "../transport" }
+# forge-auth JWKS fetch + RS256 validation (we replicate ~15 lines rather
+# than depend on the whole forge-auth IdP crate).
+jsonwebtoken = "9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# webhook signature verification (GitHub/Gitea X-Hub-Signature-256).
+hmac = "0.12"
+sha2 = "0.10"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

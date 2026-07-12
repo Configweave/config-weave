@@ -128,6 +128,11 @@ web-build:
 server-build: web-build
 	cargo build --release -p weave-server
 
+# Build the config-weave-pipeline daemon (headless — no frontend).
+[group('web')]
+pipeline-build:
+	cargo build --release -p config-weave-pipeline
+
 # Spin up the web GUI at http://localhost:8765 against a folder of runbooks
 # (each child dir has a playbook.wcl). Builds the frontend + server first.
 # Docker test runs need the static CLI: uses the one from `just install`
@@ -140,17 +145,19 @@ serve dir='testdata' *ARGS: build web-build
 		--config-weave target/debug/config-weave {{ARGS}}
 
 # Assemble the runtime image from already-built artifacts (release CLI
-# in dist/, server binary in target/release).
+# in dist/, server + pipeline binaries in target/release).
 [private]
 docker-image-assemble:
 	cp target/release/weave-server dist/weave-server
+	cp target/release/config-weave-pipeline dist/config-weave-pipeline
 	docker build -t weave-server .
 
 # Build the weave-server docker image. Cross-builds the static CLI (it
-# doubles as the in-container test binary), builds the server + frontend,
-# then assembles a slim runtime image with a static docker CLI.
-[group('web'), doc("Build the weave-server docker image (cross CLI + server + frontend)")]
-docker-build: release server-build docker-image-assemble
+# doubles as the in-container test binary), builds the server + frontend
+# + pipeline daemon, then assembles a slim runtime image with a static
+# docker CLI.
+[group('web'), doc("Build the weave-server docker image (cross CLI + server + frontend + pipeline)")]
+docker-build: release server-build pipeline-build docker-image-assemble
 
 # Run the containerized GUI: mounts the docker socket (testlab containers
 # are siblings on the host daemon) and a runbooks folder. vmlab-backed
@@ -163,6 +170,18 @@ docker-run dir='.' *ARGS:
 		-v $(realpath {{dir}}):/runbooks \
 		weave-server {{ARGS}}
 
+# Run the pipeline daemon from the same image (overridden entrypoint):
+# mounts a pipelines dir (holds pipelines.wcl) and a playbooks dir (play
+# steps resolve `playbook` names under it). --no-auth for a trusted net;
+# pass --forge-issuer … instead for forge-auth. `just docker-build` first.
+[group('web'), doc("Run the containerized pipeline daemon with a pipelines + playbooks folder mounted")]
+docker-run-pipeline pipelines='pipeline/testdata/pipelines' playbooks='testdata' *ARGS:
+	docker run --rm -p 8770:8770 \
+		-v $(realpath {{pipelines}}):/pipelines \
+		-v $(realpath {{playbooks}}):/runbooks \
+		--entrypoint config-weave-pipeline weave-server \
+		--dir /pipelines --playbooks-dir /runbooks --bind 0.0.0.0 {{ARGS}}
+
 # Start the compose monitoring test stack (docker-compose.yml): the
 # weave-server image (build it first with `just docker-build` when
 # stale) against testdata/, plus Prometheus (:9090) scraping /metrics
@@ -172,16 +191,17 @@ docker-run dir='.' *ARGS:
 stack-up:
 	docker compose up -d
 	@echo
-	@echo "weave-server:  http://localhost:8765"
-	@echo "prometheus:    http://localhost:9090"
-	@echo "loki:          http://localhost:3100"
+	@echo "weave-server:   http://localhost:8765"
+	@echo "weave-pipeline: http://localhost:8770"
+	@echo "prometheus:     http://localhost:9090"
+	@echo "loki:           http://localhost:3100"
 
 # The dev loop for the stack: rebuild the server + frontend, reassemble
 # the weave-server image (reuses the cross-built CLI already in dist/ —
 # run `just docker-build` instead when the CLI itself changed), then
 # (re)start the stack; compose recreates containers whose image changed.
-[group('web'), doc("Rebuild the weave-server image (server + frontend, no cross build) and restart the stack")]
-stack-rebuild: server-build docker-image-assemble stack-up
+[group('web'), doc("Rebuild the weave-server image (server + frontend + pipeline, no cross build) and restart the stack")]
+stack-rebuild: server-build pipeline-build docker-image-assemble stack-up
 
 # Stop the compose monitoring test stack and remove its containers
 # (named volumes with metric/log history are kept).

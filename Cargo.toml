@@ -2,7 +2,7 @@
 # `default-members` keeps plain `cargo build`/`cross build` on the CLI only,
 # so the release flow never drags the server's async web stack along.
 [workspace]
-members = [".", "server", "docjson"]
+members = [".", "server", "docjson", "transport", "pipeline"]
 default-members = ["."]
 
 [package]

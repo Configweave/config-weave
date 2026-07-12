@@ -22,7 +22,7 @@ use tokio::io::AsyncReadExt as _;
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 
 use crate::systems::{AssignmentDef, SystemDef, SystemKind};
-use crate::transport::{ExecSpec, Transport, stage_dir};
+use weave_remote::{ExecSpec, Transport, stage_dir};
 
 /// Same catch-up cap as the test runs.
 const EVENT_BUFFER_CAP: usize = 5000;
@@ -548,7 +548,7 @@ async fn drive_direct(run: &Arc<SysRun>, ctx: &SysRunContext) -> Outcome {
         ));
     };
 
-    let transport = match Transport::for_system(sys) {
+    let transport = match Transport::new(&sys.transport, sys.os) {
         Ok(t) => t,
         Err(e) => return Outcome::Failed(e),
     };

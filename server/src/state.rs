@@ -44,12 +44,17 @@ pub struct ServerState {
     /// Serializes git operations on the cache: concurrent syncs of one
     /// repo would race `reset --hard`.
     pub repo_git_lock: tokio::sync::Mutex<()>,
+    /// (user.name, user.email) stamped onto commit-and-push commits.
+    pub git_identity: (String, String),
     /// Query backends for the per-service Monitoring/Logs tabs; None =
     /// the proxy endpoints answer 503 and the tabs show "not configured".
     pub prometheus_url: Option<url::Url>,
     pub loki_url: Option<url::Url>,
     /// Shared client for the Prometheus/Loki proxy queries.
     pub http: reqwest::Client,
+    /// Reverse proxy to a config-weave-pipeline daemon (the Pipelines
+    /// section). Unconfigured ⇒ the `/api/pipeline/*` routes answer 503.
+    pub pipeline: crate::pipeline_proxy::PipelineProxy,
 }
 
 pub type SharedState = Arc<ServerState>;

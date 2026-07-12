@@ -1,0 +1,136 @@
+// Config Weave pipeline vocabulary (`pipeline.wcl` schema).
+//
+// Served as the system import <weave/pipeline.wcl>. Consumed by the
+// config-weave-pipeline daemon (the `pipeline/` crate), which embeds this
+// same file so there is one source of truth (mirrors services.wcl/repos.wcl).
+//
+// A pipeline is a CI/CD primitive: it is triggered (manually, by a git
+// webhook, or on a cron schedule), takes properties (optional/mandatory,
+// like function params), and runs ordered steps that are either a `script`
+// (a shell command run locally or on a remote ssh/winrm target) or a `play`
+// (a config-weave play from a playbook). Secrets are stored inline (0600
+// on disk) and injected into plays as vars and into remote connections.
+
+@document
+type WeavePipelineDoc {
+  @children("pipeline") pipelines: list<WeavePipeline>
+}
+
+@block("pipeline")
+type WeavePipeline {
+  @inline(0) name: utf8
+  description: utf8?
+  @children("property") properties: list<WeaveProperty>
+  @children("secret")   secrets:    list<WeaveSecret>
+  @children("target")   targets:    list<WeaveTarget>
+  @children("trigger")  triggers:   list<WeaveTrigger>
+  // Steps are two block kinds. The schema declares both child groups so
+  // each validates; execution ORDER is taken from raw document order by
+  // the loader (a single blocks() pass), so script/play steps interleave.
+  @children("script") script_steps: list<WeaveScriptStep>
+  @children("play")   play_steps:   list<WeavePlayStep>
+}
+
+// A pipeline input. `type` is a coarse type used to coerce/validate the
+// supplied value; `default` is the string form applied when omitted.
+@block("property")
+type WeaveProperty {
+  @inline(0) name: utf8
+  description: utf8?
+  @default("string") type: utf8      // string | int | bool
+  @default(false) required: bool
+  default: utf8?
+}
+
+// An inline secret. Stored 0600 on disk; injected into plays (as vars) and
+// into transport credentials via `"secret:NAME"` references.
+@block("secret")
+type WeaveSecret {
+  @inline(0) name: utf8
+  description: utf8?
+  value: utf8
+}
+
+// A remote host a script step can target. `transport` mirrors the
+// services.wcl transport shape.
+@block("target")
+type WeaveTarget {
+  @inline(0) name: utf8
+  description: utf8?
+  @default("linux") os: utf8         // linux | windows
+  @child("transport") transport: WeaveTransport
+}
+
+// ssh/winrm connection. `password`/`private_key` may be a literal or a
+// `"secret:NAME"` reference resolved at run time.
+@block("transport")
+type WeaveTransport {
+  @inline(0) kind: utf8              // ssh | winrm
+  host: utf8
+  port: i64?
+  user: utf8
+  password: utf8?
+  private_key: utf8?
+  @default(false) use_tls: bool
+}
+
+// A shell script step. `on` is "local" (the daemon host) or a target name.
+// `run` is the script body; `shell` overrides the interpreter. `env` values
+// may be a literal, "prop:NAME", or "secret:NAME".
+@block("script")
+type WeaveScriptStep {
+  @inline(0) name: utf8
+  description: utf8?
+  @default("local") on: utf8
+  run: utf8
+  shell: utf8?
+  @children("env") env: list<WeaveEnvVar>
+  @default(true) stop_on_failure: bool
+}
+
+// A config-weave play step. `var` values may be a literal, "prop:NAME", or
+// "secret:NAME"; they are injected via a 0600 --var-file.
+@block("play")
+type WeavePlayStep {
+  @inline(0) name: utf8
+  description: utf8?
+  playbook: utf8
+  play: utf8
+  @default("apply") action: utf8     // check | apply
+  @children("var") vars: list<WeavePlayVar>
+  @default(true) stop_on_failure: bool
+}
+
+// name=value pair for a script step's environment. A distinct type per
+// @block name is required by the schema system (WeavePlayVar is identical).
+@block("env")
+type WeaveEnvVar {
+  @inline(0) name: utf8
+  value: utf8
+}
+
+// name=value pair for a play step's injected vars.
+@block("var")
+type WeavePlayVar {
+  @inline(0) name: utf8
+  value: utf8
+}
+
+// A pipeline trigger. `type` selects manual/webhook/schedule; webhook
+// triggers carry a `webhook_secret`, schedule triggers a six-field `cron`.
+// `bind` blocks preset properties for runs this trigger starts.
+@block("trigger")
+type WeaveTrigger {
+  @inline(0) name: utf8
+  @default("manual") type: utf8      // manual | webhook | schedule
+  webhook_secret: utf8?
+  cron: utf8?
+  @default(true) enabled: bool
+  @children("bind") bindings: list<WeaveBinding>
+}
+
+@block("bind")
+type WeaveBinding {
+  @inline(0) property: utf8
+  value: utf8
+}

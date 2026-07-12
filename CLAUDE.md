@@ -38,6 +38,15 @@ docker-terminal/VNC debugging, and
 per-service Monitoring/Logs tabs backed by an optional Prometheus + Loki
 pair (`--prometheus-url`/`--loki-url`; `just stack-up` runs the compose
 test stack).
+`config-weave-pipeline` (`pipeline/` crate) is a headless CI/CD daemon
+that runs triggered `pipeline.wcl` pipelines: ordered steps that are
+either shell scripts (local or over ssh/winrm via the shared
+`weave-remote` transport crate — `transport/`, split out of the server)
+or config-weave plays (shelled out to the CLI). Triggers are manual
+(API), git webhooks, or cron; properties, inline 0600 secrets, and
+forge-auth machine+user JWTs (RS256/JWKS, custom `TokenValidator`).
+weave-server reaches it through a `--pipeline-url` reverse proxy plus a
+SolidJS Pipelines section.
 `docs/notes.md` records how the PRD's illustrative
 sketches were bound to the real WCL and wscript APIs, plus the testlab's
 and weave-server's bindings — read it before changing the vocabulary,

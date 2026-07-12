@@ -26,6 +26,7 @@ pub const SCHEDULE_DISPATCH_TOTAL: &str = "weave_schedule_dispatch_total";
 pub const SCHEDULER_LAST_TICK: &str = "weave_scheduler_last_tick_timestamp_seconds";
 pub const TEST_RUNS_TOTAL: &str = "weave_test_runs_total";
 pub const TEST_RUNS_ACTIVE: &str = "weave_test_runs_active";
+pub const REPO_SYNC_DISPATCH_TOTAL: &str = "weave_repo_sync_dispatch_total";
 
 const RUN_DURATION_BUCKETS: &[f64] = &[1.0, 5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1800.0];
 
@@ -76,6 +77,10 @@ pub fn setup() -> (PrometheusMetricLayer<'static>, PrometheusHandle) {
     );
     metrics::describe_counter!(TEST_RUNS_TOTAL, "Package test runs settled, by status");
     metrics::describe_gauge!(TEST_RUNS_ACTIVE, "Package test runs currently in flight");
+    metrics::describe_counter!(
+        REPO_SYNC_DISPATCH_TOTAL,
+        "Remote repository syncs, by repo/trigger (manual|cron|webhook)/outcome"
+    );
     (layer, handle)
 }
 

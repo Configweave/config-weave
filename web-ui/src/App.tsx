@@ -19,6 +19,9 @@ import ServicesView, { ServiceView } from "./components/ServicesView";
 import SystemRunView from "./components/SystemRunView";
 import PackagesView from "./components/PackagesView";
 import PackageView from "./components/PackageView";
+import PipelinesView from "./components/PipelinesView";
+import PipelineView from "./components/PipelineView";
+import PipelineRunView from "./components/PipelineRunView";
 
 export default function App() {
   onMount(init);
@@ -47,6 +50,15 @@ export default function App() {
           </Show>
           <Show when={asKind("package")} keyed>
             {(v) => <PackageView name={v.name} runbook={v.runbook} tab={v.tab} />}
+          </Show>
+          <Show when={view().kind === "pipelines"}>
+            <PipelinesView />
+          </Show>
+          <Show when={asKind("pipeline")} keyed>
+            {(v) => <PipelineView name={v.name} />}
+          </Show>
+          <Show when={asKind("pipelinerun")} keyed>
+            {(v) => <PipelineRunView id={v.id} pipeline={v.pipeline} />}
           </Show>
         </AppShell>
       </Show>

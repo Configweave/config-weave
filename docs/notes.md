@@ -364,28 +364,68 @@ weave-server).
 - **Remote repositories.** `{server root}/repos.wcl`, schema
   `<weave/repos.wcl>` (embedded from `src/vocab/repos.wcl`, same
   one-source-of-truth pattern as services): `repo "name" { url,
-  subdir?, branch? }`. Git repos cloned shallow (`--depth 1`) into
+  subdir?, runbooks_subdir?, branch?, sync_cron?, webhook_secret? }`.
+  Git repos cloned shallow (`--depth 1`) into
   `{root}/.repo-cache/<name>` — a dot-dir, invisible to the runbook
   listing and the local scan. A *missing* repos.wcl is seeded with the
   stdlib (`github.com/Configweave/config-weave-pkgs.git`, subdir
   `pkgs`); a present file — even empty — is respected, so deleting the
-  stdlib sticks. Startup clones only *absent* caches, in the background
-  (the server must start offline / without git and keep serving local
-  packages); updating is the explicit `POST /api/repos/{name}/sync`
-  (fetch `--depth 1` + `reset --hard FETCH_HEAD` — robust with shallow
-  clones, discards stray cache edits) or `/api/repos/sync` for all.
-  CRUD via `GET|POST /api/repos` + `DELETE /api/repos/{name}`; adding
-  clones synchronously and persists the entry even when the clone fails
-  (the git stderr rides back in `error`, Sync retries later). The
-  package scan merges sources — local packages dir first, then each
-  repo's cache in repos.wcl order; first name wins (local shadows
-  remote, collisions reported in the inventory's `shadowed` array) —
-  and the wrapper symlinks whichever real dir won. Every inventory
-  entry carries a `source` tag (`"local"` is reserved; repo names may
-  not use it). Remote packages are **read-only**: `file_put`/`doc_save`
-  403 (the UI greys out saving), while docs/tree/tests/add-to-playbook
-  work identically — add-to-playbook copies out of the cache like any
-  local package, which is also the editing escape hatch.
+  stdlib sticks. The file is written 0600 (it may carry webhook
+  secrets, same posture as services.wcl). Startup clones only *absent*
+  caches, in the background (the server must start offline / without
+  git and keep serving local packages). CRUD via `GET|POST /api/repos`,
+  `GET|PUT|DELETE /api/repos/{name}`; adding clones synchronously and
+  persists the entry even when the clone fails (the git stderr rides
+  back in `error`, Sync retries later). The package scan merges
+  sources — local packages dir first, then each repo's cache in
+  repos.wcl order; first name wins (local shadows remote, collisions
+  reported in the inventory's `shadowed` array) — and the wrapper
+  symlinks whichever real dir won. Every inventory entry carries a
+  `source` tag (`"local"` is reserved; repo names may not use it).
+- **Repo runbooks, sync triggers, write-back.** A repo with
+  `runbooks_subdir` (a subdir of playbook dirs; `"."` = the checkout
+  root) also provides runbooks: `runbooks::scan_runbook_sources` merges
+  the local root first, then each repo's runbooks root, through the
+  same first-name-wins policy as packages (shared
+  `packages::merge_sources`; `GET /api/playbooks` now returns
+  `{ runbooks: [{name, source}], shadowed: [...] }`). `runbook_dir` is
+  `resolve_runbook` under the hood, so *every* `/api/playbooks/{rb}/*`
+  route (tree/file/doc/validate/inventory/zip download/test runs/system
+  assignments) transparently serves repo runbooks; zip upload 409s on a
+  name any repo already provides (silent shadowing refused).
+  **Sync is clean-gated**: `sync_repo` skips (409 from
+  `POST /api/repos/{name}/sync`, `skipped` rows in `/api/repos/sync`)
+  whenever the cache has uncommitted edits (`status --porcelain`) or
+  unpushed commits (`rev-list --count @{upstream}..HEAD` — our clones
+  are single-branch so the upstream ref always exists; a hand-mutated
+  cache degrades to ahead=0 with a warning and Discard repairs it).
+  A clean cache fast-forwards via fetch with an explicit
+  `+refs/heads/<b>:refs/remotes/origin/<b>` refspec (keeps the
+  ahead-probe accurate) + `reset --hard FETCH_HEAD`. Three triggers,
+  all funneling through the same `sync_repo` under `repo_git_lock` and
+  counted in `weave_repo_sync_dispatch_total{repo,trigger,outcome}`:
+  manual (the UI buttons), cron (`sync_cron`, six-field UTC cron shared
+  with service schedules via `scheduler::cron_due`, checked on the same
+  15s tick, spawned so slow fetches never block it), and webhook.
+  `POST /api/webhooks/repos/{name}` is the only route besides /metrics
+  without a JWT: it authenticates per call against the repo's
+  `webhook_secret` — GitHub/Gitea HMAC `X-Hub-Signature-256` over the
+  raw body, or the plain token in `X-Gitlab-Token`/`X-Weave-Token`
+  (constant-time compares); unknown repo, unset secret, and bad auth
+  all answer a uniform 404. A policy skip answers 200 (forges must not
+  retry it). **Write-back**: repo packages *and* repo runbooks are
+  editable in place (the old remote-package 403 is gone) — edits dirty
+  the cache, badged in the UI (repo table + a write bar on repo-sourced
+  editors polling `GET /api/repos/{name}`), and settled by
+  `POST /api/repos/{name}/commit` (`add -A`, commit as `-c user.name/
+  user.email` from `--git-user-name`/`--git-user-email`, defaults
+  `weave-server <weave-server@localhost>`, then push to the origin
+  branch — shallow clones push fine) or `POST /api/repos/{name}/discard`
+  (fetch + `reset --hard FETCH_HEAD` + `clean -fd`). A rejected push
+  (remote moved) is a 409 — no auto-rebase (a conflicted rebase would
+  wedge a headless cache); settle via Discard or a real checkout. Push
+  reuses ambient git credentials (ssh agent / credential helper);
+  prompt-requiring remotes fail fast (`GIT_TERMINAL_PROMPT=0`).
 - **Playbook zip transfer.** `GET /api/playbooks/{rb}/download` streams
   a self-contained zip (entries under a `<rb>/` top folder, `pkgs/`
   included, copy_dir_filtered's skip list + symlinks excluded);
@@ -509,3 +549,90 @@ weave-server image + prom/prometheus + grafana/loki, configs under
   exactly `{service="X"[,system="Y"]}`, so labeled streams appear
   with no server change; future node-metric queries key off the same
   pair.
+
+## config-weave-pipeline (the CI/CD daemon — post-v1)
+
+A separate headless daemon (`pipeline/` crate, binary
+`config-weave-pipeline`) that runs triggered `pipeline.wcl` pipelines.
+Bindings fixed here:
+
+- **Shape.** `src/vocab/pipeline.wcl` (embedded in the CLI as the one
+  source of truth, registered in `src/vocab.rs`; the daemon embeds the
+  same file via `include_str!("../../src/vocab/pipeline.wcl")`, the
+  services.wcl idiom). A `pipeline "name"` block owns `property`
+  (name/type=string|int|bool/required/default), `secret` (inline value,
+  0600 on disk), `target` (os + a `transport "ssh|winrm"` reusing the
+  services.wcl transport shape; `password`/`private_key` may be
+  `"secret:NAME"`), `trigger` (type=manual|webhook|schedule with
+  `webhook_secret`/`cron`/`enabled` + `bind` property presets), and
+  ordered **steps**: `script` (a `run` body, `on = "local"` or a target
+  name, `env` values literal/`prop:`/`secret:`) or `play` (`playbook` +
+  `play` + `action`, `var` values literal/`prop:`/`secret:`). Each block
+  kind needs its own WCL `type`, so `env`/`var` are two identical types
+  (`WeaveEnvVar`/`WeavePlayVar`).
+- **Step ordering.** Script and play steps must interleave in
+  declaration order. The loader (`pipelines.rs`) does a **single
+  `block.blocks()` pass** matching on `kind()` into one ordered
+  `Vec<StepDef>` (unlike systems.rs' two order-independent filtered
+  passes); `save()` iterates that Vec so items round-trip in order. The
+  inventory lives in `{--dir}/pipelines.wcl`, regenerated 0600 via
+  wcl_lang's AST builder + printer (services.wcl save idiom).
+- **Execution** (`exec.rs`, run lifecycle `runs.rs` modeled on
+  sysruns.rs). A trigger binds properties (defaults, `required`, coerce
+  by type), then each step runs in order on topic `pipeline:{id}`:
+  local scripts via `sh -c` / `<shell> -Command` with env vars in the
+  process env (never argv); remote scripts over the shared
+  `weave-remote` transport (`Transport::new`, `exec_stream`), env
+  prepended as `export`/`$env:` into the script body (visible in the
+  remote process list — documented tradeoff, prefer plays for secrets);
+  plays shell out to `config-weave apply|check {playbooks_dir}/{playbook}
+  {play} --json --events-ndjson --continue-on-error --var-file <0600
+  tmp>`, streaming stderr NDJSON and collecting the stdout report.
+  Failure semantics: a non-zero step fails; if `stop_on_failure`
+  (default) the run stops and remaining steps are `skipped`; an infra
+  error (missing secret, spawn/probe failure) is a hard `error`.
+- **Transport crate.** `server/src/transport.rs` moved to a shared
+  `transport/` crate (`weave-remote`) so both weave-server and the
+  daemon use one copy. The only coupling removed was
+  `Transport::for_system(&SystemDef)` → `Transport::new(&TransportConfig,
+  TargetOs)`; `TargetOs`/`TransportKind`/`TransportConfig` moved into the
+  crate and are re-exported from `server/src/systems.rs`.
+- **Auth (forge-auth RS256/JWKS).** `pipeline/src/auth.rs` is a custom
+  forge-server `TokenValidator` accepting forge-auth OIDC access tokens
+  (user logins **and** machine/exchange tokens). It replicates ~15 lines
+  of RS256 + JWKS validation with `jsonwebtoken` rather than depending on
+  the forge-auth crate (which drags sqlx/ldap3/openidconnect). JWKS is
+  fetched at startup and refreshed every 5 min into an `RwLock` cache, so
+  the sync `validate` never blocks on the network; an unknown `kid`
+  rejects (surfaces on the next refresh). `AccessClaims` → forge `Claims`:
+  `preferred_username` present ⇒ user (its value is `sub`); absent ⇒
+  machine (`sub` = `azp`/client id, plus a synthetic `machine` role).
+  `iss` is validated; `aud` only when `--forge-audience` is set
+  (forge-auth deliberately leaves aud to the resource server). Wired via
+  `ForgeApp::auth_validator` (external-issuer mode: no login minting). A
+  loopback bind with no `--forge-issuer` runs open (dev); a non-loopback
+  one is refused unless `--no-auth`.
+- **weave-server integration.** The daemon is headless; the config-weave
+  site reaches it through a reverse proxy (`server/src/pipeline_proxy.rs`,
+  the monitoring-proxy pattern): `--pipeline-url` + a machine token, with
+  routes `GET /api/pipeline-config` (capability probe) and
+  `{GET,POST,PUT,DELETE} /api/pipeline/{*rest}` → `{pipeline_url}/api/*`,
+  body/status passed through verbatim (the daemon already speaks the
+  forge envelope). The browser holds an HS256 weave-server token, not a
+  forge-auth token, so the proxy attaches a forge-auth **machine token**:
+  a static `--pipeline-token`, or one auto-refreshed via the
+  `refresh_token` grant (`--pipeline-refresh-token`/`--pipeline-token-url`
+  /`--pipeline-client-id`). Note: forge-auth has **no
+  `client_credentials` grant**, hence the static-token / refresh-token
+  bridge rather than a client-credentials fetch. The SolidJS Pipelines
+  section (`web-ui/src/components/Pipeline{s,,Run}View.tsx`) lists/opens/
+  triggers pipelines and **polls** `GET /api/pipeline/runs/{id}` every
+  2.5s — the daemon's SSE bus is not weave-server's, so there is no event
+  replay; the run snapshot's event buffer is authoritative.
+- **Authorization seam.** For v1 every daemon handler requires only a
+  valid token (presence), matching weave-server's posture; the machine/
+  user distinction rides in `Claims.roles` for a future `require_role`
+  gate on mutations/triggers. Secret **values are never returned** by any
+  read endpoint (`SecretDef.value` is `skip_serializing`); `update`
+  preserves a stored value when an incoming secret's value is empty, so a
+  redacted round-trip never wipes a secret.

@@ -168,7 +168,7 @@ function ScheduleForm(props: { service: string; systems: SystemDef[]; original: 
 }
 
 function SystemForm(props: { service: string; original: string; initial: SystemDef; onDone: (saved: boolean) => void }) {
-  const [def, setDef] = createStore<SystemDef>(structuredClone(props.initial)); const [saving, setSaving] = createSignal(false); const [showPassword, setShowPassword] = createSignal(false); const [playbooks] = createResource(listRunbooks);
+  const [def, setDef] = createStore<SystemDef>(structuredClone(props.initial)); const [saving, setSaving] = createSignal(false); const [showPassword, setShowPassword] = createSignal(false); const [playbooks] = createResource(() => listRunbooks().then((r) => r.runbooks));
   const save = async () => { setSaving(true); try { const payload = unwrap(def); props.original ? await updateSystem(props.service, props.original, payload) : await createSystem(props.service, payload); notifyServicesChanged(); toast(`saved ${def.name}`, { tone: "success" }); props.onDone(true); } catch (e: any) { toast(e?.message ?? "save failed", { tone: "danger" }); } finally { setSaving(false); } };
   const addAssignment = () => setDef("assignments", def.assignments.length, { playbook: "", play: "" });
   return <Modal open size="lg" title={props.original ? `Edit ${props.original}` : "Add system"} onClose={() => props.onDone(false)} footer={<><Button variant="ghost" onClick={() => props.onDone(false)}>Cancel</Button><Button disabled={saving() || !def.name} onClick={save}>Save</Button></>}><div class="system-form">

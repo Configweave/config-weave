@@ -4,8 +4,9 @@
 //! packages can be doc-viewed (via the extended `list --json`
 //! inventory), tested, and copied into a runbook's `pkgs/`. Each package
 //! carries a `source` tag — `"local"` or a remote repo's name; on a name
-//! collision the local package shadows the remote one, and remote
-//! packages are read-only (sync to update, or copy into a playbook).
+//! collision the local package shadows the remote one. Repo packages
+//! are editable: an edit dirties the repo's cache, settled by Commit &
+//! push or Discard on the repository.
 //!
 //! The CLI only understands playbook dirs, so the merged repo is wrapped
 //! in a synthesized tempdir playbook (`playbook "package-repo" { … }` +
@@ -45,17 +46,19 @@ struct Wrapper {
 #[derive(Default)]
 pub struct WrapperCache(Mutex<Option<Wrapper>>);
 
-/// A scanned package dir: name, real path, manifest mtime.
-type PkgDirEntry = (String, PathBuf, SystemTime);
+/// A scanned content dir: name, real path, manifest mtime. Shared by
+/// the package and runbook merges.
+pub(crate) type NamedDirEntry = (String, PathBuf, SystemTime);
 
-/// Scan one source dir: package dirs (containing package.wcl) with
-/// their real paths and manifest mtimes.
-fn scan_dir(dir: &Path) -> Result<Vec<PkgDirEntry>, String> {
+/// Scan one source dir: child dirs holding `manifest` with their real
+/// paths and manifest mtimes. Shared by the package scan (package.wcl)
+/// and the runbook scan (playbook.wcl).
+pub(crate) fn scan_dir_for(dir: &Path, manifest: &str) -> Result<Vec<NamedDirEntry>, String> {
     let mut found = Vec::new();
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("cannot read packages dir: {e}"))?;
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("cannot read source dir: {e}"))?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let manifest = entry.path().join("package.wcl");
+        let manifest = entry.path().join(manifest);
         if entry.path().is_dir() && valid_name(&name) && manifest.is_file() {
             let mtime = std::fs::metadata(&manifest)
                 .and_then(|m| m.modified())
@@ -67,23 +70,27 @@ fn scan_dir(dir: &Path) -> Result<Vec<PkgDirEntry>, String> {
     Ok(found)
 }
 
-/// One package in the merged repo.
-struct SourceEntry {
-    name: String,
-    dir: PathBuf,
-    mtime: SystemTime,
-    source: String,
+fn scan_dir(dir: &Path) -> Result<Vec<NamedDirEntry>, String> {
+    scan_dir_for(dir, "package.wcl")
 }
 
-struct ScanResult {
-    entries: Vec<SourceEntry>,
+/// One entry in a merged multi-source view.
+pub(crate) struct SourceEntry {
+    pub(crate) name: String,
+    pub(crate) dir: PathBuf,
+    pub(crate) mtime: SystemTime,
+    pub(crate) source: String,
+}
+
+pub(crate) struct ScanResult {
+    pub(crate) entries: Vec<SourceEntry>,
     /// Name collisions: `(name, winning source, shadowed source)`.
-    shadowed: Vec<(String, String, String)>,
+    pub(crate) shadowed: Vec<(String, String, String)>,
 }
 
 /// First occurrence of a name wins: earlier sources shadow later ones.
 /// Split from state so the policy is unit-testable.
-fn merge_sources(sources: Vec<(String, Vec<PkgDirEntry>)>) -> ScanResult {
+pub(crate) fn merge_sources(sources: Vec<(String, Vec<NamedDirEntry>)>) -> ScanResult {
     let mut result = ScanResult {
         entries: Vec::new(),
         shadowed: Vec::new(),
@@ -277,22 +284,14 @@ fn package_dir_in(packages_dir: &Path, name: &str) -> Option<PathBuf> {
     (dir.is_dir() && dir.join("package.wcl").is_file()).then(|| dir.canonicalize().unwrap_or(dir))
 }
 
-/// The read-only guard for write endpoints: resolve the package and
-/// refuse anything not from the local repository.
+/// Resolve a package dir for the write endpoints. Repo-sourced
+/// packages are editable too — an edit dirties the repo's cache, and
+/// Commit & push / Discard on the repository settle it.
 fn writable_package_dir(state: &SharedState, name: &str) -> Result<PathBuf, (StatusCode, String)> {
-    let Some((dir, source)) = resolve_package(state, name) else {
-        return Err((StatusCode::NOT_FOUND, "no such package".into()));
-    };
-    if source != crate::repos::LOCAL_SOURCE {
-        return Err((
-            StatusCode::FORBIDDEN,
-            format!(
-                "package '{name}' is read-only: it comes from repository '{source}' — \
-                 sync the repository to update it, or copy it into a playbook to edit"
-            ),
-        ));
+    match resolve_package(state, name) {
+        Some((dir, _source)) => Ok(dir),
+        None => Err((StatusCode::NOT_FOUND, "no such package".into())),
     }
-    Ok(dir)
 }
 
 // ------------------------------------------------------- API docs
@@ -394,7 +393,6 @@ pub async fn file_get(
 
 /// PUT /api/packages/{name}/file?path=… — edits the repo in place; the
 /// wrapper cache invalidates via the manifest's mtime fingerprint.
-/// Remote packages are read-only (403).
 pub async fn file_put(
     Extension(state): Extension<SharedState>,
     UrlPath(name): UrlPath<String>,
@@ -435,7 +433,7 @@ pub async fn doc_render(
     doc_render_at(&state, &dir, body).await
 }
 
-/// PUT /api/packages/{name}/doc — remote packages are read-only (403).
+/// PUT /api/packages/{name}/doc
 pub async fn doc_save(
     Extension(state): Extension<SharedState>,
     UrlPath(name): UrlPath<String>,
@@ -486,7 +484,7 @@ pub async fn import_to_repo(
     if dest.exists() {
         return err(StatusCode::CONFLICT, "package already in the repository");
     }
-    match crate::transport::copy_dir_filtered(&src, &dest) {
+    match weave_remote::copy_dir_filtered(&src, &dest) {
         Ok(()) => ok(json!({ "imported": name })),
         Err(e) => err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -582,7 +580,7 @@ pub async fn add_to_runbook(
             );
         }
     }
-    if let Err(e) = crate::transport::copy_dir_filtered(&src, &dest) {
+    if let Err(e) = weave_remote::copy_dir_filtered(&src, &dest) {
         return err(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("cannot copy: {e}"),

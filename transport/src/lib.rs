@@ -1,27 +1,108 @@
-//! Remote transports for direct systems: copy the config-weave binary +
-//! playbook to the target and run check/apply there. The API mirrors the
-//! testlab's `TestInstance` seam (copy_in/exec) but is async and speaks
-//! ssh (openssh client; Linux and Win32-OpenSSH targets) or winrm
-//! (shelling out to `pwsh` PSRemoting; requires pwsh + PSWSMan on the
-//! server host).
+//! Remote transports: copy files to a target and run commands there,
+//! streaming output line-by-line. The API is async and speaks ssh (openssh
+//! client; Linux and Win32-OpenSSH targets) or winrm (shelling out to `pwsh`
+//! PSRemoting; requires pwsh + PSWSMan on the host).
 //!
-//! Remote commands are structured (`ExecSpec`: program + args + stdout
-//! redirect), never free-form shell strings — each transport renders
-//! them for the target's shell itself, and Windows payloads go through
-//! `powershell -EncodedCommand` so quoting can never break. The run
-//! protocol always redirects remote stdout to `<stage>/report.json` and
-//! fetches it afterwards, sidestepping stream-separation quirks; the
-//! live NDJSON events arrive on the streamed remaining output.
+//! Shared by weave-server (direct-system runs) and config-weave-pipeline
+//! (remote script steps). Split out of weave-server so both reuse one copy.
+//!
+//! Remote commands are structured ([`ExecSpec`]: program + args + stdout
+//! redirect), never free-form shell strings — each transport renders them
+//! for the target's shell itself, and Windows payloads go through
+//! `powershell -EncodedCommand` so quoting can never break. The run protocol
+//! always redirects remote stdout to a file and fetches it afterwards,
+//! sidestepping stream-separation quirks; live output arrives on the
+//! streamed remaining output.
 
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 
-use crate::systems::{SystemDef, TargetOs, TransportConfig, TransportKind};
-
 /// Directories never staged to a target (same set the runbook tree hides).
-const EXCLUDED_DIRS: [&str; 4] = [".git", "node_modules", "target", ".vmlab"];
+pub const EXCLUDED_DIRS: [&str; 4] = [".git", "node_modules", "target", ".vmlab"];
+
+// ------------------------------------------------------- connection config
+
+/// The OS of a remote target: selects the shell/quoting/path conventions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TargetOs {
+    Linux,
+    Windows,
+}
+
+impl TargetOs {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TargetOs::Linux => "linux",
+            TargetOs::Windows => "windows",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "linux" => Some(TargetOs::Linux),
+            "windows" => Some(TargetOs::Windows),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TransportKind {
+    Ssh,
+    Winrm,
+}
+
+impl TransportKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TransportKind::Ssh => "ssh",
+            TransportKind::Winrm => "winrm",
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "ssh" => Some(TransportKind::Ssh),
+            "winrm" => Some(TransportKind::Winrm),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransportConfig {
+    pub kind: TransportKind,
+    pub host: String,
+    #[serde(default)]
+    pub port: Option<u16>,
+    pub user: String,
+    #[serde(default)]
+    pub password: Option<String>,
+    /// ssh: path to a key file, or an inline PEM body.
+    #[serde(default)]
+    pub private_key: Option<String>,
+    /// winrm: HTTPS (5986).
+    #[serde(default)]
+    pub use_tls: bool,
+}
+
+impl TransportConfig {
+    pub fn effective_port(&self) -> u16 {
+        self.port.unwrap_or(match self.kind {
+            TransportKind::Ssh => 22,
+            TransportKind::Winrm => {
+                if self.use_tls {
+                    5986
+                } else {
+                    5985
+                }
+            }
+        })
+    }
+}
 
 /// A remote command: absolute program path, plain args, optional remote
 /// file that receives the program's stdout.
@@ -45,10 +126,11 @@ pub enum Transport {
 }
 
 impl Transport {
-    pub fn for_system(sys: &SystemDef) -> Result<Transport, String> {
-        match sys.transport.kind {
-            TransportKind::Ssh => Ok(Transport::Ssh(SshTransport::new(&sys.transport, sys.os)?)),
-            TransportKind::Winrm => Ok(Transport::Winrm(WinrmTransport::new(&sys.transport)?)),
+    /// Build a transport for a connection config + target OS.
+    pub fn new(cfg: &TransportConfig, os: TargetOs) -> Result<Transport, String> {
+        match cfg.kind {
+            TransportKind::Ssh => Ok(Transport::Ssh(SshTransport::new(cfg, os)?)),
+            TransportKind::Winrm => Ok(Transport::Winrm(WinrmTransport::new(cfg)?)),
         }
     }
 
@@ -626,7 +708,7 @@ async fn stream_child(
 /// Recursive copy skipping EXCLUDED_DIRS and dotdirs, dereferencing
 /// nothing exotic (symlinked files copy as their content). Also used by
 /// the package repository's add-to-runbook copy.
-pub(crate) fn copy_dir_filtered(src: &Path, dest: &Path) -> std::io::Result<()> {
+pub fn copy_dir_filtered(src: &Path, dest: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;

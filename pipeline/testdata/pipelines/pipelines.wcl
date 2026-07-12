@@ -1,0 +1,48 @@
+pipeline "deploy-web" {
+  description = "Build locally, then converge the web fleet"
+
+  property "version" {
+    description = "Release version to deploy"
+    type = "string"
+    required = true
+  }
+  property "dry_run" {
+    type = "bool"
+    default = "false"
+  }
+
+  secret "vault_token" {
+    description = "Token the play uses to pull config"
+    value = "hvs.CAES-example-token"
+  }
+
+  trigger "on-push" {
+    type = "webhook"
+    webhook_secret = "hunter2hunter2hunter2hunter2hunter2"
+    # A webhook carries no properties, so a required one must be preset here
+    # (a real pipeline would derive the version from the pushed ref/tag).
+    bind "version" { value = "webhook-build" }
+    bind "dry_run" { value = "false" }
+  }
+  trigger "nightly" {
+    type = "schedule"
+    cron = "0 0 3 * * *"
+  }
+
+  script "build" {
+    description = "Build the release artifact"
+    on = "local"
+    run = "echo building version $VERSION dry_run=$DRY_RUN"
+    env "VERSION" { value = "prop:version" }
+    env "DRY_RUN" { value = "prop:dry_run" }
+  }
+
+  play "converge" {
+    description = "Apply the web app play"
+    playbook = "web"
+    play = "app"
+    action = "apply"
+    var "app_version" { value = "prop:version" }
+    var "vault_token" { value = "secret:vault_token" }
+  }
+}

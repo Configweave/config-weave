@@ -12,6 +12,7 @@ import {
   downloadRunbookZip,
   importPackageToRepo,
   listPackages,
+  listRunbooks,
   removePackageFromRunbook,
   runbookInventory,
   runbookScope,
@@ -20,12 +21,21 @@ import {
 } from "../api";
 import { setView } from "../store";
 import FileWorkspace from "./FileWorkspace";
+import { RepoWriteBar } from "./RepoSync";
 
 export default function RunbookView(props: { name: string }) {
   const [inventory, { refetch: refetchInventory }] = createResource(
     () => props.name,
     runbookInventory,
   );
+  // "local" or the remote repository providing this runbook — repo
+  // runbooks get the write bar (Commit & push / Discard).
+  const [source] = createResource(
+    () => props.name,
+    async (name) =>
+      (await listRunbooks()).runbooks.find((r) => r.name === name)?.source ?? "local",
+  );
+  const fromRepo = () => !!source() && source() !== "local";
   const [diags, setDiags] = createSignal<ValidateResult | null>(null);
   const [validating, setValidating] = createSignal(false);
   const [keep, setKeep] = createSignal(false);
@@ -117,7 +127,15 @@ export default function RunbookView(props: { name: string }) {
     <>
       <PageHead
         title={props.name}
-        sub={inventory()?.description || "playbook"}
+        sub={
+          <span>
+            {inventory()?.description || "playbook"}
+            <Show when={fromRepo()}>
+              {" "}
+              <Badge tone="info">from {source()}</Badge>
+            </Show>
+          </span>
+        }
         actions={
           <div class="head-actions">
             <Button
@@ -150,6 +168,10 @@ export default function RunbookView(props: { name: string }) {
             </Alert>
           </Show>
         )}
+      </Show>
+
+      <Show when={fromRepo()}>
+        <RepoWriteBar repo={source()!} onSettled={() => setPkgReload((n) => n + 1)} />
       </Show>
 
       <FileWorkspace

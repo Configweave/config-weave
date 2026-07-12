@@ -48,83 +48,10 @@ impl SystemKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TargetOs {
-    Linux,
-    Windows,
-}
-
-impl TargetOs {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            TargetOs::Linux => "linux",
-            TargetOs::Windows => "windows",
-        }
-    }
-    fn parse(s: &str) -> Option<Self> {
-        match s {
-            "linux" => Some(TargetOs::Linux),
-            "windows" => Some(TargetOs::Windows),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TransportKind {
-    Ssh,
-    Winrm,
-}
-
-impl TransportKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            TransportKind::Ssh => "ssh",
-            TransportKind::Winrm => "winrm",
-        }
-    }
-    fn parse(s: &str) -> Option<Self> {
-        match s {
-            "ssh" => Some(TransportKind::Ssh),
-            "winrm" => Some(TransportKind::Winrm),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TransportConfig {
-    pub kind: TransportKind,
-    pub host: String,
-    #[serde(default)]
-    pub port: Option<u16>,
-    pub user: String,
-    #[serde(default)]
-    pub password: Option<String>,
-    /// ssh: path to a key file, or an inline PEM body.
-    #[serde(default)]
-    pub private_key: Option<String>,
-    /// winrm: HTTPS (5986).
-    #[serde(default)]
-    pub use_tls: bool,
-}
-
-impl TransportConfig {
-    pub fn effective_port(&self) -> u16 {
-        self.port.unwrap_or(match self.kind {
-            TransportKind::Ssh => 22,
-            TransportKind::Winrm => {
-                if self.use_tls {
-                    5986
-                } else {
-                    5985
-                }
-            }
-        })
-    }
-}
+// The connection types live in the shared `weave-remote` crate (the
+// config-weave-pipeline daemon reuses them too); re-exported here so the
+// rest of the server keeps referring to `crate::systems::TargetOs` etc.
+pub use weave_remote::{TargetOs, TransportConfig, TransportKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemDef {

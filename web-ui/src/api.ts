@@ -9,6 +9,8 @@ export const api = createClient();
 
 export interface RunbookEntry {
   name: string;
+  /// "local" or the remote repository providing it.
+  source: string;
 }
 
 export interface TreeNode {
@@ -104,7 +106,11 @@ export interface RunSnapshot extends RunSummary {
   report: any | null;
 }
 
-export const listRunbooks = () => api.request<RunbookEntry[]>("GET", "/api/playbooks");
+export const listRunbooks = () =>
+  api.request<{ runbooks: RunbookEntry[]; shadowed: ShadowedPackage[] }>(
+    "GET",
+    "/api/playbooks",
+  );
 export const validateRunbook = (rb: string) =>
   api.request<ValidateResult>("POST", `/api/playbooks/${encodeURIComponent(rb)}/validate`);
 export const runbookInventory = (rb: string) =>
@@ -520,23 +526,55 @@ export interface RepoDef {
   name: string;
   url: string;
   subdir: string | null;
+  /// Subdir of playbook dirs ("." = checkout root); null = no runbooks.
+  runbooks_subdir: string | null;
   branch: string | null;
+  /// Six-field cron; a due tick syncs the repo. Null = manual/webhook only.
+  sync_cron: string | null;
+  /// Enables POST /api/webhooks/repos/{name} (HMAC or plain token).
+  webhook_secret: string | null;
   cloned: boolean;
   packages: number | null;
+  runbooks: number | null;
+  /// Uncommitted local edits in the cache (blocks sync).
+  dirty: boolean;
+  /// Committed-but-unpushed commits in the cache (blocks sync).
+  ahead: number;
   /// Set when the initial clone failed (the entry still persists; Sync
   /// retries).
   error?: string;
 }
 
+export interface RepoInput {
+  name: string;
+  url: string;
+  subdir?: string | null;
+  runbooks_subdir?: string | null;
+  branch?: string | null;
+  sync_cron?: string | null;
+  webhook_secret?: string | null;
+}
+
 export const listRepos = () => api.request<RepoDef[]>("GET", "/api/repos");
-export const addRepo = (def: { name: string; url: string; subdir?: string; branch?: string }) =>
+export const getRepo = (name: string) =>
+  api.request<RepoDef>("GET", `/api/repos/${encodeURIComponent(name)}`);
+export const addRepo = (def: RepoInput) =>
   api.request<RepoDef>("POST", "/api/repos", def);
+export const updateRepo = (name: string, def: RepoInput) =>
+  api.request<RepoDef>("PUT", `/api/repos/${encodeURIComponent(name)}`, def);
 export const removeRepo = (name: string) =>
   api.request<{ deleted: string }>("DELETE", `/api/repos/${encodeURIComponent(name)}`);
 export const syncRepo = (name: string) =>
   api.request<RepoDef>("POST", `/api/repos/${encodeURIComponent(name)}/sync`);
 export const syncAllRepos = () =>
-  api.request<{ name: string; ok: boolean; error?: string }[]>("POST", "/api/repos/sync");
+  api.request<{ name: string; ok: boolean; error?: string; skipped?: string }[]>(
+    "POST",
+    "/api/repos/sync",
+  );
+export const commitRepo = (name: string, message: string) =>
+  api.request<RepoDef>("POST", `/api/repos/${encodeURIComponent(name)}/commit`, { message });
+export const discardRepo = (name: string) =>
+  api.request<RepoDef>("POST", `/api/repos/${encodeURIComponent(name)}/discard`);
 
 // --- playbook zip transfer ---------------------------------------------------
 //
@@ -585,3 +623,99 @@ export async function uploadRunbookZip(file: File, name?: string): Promise<{ nam
   const body = await res.json();
   return body?.data ?? body;
 }
+
+// --- config-weave-pipeline (proxied through weave-server) ------------------
+
+export interface PipelineTriggerSummary {
+  name: string;
+  type: string;
+  enabled: boolean;
+}
+
+export interface PipelineSummary {
+  name: string;
+  description?: string | null;
+  steps: number;
+  triggers: PipelineTriggerSummary[];
+}
+
+export interface PipelinePropertyDef {
+  name: string;
+  description?: string | null;
+  type: string;
+  required: boolean;
+  default?: string | null;
+}
+
+export interface PipelineStepDef {
+  kind: "script" | "play";
+  name: string;
+  description?: string | null;
+  // script
+  on?: string;
+  run?: string;
+  // play
+  playbook?: string;
+  play?: string;
+  action?: string;
+}
+
+export interface PipelineDetail {
+  name: string;
+  description?: string | null;
+  properties: PipelinePropertyDef[];
+  secrets: { name: string; description?: string | null }[];
+  targets: { name: string; os: string; description?: string | null }[];
+  triggers: {
+    name: string;
+    type: string;
+    enabled: boolean;
+    cron?: string | null;
+    bindings?: [string, string][];
+  }[];
+  steps: PipelineStepDef[];
+}
+
+export interface PipelineRunSummary {
+  id: string;
+  started_at: string;
+  pipeline: string;
+  trigger: string;
+  status: string;
+  phase: string;
+}
+
+export interface PipelineRunSnapshot {
+  id: string;
+  started_at: string;
+  pipeline: string;
+  trigger: string;
+  properties: Record<string, string>;
+  status: string;
+  phase: string;
+  steps: any[];
+  events: any[];
+  dropped_events: number;
+}
+
+export const getPipelineConfig = () =>
+  api.request<{ configured: boolean }>("GET", "/api/pipeline-config");
+export const listPipelines = () =>
+  api.request<{ pipelines: PipelineSummary[] }>("GET", "/api/pipeline/pipelines");
+export const getPipeline = (name: string) =>
+  api.request<PipelineDetail>("GET", `/api/pipeline/pipelines/${encodeURIComponent(name)}`);
+export const triggerPipeline = (name: string, properties: Record<string, string>) =>
+  api.request<{ run_id: string }>(
+    "POST",
+    `/api/pipeline/pipelines/${encodeURIComponent(name)}/trigger`,
+    { properties },
+  );
+export const listPipelineRuns = () =>
+  api.request<{ runs: PipelineRunSummary[] }>("GET", "/api/pipeline/runs");
+export const getPipelineRun = (id: string) =>
+  api.request<PipelineRunSnapshot>("GET", `/api/pipeline/runs/${encodeURIComponent(id)}`);
+export const cancelPipelineRun = (id: string) =>
+  api.request<{ cancelling: boolean }>(
+    "POST",
+    `/api/pipeline/runs/${encodeURIComponent(id)}/cancel`,
+  );

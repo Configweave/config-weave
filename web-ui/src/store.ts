@@ -13,7 +13,10 @@ export type View =
   | { kind: "service"; name: string; tab?: "overview" | "systems" | "schedules" | "monitoring" | "logs" }
   | { kind: "sysrun"; id: string; service: string; system: string; action: string; playbook: string; play: string }
   | { kind: "packages" }
-  | { kind: "package"; name: string; runbook?: string; tab?: "overview" | "docs" };
+  | { kind: "package"; name: string; runbook?: string; tab?: "overview" | "docs" }
+  | { kind: "pipelines" }
+  | { kind: "pipeline"; name: string }
+  | { kind: "pipelinerun"; id: string; pipeline: string };
 
 export const [view, setView] = createSignal<View>({ kind: "services" });
 export const [servicesRevision, setServicesRevision] = createSignal(1);

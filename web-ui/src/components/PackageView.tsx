@@ -32,6 +32,7 @@ import {
 import { setView } from "../store";
 import FileWorkspace from "./FileWorkspace";
 import PackageDocs from "./PackageDocs";
+import { RepoWriteBar } from "./RepoSync";
 
 export default function PackageView(props: {
   name: string;
@@ -63,11 +64,10 @@ export default function PackageView(props: {
       : packageScope(props.name),
   );
 
-  // Remote-repo packages are read-only in the library (the cache would
-  // be clobbered by the next sync); copies installed in runbooks and
-  // local repo packages edit normally.
+  // Remote-repo packages are editable: an edit dirties the repo's
+  // cache, settled from the write bar (Commit & push / Discard).
   const source = () => (props.runbook ? undefined : info()?.source);
-  const readOnly = () => !!source() && source() !== "local";
+  const fromRepo = () => !!source() && source() !== "local";
 
   const [busy, setBusy] = createSignal(false);
 
@@ -133,10 +133,6 @@ export default function PackageView(props: {
             <Badge tone={props.runbook ? "info" : "neutral"}>
               {props.runbook ? `installed in ${props.runbook}` : "repository"}
             </Badge>
-            <Show when={readOnly()}>
-              {" "}
-              <Badge tone="info">{`from ${source()} (read-only)`}</Badge>
-            </Show>
           </span>
         }
         actions={
@@ -257,7 +253,10 @@ export default function PackageView(props: {
         </Card>
 
         <Card title="Files">
-          <FileWorkspace scope={scope()} readOnly={readOnly()} />
+          <Show when={fromRepo()}>
+            <RepoWriteBar repo={source()!} />
+          </Show>
+          <FileWorkspace scope={scope()} />
         </Card>
 
         <Show when={!props.runbook}>
@@ -341,7 +340,7 @@ function GathererDocs(props: { gatherer: GathererDecl }) {
 }
 
 function AddToPlaybook(props: { package: string }) {
-  const [runbooks] = createResource(listRunbooks);
+  const [runbooks] = createResource(() => listRunbooks().then((r) => r.runbooks));
   const [target, setTarget] = createSignal("");
   const [adding, setAdding] = createSignal(false);
 
