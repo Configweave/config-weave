@@ -1,7 +1,6 @@
 //! Playbook/package data model and WCL loading + schema validation.
-//! The graphical editors' DocJson pipeline lives in the shared
-//! `weave-docjson` crate (re-exported here so `model::docjson` etc.
-//! keep working); weave-server consumes that crate directly.
+//! The DocJson pipeline lives in the shared `weave-docjson` crate
+//! (re-exported here so `model::docjson` etc. keep working).
 
 mod load;
 mod types;

@@ -53,6 +53,27 @@ pub fn generate(pb: &Playbook, outdir: &Path) -> Result<usize, Diag> {
     Ok(page_count(pb))
 }
 
+/// Serve a generated site with `wcl wdoc serve` (watch-rebuild dev server
+/// with live reload) on the emitted source. Blocks until the server exits.
+pub fn serve(outdir: &Path, addr: Option<&str>) -> Result<(), Diag> {
+    let src_path = outdir.join("_weave_docs.wcl");
+    let bin = wcl_bin();
+    let mut cmd = Command::new(&bin);
+    cmd.args(["wdoc", "serve"]).arg(&src_path);
+    if let Some(addr) = addr {
+        cmd.args(["--addr", addr]);
+    }
+    let status = cmd.status().map_err(|e| {
+        Diag::bare(format!(
+            "cannot run `{bin} wdoc serve` (is `wcl` on PATH? set CONFIG_WEAVE_WCL to override): {e}"
+        ))
+    })?;
+    if !status.success() {
+        return Err(Diag::bare(format!("wdoc serve exited with {status}")));
+    }
+    Ok(())
+}
+
 /// Number of pages `emit` produces: one index, one per play, one per
 /// package, and one per resource and test.
 fn page_count(pb: &Playbook) -> usize {

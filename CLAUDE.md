@@ -25,31 +25,19 @@ convergence tests in disposable instances — docker containers (linux) or
 vmlab VMs (linux + windows guests, shelling out to the sibling `../vmlab`
 CLI) — with `test` blocks in package.wcl, a three-run idempotence
 protocol, `just test-lab` for the docker-gated suite, and `just
-test-lab-vm` for a vmlab smoke. `weave-server` (`server/` + SolidJS
-`web-ui/`, on the sibling `../forge` stack) is the web GUI: runbook
-browsing/editing with visual playbook/package editors (DocJson pipeline
-in `src/model/{docjson,inspect_ast,emit}.rs`), a systems inventory
-(`systems.wcl`, ssh/winrm deployment of direct systems, remote systems
-via injected `system_*` vars), a package repository (`--packages-dir`,
-merged with remote git repos from `repos.wcl` — the public
-config-weave-pkgs stdlib is seeded by default, remote packages are
-read-only), playbook zip download/upload, live test/system runs with
-docker-terminal/VNC debugging, and
-per-service Monitoring/Logs tabs backed by an optional Prometheus + Loki
-pair (`--prometheus-url`/`--loki-url`; `just stack-up` runs the compose
-test stack).
-`config-weave-pipeline` (`pipeline/` crate) is a headless CI/CD daemon
-that runs triggered `pipeline.wcl` pipelines: ordered steps that are
-either shell scripts (local or over ssh/winrm via the shared
-`weave-remote` transport crate — `transport/`, split out of the server)
-or config-weave plays (shelled out to the CLI). Triggers are manual
-(API), git webhooks, or cron; properties, inline 0600 secrets, and
-forge-auth machine+user JWTs (RS256/JWKS, custom `TokenValidator`).
-weave-server reaches it through a `--pipeline-url` reverse proxy plus a
-SolidJS Pipelines section.
+test-lab-vm` for a vmlab smoke. `config-weave docs` renders a static
+wdoc site from the playbook/package metadata (emits `_weave_docs.wcl`,
+shells out to `wcl wdoc build`; `--serve` hands off to `wcl wdoc serve`)
+— the sibling `../config-weave-pkgs` stdlib repo uses it for its package
+docs. The DocJson pipeline (structural package/playbook extraction and
+AST-preserving round-tripping) lives in the `docjson/` crate
+(`weave-docjson`), re-exported through `src/model/mod.rs`.
+A web GUI (`weave-server`) and CI/CD daemon (`config-weave-pipeline`)
+were built and later removed to refocus on the CLI — see git history
+before 2026-07 for that code.
 `docs/notes.md` records how the PRD's illustrative
 sketches were bound to the real WCL and wscript APIs, plus the testlab's
-and weave-server's bindings — read it before changing the vocabulary,
+bindings — read it before changing the vocabulary,
 the variable scheme, the host API surface, or the test protocol.
 
 ## Layout

@@ -140,6 +140,13 @@ enum Command {
     Docs {
         playbook_dir: PathBuf,
         outdir: Option<PathBuf>,
+        /// After rendering, serve the site with `wcl wdoc serve`
+        /// (watch-rebuild dev server with live reload).
+        #[arg(long)]
+        serve: bool,
+        /// Listen address for --serve (default 127.0.0.1:8080).
+        #[arg(long, requires = "serve")]
+        addr: Option<String>,
     },
     /// Emit .wscripti interface files for the host API plus a starter wscript.toml.
     Wscripti { outdir: Option<PathBuf> },
@@ -168,9 +175,9 @@ enum Command {
         facts: Option<PathBuf>,
     },
     /// (internal) stdin `{kind, source}` → stdout `{ok, doc | diags}`:
-    /// structural DocJson extraction from one WCL source for the web
-    /// GUI's graphical editors. Content-based (no file IO), so it works
-    /// on unsaved buffers; kind is "playbook" or "package".
+    /// structural DocJson extraction from one WCL source for external
+    /// tooling. Content-based (no file IO), so it works on unsaved
+    /// buffers; kind is "playbook" or "package".
     #[command(name = "__wcl-inspect", hide = true)]
     WclInspect,
     /// (internal) stdin `{kind, base_source, doc}` → stdout
@@ -178,8 +185,8 @@ enum Command {
     /// AST (comments survive) and print the canonical WCL.
     #[command(name = "__wcl-render", hide = true)]
     WclRender,
-    /// (internal) Scaffold templates as JSON for the web GUI's "new
-    /// script" actions.
+    /// (internal) Scaffold templates as JSON for external tooling's
+    /// "new script" actions.
     #[command(name = "__templates", hide = true)]
     Templates,
 }
@@ -239,7 +246,9 @@ fn main() -> ExitCode {
         Command::Docs {
             playbook_dir,
             outdir,
-        } => cmd_docs(playbook_dir, outdir.as_deref()),
+            serve,
+            addr,
+        } => cmd_docs(playbook_dir, outdir.as_deref(), *serve, addr.as_deref()),
         Command::Wscripti { outdir } => {
             let dir = outdir.clone().unwrap_or_else(|| PathBuf::from("."));
             match scaffold::wscripti(&dir) {
@@ -906,7 +915,12 @@ fn cmd_run_verify(script: &std::path::Path, facts: Option<&std::path::Path>) -> 
     }
 }
 
-fn cmd_docs(dir: &std::path::Path, outdir: Option<&std::path::Path>) -> u8 {
+fn cmd_docs(
+    dir: &std::path::Path,
+    outdir: Option<&std::path::Path>,
+    serve: bool,
+    addr: Option<&str>,
+) -> u8 {
     // Docs share the validation pipeline: a playbook that doesn't
     // validate doesn't document (PRD §12).
     let pb = match load_validated(dir) {
@@ -920,20 +934,22 @@ fn cmd_docs(dir: &std::path::Path, outdir: Option<&std::path::Path>) -> u8 {
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| dir.join("docs"));
     match docsgen::generate(&pb, &out) {
-        Ok(pages) => {
-            println!("rendered {pages} page(s) to {}", out.display());
-            EXIT_OK
-        }
+        Ok(pages) => println!("rendered {pages} page(s) to {}", out.display()),
         Err(d) => {
             eprintln!("{}", d.rendered);
-            EXIT_VALIDATION
+            return EXIT_VALIDATION;
         }
     }
+    if serve && let Err(d) = docsgen::serve(&out, addr) {
+        eprintln!("{}", d.rendered);
+        return EXIT_VALIDATION;
+    }
+    EXIT_OK
 }
 
 /// Everything the DocJson subcommands need arrives as one JSON object
 /// on stdin; results leave as one JSON object on stdout. Errors are
-/// in-band (`ok: false`) so the server never has to parse stderr.
+/// in-band (`ok: false`) so callers never have to parse stderr.
 fn read_stdin_json() -> Result<serde_json::Value, String> {
     use std::io::Read as _;
     let mut buf = String::new();
@@ -1013,8 +1029,8 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
         return EXIT_VALIDATION;
     }
     if cli.json {
-        // The full inventory, not just plays: machine consumers (the web
-        // GUI) need the packages' tests and scenarios to offer runs.
+        // The full inventory, not just plays: machine consumers need
+        // the packages' tests and scenarios to offer runs.
         let plays: Vec<serde_json::Value> = pb
             .plays
             .iter()

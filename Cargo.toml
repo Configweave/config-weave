@@ -1,8 +1,7 @@
-# Workspace: the CLI (this package, the root) plus the web GUI server.
-# `default-members` keeps plain `cargo build`/`cross build` on the CLI only,
-# so the release flow never drags the server's async web stack along.
+# Workspace: the CLI (this package, the root) plus the weave-docjson crate.
+# `default-members` keeps plain `cargo build`/`cross build` on the CLI only.
 [workspace]
-members = [".", "server", "docjson", "transport", "pipeline"]
+members = [".", "docjson"]
 default-members = ["."]
 
 [package]

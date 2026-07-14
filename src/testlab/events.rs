@@ -1,8 +1,9 @@
 //! Testlab progress events: one stream drives both the human stderr
 //! renderer and the machine NDJSON emitter (mirroring `engine::events`).
-//! `--events-ndjson` consumers (e.g. weave-server) parse one JSON object
-//! per stderr line to follow a run live and to learn the raw instance
-//! ids they need for troubleshooting attach and post-kill cleanup.
+//! `--events-ndjson` consumers (external supervisors) parse one JSON
+//! object per stderr line to follow a run live and to learn the raw
+//! instance ids they need for troubleshooting attach and post-kill
+//! cleanup.
 
 use std::io::Write as _;
 use std::sync::Arc;
