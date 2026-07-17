@@ -7,18 +7,14 @@ name: CI
 # into wscript/ — the same layout as a local dev checkout. Docker- and
 # vmlab-backed testlab tests are #[ignore]-gated, so `cargo test` runs only
 # the host-independent suite here.
+#
+# No paths filter: releases are trailer-gated (see the version job), so the
+# workflow must see every push to main — a release commit that touches
+# nothing buildable (e.g. an empty `chore: release`) still has to run.
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'testdata/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'justfile'
-      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main]
   workflow_dispatch: {}
@@ -62,3 +58,170 @@ jobs:
       - name: Test
         working-directory: config-weave
         run: cargo test
+
+  # ── Version ───────────────────────────────────────────────────────────────
+  # Trailer-gated: a release only happens when HEAD carries a publish trailer.
+  #   pre-release: true   → X.Y.Z-alpha, marked as a GitHub pre-release
+  #   release: true       → X.Y.Z stable
+  # Neither → CI runs tests only. The version is bumped from the last v* tag,
+  # scanning conventional-commit subjects since that tag for the bump level
+  # (0.x semantics: a breaking change bumps the minor, not the major).
+  # Same scheme as the sibling WCL and vmlab repos.
+  version:
+    name: Calculate version
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      version: ${{ steps.calc.outputs.version }}
+      prerelease: ${{ steps.calc.outputs.prerelease }}
+      do_release: ${{ steps.calc.outputs.do_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: calc
+        run: |
+          IS_RELEASE=$(git log -1 --format='%(trailers:key=release,valueonly)')
+          IS_PRERELEASE=$(git log -1 --format='%(trailers:key=pre-release,valueonly)')
+
+          if [[ "$IS_RELEASE" != "true" && "$IS_PRERELEASE" != "true" ]]; then
+            echo "do_release=false" >> "$GITHUB_OUTPUT"
+            echo "No release/pre-release trailer on HEAD — tests only." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Next version = bump from the last v* tag, scanning conventional
+          # commits since that tag for the bump level (0.x: major -> minor).
+          LAST_TAG=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo "")
+          if [[ -z "$LAST_TAG" ]]; then
+            PREV_MAJOR=0; PREV_MINOR=0; PREV_PATCH=0; RANGE="HEAD"
+          else
+            VER="${LAST_TAG#v}"; VER="${VER%%-*}"
+            IFS='.' read -r PREV_MAJOR PREV_MINOR PREV_PATCH <<< "$VER"
+            RANGE="${LAST_TAG}..HEAD"
+          fi
+
+          BUMP="none"
+          while IFS= read -r HASH; do
+            SUBJECT=$(git log -1 --format='%s' "$HASH")
+            BODY=$(git log -1 --format='%b' "$HASH")
+            if echo "$SUBJECT" | grep -qE '^[a-z]+(\(.+\))?!:' || echo "$BODY" | grep -qiE '^BREAKING[ -]CHANGE:'; then
+              BUMP="major"
+            elif echo "$SUBJECT" | grep -qE '^feat(\(.+\))?:' && [[ "$BUMP" != "major" ]]; then
+              BUMP="minor"
+            elif echo "$SUBJECT" | grep -qE '^(fix|perf|refactor|build|ci|docs|style|test|chore|revert)(\(.+\))?:' && [[ "$BUMP" == "none" ]]; then
+              BUMP="patch"
+            fi
+          done < <(git log --format='%H' $RANGE)
+          [[ "$BUMP" == "none" ]] && BUMP="patch"
+
+          case "$BUMP" in
+            major)
+              if [[ "$PREV_MAJOR" -eq 0 ]]; then MAJOR=0; MINOR=$((PREV_MINOR + 1)); PATCH=0
+              else MAJOR=$((PREV_MAJOR + 1)); MINOR=0; PATCH=0; fi ;;
+            minor) MAJOR=$PREV_MAJOR; MINOR=$((PREV_MINOR + 1)); PATCH=0 ;;
+            patch) MAJOR=$PREV_MAJOR; MINOR=$PREV_MINOR; PATCH=$((PREV_PATCH + 1)) ;;
+          esac
+
+          VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          PRERELEASE=false
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            VERSION="${VERSION}-alpha"
+            PRERELEASE=true
+          fi
+
+          echo "Calculated version: $VERSION (bump=$BUMP, prerelease=$PRERELEASE, from ${LAST_TAG:-none})"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "do_release=true" >> "$GITHUB_OUTPUT"
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<SUMMARY
+          ## Release
+
+          | | |
+          |---|---|
+          | **Version** | \`$VERSION\` |
+          | **Bump** | $BUMP |
+          | **Pre-release** | $PRERELEASE |
+          | **Previous tag** | \`${LAST_TAG:-none}\` |
+          SUMMARY
+
+  # ── Binaries ──────────────────────────────────────────────────────────────
+  # `just release` cross-builds both PRD targets (linux musl + windows gnu)
+  # via `cross`, which runs in docker; Cross.toml mounts the sibling path
+  # deps into the build container through CW_WCL/CW_WSCRIPT. Version-stamped
+  # so `config-weave --version` matches the tag. Artifacts land in dist/
+  # (both binaries + SHA256SUMS).
+  build:
+    name: Build release binaries
+    needs: [version, test]
+    if: needs.version.outputs.do_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: config-weave
+
+      - name: Check out sibling path dependencies
+        uses: actions/checkout@v4
+        with:
+          repository: wiltaylor/wcl
+          path: WCL
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Configweave/wscript
+          path: wscript
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@cross
+
+      - name: Stamp version
+        working-directory: config-weave
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          sed -i '0,/^version = ".*"$/s//version = "'"$V"'"/' Cargo.toml
+
+      - name: Build
+        working-directory: config-weave
+        run: just release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: config-weave/dist/*
+          retention-days: 1
+
+  # ── Release ───────────────────────────────────────────────────────────────
+  # Tag the commit and cut a GitHub (pre-)release with the binaries attached.
+  release:
+    name: Create GitHub release
+    needs: [version, build]
+    if: needs.version.outputs.do_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          name: binaries
+      - name: Tag
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v$V"
+          git push origin "v$V"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: v${{ needs.version.outputs.version }}
+          prerelease: ${{ needs.version.outputs.prerelease }}
+          generate_release_notes: true
+          files: dist/**/*

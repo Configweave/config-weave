@@ -55,3 +55,8 @@ embedded WCL schema served as system imports). Path deps on `../WCL` and
   unless explicitly asked.
 - **just** as command runner: `just build` / `just test` / `just check` /
   `just release` (cross-builds both PRD targets + checksums).
+- Releases are trailer-gated in CI (same scheme as WCL/vmlab): push a
+  commit to `main` with a `pre-release: true` (→ vX.Y.Z-alpha) or
+  `release: true` (→ vX.Y.Z) trailer; CI bumps from the last tag by
+  conventional commits, cross-builds via `just release`, tags, and
+  publishes a GitHub release.
