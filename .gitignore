@@ -3,3 +3,4 @@ target-cross/
 dist/
 .playwright-cli/
 .repo-cache/
+target-cross-win/
