@@ -116,15 +116,19 @@ skill-build *ARGS:
 # Release artifacts for both PRD targets plus a checksums file.
 # Requires `cross` and a container runtime; path deps are mounted into
 # the build container (see Cross.toml).
+# The windows-gnu build gets its own target dir: host-triple build scripts
+# compiled in the musl container link against a newer glibc than the
+# windows-gnu cross image ships, so sharing target-cross fails on a fresh
+# checkout ("GLIBC_2.28 not found" running the cached build scripts).
 [group('build'), doc("Cross-build release artifacts for both PRD targets + checksums")]
 release:
 	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-unknown-linux-musl
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
+	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross-win \
 		cross build --release --target x86_64-pc-windows-gnu
 	mkdir -p dist
 	cp target-cross/x86_64-unknown-linux-musl/release/config-weave dist/config-weave-linux-x86_64
-	cp target-cross/x86_64-pc-windows-gnu/release/config-weave.exe dist/config-weave-windows-x86_64.exe
+	cp target-cross-win/x86_64-pc-windows-gnu/release/config-weave.exe dist/config-weave-windows-x86_64.exe
 	cd dist && sha256sum config-weave-linux-x86_64 config-weave-windows-x86_64.exe > SHA256SUMS
 	@echo "release artifacts in dist/"
 
