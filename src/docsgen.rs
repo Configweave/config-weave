@@ -136,7 +136,7 @@ fn emit(pb: &Playbook) -> String {
     let mut w = String::new();
     let _ = writeln!(w, "import <wdoc.wcl>");
     let _ = writeln!(w);
-    let _ = writeln!(w, "site main {{ title = \"{}\" }}", esc(&pb.name));
+    emit_site(&mut w, pb);
     let _ = writeln!(w);
 
     emit_index(&mut w, pb);
@@ -153,6 +153,58 @@ fn emit(pb: &Playbook) -> String {
         }
     }
     w
+}
+
+/// The site block: an mdBook-style `:book` site whose sidebar `toc` mirrors
+/// the page tree — overview, plays, then each package with its resources and
+/// tests as nested chapters.
+fn emit_site(w: &mut String, pb: &Playbook) {
+    let _ = writeln!(w, "site main {{");
+    let _ = writeln!(w, "  default_template = :book");
+    let _ = writeln!(w, "  title = \"{}\"", esc(&pb.name));
+    let _ = writeln!(w, "  theme_toggle = true");
+    let _ = writeln!(w, "  search = true");
+    let _ = writeln!(w, "  toc {{");
+    let _ = writeln!(w, "    chapter \"Overview\" {{ page = index }}");
+    if !pb.plays.is_empty() {
+        let _ = writeln!(w, "    chapter \"Plays\" {{");
+        for play in &pb.plays {
+            let _ = writeln!(
+                w,
+                "      chapter \"{}\" {{ page = {} }}",
+                esc(&play.name),
+                play_page(&play.name)
+            );
+        }
+        let _ = writeln!(w, "    }}");
+    }
+    if !pb.packages.is_empty() {
+        let _ = writeln!(w, "    chapter \"Packages\" {{");
+        for pkg in pb.packages.values() {
+            let _ = writeln!(w, "      chapter \"{}\" {{", esc(&pkg.name));
+            let _ = writeln!(w, "        page = {}", package_page(&pkg.name));
+            for res in pkg.resources.values() {
+                let _ = writeln!(
+                    w,
+                    "        chapter \"{}\" {{ page = {} }}",
+                    esc(&res.name),
+                    resource_page(&pkg.name, &res.name)
+                );
+            }
+            for test in &pkg.tests {
+                let _ = writeln!(
+                    w,
+                    "        chapter \"test: {}\" {{ page = {} }}",
+                    esc(&test.name),
+                    test_page(&pkg.name, &test.name)
+                );
+            }
+            let _ = writeln!(w, "      }}");
+        }
+        let _ = writeln!(w, "    }}");
+    }
+    let _ = writeln!(w, "  }}");
+    let _ = writeln!(w, "}}");
 }
 
 fn emit_index(w: &mut String, pb: &Playbook) {

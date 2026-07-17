@@ -5,6 +5,11 @@ data_dir := env_var_or_default("XDG_DATA_HOME", env_var("HOME") / ".local/share"
 prefix   := data_dir / "config-weave/bin"
 bin_dir  := env_var("HOME") / ".local/bin"
 
+# Fixed dev-server addresses so the two docs sites (and other projects on the
+# default 8080) never collide. Must match DOCS_ADDR in ../config-weave-pkgs.
+docs_addr      := "127.0.0.1:8280"
+pkgs_docs_addr := "127.0.0.1:8281"
+
 [default, private]
 main:
 	@just --list
@@ -90,7 +95,7 @@ test-pkgs: build
 [group('docs'), doc("Render + serve the sibling package docs with live reload (needs wcl)")]
 serve-pkgs-docs: build
 	test -d ../config-weave-pkgs
-	target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs --serve
+	target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs --serve --addr {{pkgs_docs_addr}}
 
 # Serve config-weave's own documentation site (landing at /, the config-weave
 # reference book under /wskills/config-weave/) with live reload and comment mode
@@ -98,12 +103,23 @@ serve-pkgs-docs: build
 # them with `wcl wdoc comments`). Needs `wcl` on PATH.
 [group('docs'), doc("Serve config-weave's documentation site with live reload + comment mode (needs wcl)")]
 docs-serve *ARGS:
-	wcl wdoc serve docs/main.wcl --comment {{ARGS}}
+	wcl wdoc serve docs/main.wcl --comment --addr {{docs_addr}} {{ARGS}}
 
 # Build config-weave's documentation site into docs/_site/ (gitignored). Needs `wcl`.
 [group('docs')]
 docs-build *ARGS:
 	wcl wdoc build docs/main.wcl --out docs/_site {{ARGS}}
+
+# Serve config-weave's documentation site and open the landing page in the
+# browser once the server responds. Needs `wcl` on PATH.
+[group('docs'), doc("Serve the docs site and open the landing page in the browser (needs wcl)")]
+docs-open *ARGS: (browser-open "http://" + docs_addr + "/") (docs-serve ARGS)
+
+# Wait for `url` to respond, then open it in the default browser. Backgrounds
+# itself so a blocking server recipe can run as the next dependency.
+[private]
+browser-open url:
+	@( for _ in $(seq 1 60); do curl -sf -o /dev/null '{{url}}' && break; sleep 0.5; done; xdg-open '{{url}}' ) >/dev/null 2>&1 &
 
 # Regenerate the committed Claude Code skill (.claude/skills/config-weave/) from the
 # config-weave wskill (docs/wskills/config-weave/). Cleans first — `wcl wdoc skill`
@@ -116,19 +132,18 @@ skill-build *ARGS:
 # Release artifacts for both PRD targets plus a checksums file.
 # Requires `cross` and a container runtime; path deps are mounted into
 # the build container (see Cross.toml).
-# The windows-gnu build gets its own target dir: host-triple build scripts
-# compiled in the musl container link against a newer glibc than the
-# windows-gnu cross image ships, so sharing target-cross fails on a fresh
-# checkout ("GLIBC_2.28 not found" running the cached build scripts).
 [group('build'), doc("Cross-build release artifacts for both PRD targets + checksums")]
 release:
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
+	# Separate CARGO_TARGET_DIRs: cross runs each target in its own container,
+	# and host-arch build scripts compiled under one image's glibc fail to run
+	# under the other's ("GLIBC_x.yz not found" — seen on CI runners).
+	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross/musl \
 		cross build --release --target x86_64-unknown-linux-musl
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross-win \
+	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross/win \
 		cross build --release --target x86_64-pc-windows-gnu
 	mkdir -p dist
-	cp target-cross/x86_64-unknown-linux-musl/release/config-weave dist/config-weave-linux-x86_64
-	cp target-cross-win/x86_64-pc-windows-gnu/release/config-weave.exe dist/config-weave-windows-x86_64.exe
+	cp target-cross/musl/x86_64-unknown-linux-musl/release/config-weave dist/config-weave-linux-x86_64
+	cp target-cross/win/x86_64-pc-windows-gnu/release/config-weave.exe dist/config-weave-windows-x86_64.exe
 	cd dist && sha256sum config-weave-linux-x86_64 config-weave-windows-x86_64.exe > SHA256SUMS
 	@echo "release artifacts in dist/"
 
