@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::diag::Diag;
-use crate::model::{ParamDecl, Play, PlayItem, Playbook};
+use crate::model::{CoarseType, ParamDecl, Play, PlayItem, Playbook};
 
 /// The `wcl` binary to drive the wdoc build. Defaults to a PATH lookup;
 /// `CONFIG_WEAVE_WCL` pins a specific binary (used by tests/CI).
@@ -18,8 +18,11 @@ fn wcl_bin() -> String {
 }
 
 /// Generate the wdoc site for a playbook. Returns the page count.
-pub fn generate(pb: &Playbook, outdir: &Path) -> Result<usize, Diag> {
-    let source = emit(pb);
+/// `pkg_only` documents just the packages — the playbook's plays,
+/// variables and gathered facts (a package repo's validation harness,
+/// not part of its public surface) are skipped.
+pub fn generate(pb: &Playbook, outdir: &Path, pkg_only: bool) -> Result<usize, Diag> {
+    let source = emit(pb, pkg_only);
     std::fs::create_dir_all(outdir)
         .map_err(|e| Diag::bare(format!("cannot create {}: {e}", outdir.display())))?;
     // Keep the generated source next to the site for inspection — and as
@@ -50,7 +53,7 @@ pub fn generate(pb: &Playbook, outdir: &Path) -> Result<usize, Diag> {
 
     // The CLI rendered one HTML page per `page` block we emitted; recover
     // the count from the model rather than parsing stdout.
-    Ok(page_count(pb))
+    Ok(page_count(pb, pkg_only))
 }
 
 /// Serve a generated site with `wcl wdoc serve` (watch-rebuild dev server
@@ -74,15 +77,16 @@ pub fn serve(outdir: &Path, addr: Option<&str>) -> Result<(), Diag> {
     Ok(())
 }
 
-/// Number of pages `emit` produces: one index, one per play, one per
-/// package, and one per resource and test.
-fn page_count(pb: &Playbook) -> usize {
+/// Number of pages `emit` produces: one index, one per play (unless
+/// `pkg_only`), one per package, and one per resource and gatherer.
+fn page_count(pb: &Playbook, pkg_only: bool) -> usize {
     let per_pkg: usize = pb
         .packages
         .values()
-        .map(|p| 1 + p.resources.len() + p.tests.len())
+        .map(|p| 1 + p.resources.len() + p.gatherers.len())
         .sum();
-    1 + pb.plays.len() + per_pkg
+    let plays = if pkg_only { 0 } else { pb.plays.len() };
+    1 + plays + per_pkg
 }
 
 /// Escape a string for a WCL double-quoted literal.
@@ -118,8 +122,8 @@ fn resource_page(pkg: &str, res: &str) -> String {
     format!("res_{}_{}", ident(pkg), ident(res))
 }
 
-fn test_page(pkg: &str, test: &str) -> String {
-    format!("test_{}_{}", ident(pkg), ident(test))
+fn gatherer_page(pkg: &str, g: &str) -> String {
+    format!("gath_{}_{}", ident(pkg), ident(g))
 }
 
 fn md_text(s: &str) -> String {
@@ -132,24 +136,26 @@ fn page_link(label: &str, page: &str) -> String {
     format!("[{}]({})", md_text(label), page)
 }
 
-fn emit(pb: &Playbook) -> String {
+fn emit(pb: &Playbook, pkg_only: bool) -> String {
     let mut w = String::new();
     let _ = writeln!(w, "import <wdoc.wcl>");
     let _ = writeln!(w);
-    emit_site(&mut w, pb);
+    emit_site(&mut w, pb, pkg_only);
     let _ = writeln!(w);
 
-    emit_index(&mut w, pb);
-    for play in &pb.plays {
-        emit_play(&mut w, pb, play);
+    emit_index(&mut w, pb, pkg_only);
+    if !pkg_only {
+        for play in &pb.plays {
+            emit_play(&mut w, pb, play);
+        }
     }
     for pkg in pb.packages.values() {
         emit_package(&mut w, pkg);
         for res in pkg.resources.values() {
             emit_resource(&mut w, &pkg.name, res);
         }
-        for test in &pkg.tests {
-            emit_test(&mut w, &pkg.name, test);
+        for g in pkg.gatherers.values() {
+            emit_gatherer(&mut w, &pkg.name, g);
         }
     }
     w
@@ -157,8 +163,8 @@ fn emit(pb: &Playbook) -> String {
 
 /// The site block: an mdBook-style `:book` site whose sidebar `toc` mirrors
 /// the page tree — overview, plays, then each package with its resources and
-/// tests as nested chapters.
-fn emit_site(w: &mut String, pb: &Playbook) {
+/// gatherers grouped under their own section headings.
+fn emit_site(w: &mut String, pb: &Playbook, pkg_only: bool) {
     let _ = writeln!(w, "site main {{");
     let _ = writeln!(w, "  default_template = :book");
     let _ = writeln!(w, "  title = \"{}\"", esc(&pb.name));
@@ -166,7 +172,7 @@ fn emit_site(w: &mut String, pb: &Playbook) {
     let _ = writeln!(w, "  search = true");
     let _ = writeln!(w, "  toc {{");
     let _ = writeln!(w, "    chapter \"Overview\" {{ page = index }}");
-    if !pb.plays.is_empty() {
+    if !pkg_only && !pb.plays.is_empty() {
         let _ = writeln!(w, "    chapter \"Plays\" {{");
         for play in &pb.plays {
             let _ = writeln!(
@@ -183,21 +189,29 @@ fn emit_site(w: &mut String, pb: &Playbook) {
         for pkg in pb.packages.values() {
             let _ = writeln!(w, "      chapter \"{}\" {{", esc(&pkg.name));
             let _ = writeln!(w, "        page = {}", package_page(&pkg.name));
-            for res in pkg.resources.values() {
-                let _ = writeln!(
-                    w,
-                    "        chapter \"{}\" {{ page = {} }}",
-                    esc(&res.name),
-                    resource_page(&pkg.name, &res.name)
-                );
+            if !pkg.resources.is_empty() {
+                let _ = writeln!(w, "        chapter \"Resources\" {{");
+                for res in pkg.resources.values() {
+                    let _ = writeln!(
+                        w,
+                        "          chapter \"{}\" {{ page = {} }}",
+                        esc(&res.name),
+                        resource_page(&pkg.name, &res.name)
+                    );
+                }
+                let _ = writeln!(w, "        }}");
             }
-            for test in &pkg.tests {
-                let _ = writeln!(
-                    w,
-                    "        chapter \"test: {}\" {{ page = {} }}",
-                    esc(&test.name),
-                    test_page(&pkg.name, &test.name)
-                );
+            if !pkg.gatherers.is_empty() {
+                let _ = writeln!(w, "        chapter \"Gatherers\" {{");
+                for g in pkg.gatherers.values() {
+                    let _ = writeln!(
+                        w,
+                        "          chapter \"{}\" {{ page = {} }}",
+                        esc(&g.name),
+                        gatherer_page(&pkg.name, &g.name)
+                    );
+                }
+                let _ = writeln!(w, "        }}");
             }
             let _ = writeln!(w, "      }}");
         }
@@ -207,7 +221,7 @@ fn emit_site(w: &mut String, pb: &Playbook) {
     let _ = writeln!(w, "}}");
 }
 
-fn emit_index(w: &mut String, pb: &Playbook) {
+fn emit_index(w: &mut String, pb: &Playbook, pkg_only: bool) {
     let _ = writeln!(
         w,
         "page index {{ sites = [:main]  title = \"{}\"",
@@ -217,7 +231,7 @@ fn emit_index(w: &mut String, pb: &Playbook) {
     let _ = writeln!(w, "  p \"{}\"", esc(&pb.description));
     let _ = writeln!(w, "  p \"Version {}\"", esc(&pb.version));
 
-    if !pb.gathers.is_empty() {
+    if !pkg_only && !pb.gathers.is_empty() {
         let _ = writeln!(w, "  h2 \"Gathered facts\"");
         let _ = writeln!(w, "  table {{\n    rows:");
         let _ = writeln!(w, "      | \"Variable\" | \"Gatherer\" |");
@@ -233,7 +247,7 @@ fn emit_index(w: &mut String, pb: &Playbook) {
         let _ = writeln!(w, "  }}");
     }
 
-    if !pb.vars.is_empty() {
+    if !pkg_only && !pb.vars.is_empty() {
         let _ = writeln!(w, "  h2 \"Variables\"");
         let _ = writeln!(w, "  table {{\n    rows:");
         let _ = writeln!(w, "      | \"Name\" | \"Value\" |");
@@ -248,19 +262,21 @@ fn emit_index(w: &mut String, pb: &Playbook) {
         let _ = writeln!(w, "  }}");
     }
 
-    let _ = writeln!(w, "  h2 \"Plays\"");
-    let _ = writeln!(w, "  table {{\n    rows:");
-    let _ = writeln!(w, "      | \"Play\" | \"Steps\" | \"Description\" |");
-    for play in &pb.plays {
-        let _ = writeln!(
-            w,
-            "      | \"{}\" | \"{}\" | \"{}\" |",
-            esc(&page_link(&play.name, &play_page(&play.name))),
-            play.steps().len(),
-            esc(&play.description)
-        );
+    if !pkg_only {
+        let _ = writeln!(w, "  h2 \"Plays\"");
+        let _ = writeln!(w, "  table {{\n    rows:");
+        let _ = writeln!(w, "      | \"Play\" | \"Steps\" | \"Description\" |");
+        for play in &pb.plays {
+            let _ = writeln!(
+                w,
+                "      | \"{}\" | \"{}\" | \"{}\" |",
+                esc(&page_link(&play.name, &play_page(&play.name))),
+                play.steps().len(),
+                esc(&play.description)
+            );
+        }
+        let _ = writeln!(w, "  }}");
     }
-    let _ = writeln!(w, "  }}");
 
     if !pb.packages.is_empty() {
         let _ = writeln!(w, "  h2 \"Packages\"");
@@ -407,7 +423,7 @@ fn emit_package(w: &mut String, pkg: &crate::model::Package) {
             let _ = writeln!(
                 w,
                 "      | \"{}\" | \"{}\" |",
-                esc(&g.name),
+                esc(&page_link(&g.name, &gatherer_page(&pkg.name, &g.name))),
                 esc(&g.description)
             );
         }
@@ -431,138 +447,140 @@ fn emit_package(w: &mut String, pkg: &crate::model::Package) {
         }
         let _ = writeln!(w, "  }}");
     }
-    if !pkg.tests.is_empty() {
-        let _ = writeln!(w, "  h2 \"Tests\"");
-        let _ = writeln!(w, "  table {{\n    rows:");
-        let _ = writeln!(
-            w,
-            "      | \"Test\" | \"Backend\" | \"Image\" | \"Description\" |"
-        );
-        for t in &pkg.tests {
-            let _ = writeln!(
-                w,
-                "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",
-                esc(&page_link(&t.name, &test_page(&pkg.name, &t.name))),
-                esc(&t.backend),
-                esc(&t.image),
-                esc(&t.description)
-            );
-        }
-        let _ = writeln!(w, "  }}");
-    }
     let _ = writeln!(w, "}}");
     let _ = writeln!(w);
 }
 
-fn emit_test(w: &mut String, pkg: &str, test: &crate::model::TestDecl) {
-    let _ = writeln!(
-        w,
-        "page test_{}_{} {{ sites = [:main]  title = \"Test: {}:{}\"",
-        ident(pkg),
-        ident(&test.name),
-        esc(pkg),
-        esc(&test.name)
-    );
-    let _ = writeln!(w, "  h1 \"Test: {}:{}\"", esc(pkg), esc(&test.name));
-    let _ = writeln!(w, "  p \"{}\"", esc(&test.description));
-    let _ = writeln!(
-        w,
-        "  p \"Runs on {} image {}\"",
-        esc(&test.backend),
-        esc(&test.image)
-    );
-    if let Some(setup) = &test.setup {
-        let _ = writeln!(w, "  p \"Setup: {}\"", esc(setup));
-    }
-    if !test.steps.is_empty() {
-        let _ = writeln!(w, "  h2 \"Steps\"");
-        let _ = writeln!(w, "  table {{\n    rows:");
-        let _ = writeln!(
-            w,
-            "      | \"Step\" | \"Resource\" | \"Expect\" | \"Requires\" | \"Description\" |"
-        );
-        for s in &test.steps {
-            let _ = writeln!(
-                w,
-                "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",
-                esc(&s.name),
-                esc(&page_link(
-                    &format!("{}.{}", s.package, s.resource),
-                    &resource_page(&s.package, &s.resource)
-                )),
-                s.expect.as_str(),
-                esc(&if s.requires.is_empty() {
-                    "—".to_string()
-                } else {
-                    s.requires.join(", ")
-                }),
-                esc(&s.description)
-            );
-        }
-        let _ = writeln!(w, "  }}");
-    }
-    if !test.gathers.is_empty() {
-        let _ = writeln!(w, "  h2 \"Gather checks\"");
-        let _ = writeln!(w, "  table {{\n    rows:");
-        let _ = writeln!(
-            w,
-            "      | \"Gather\" | \"Gatherer\" | \"Expectations\" | \"Description\" |"
-        );
-        for g in &test.gathers {
-            let expects = if g.expect.is_empty() {
-                "—".to_string()
-            } else {
-                g.expect
-                    .iter()
-                    .map(|(k, v)| format!("{k} = {}", crate::convert::canonicalise(v)))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            let _ = writeln!(
-                w,
-                "      | \"{}\" | \"{}.{}\" | \"{}\" | \"{}\" |",
-                esc(&g.name),
-                esc(&g.package),
-                esc(&g.gatherer),
-                esc(&expects),
-                esc(&g.description)
-            );
-        }
-        let _ = writeln!(w, "  }}");
-    }
-    if let Some(verify) = &test.verify {
-        let _ = writeln!(
-            w,
-            "  p \"Custom assertions: {}\"",
-            esc(&verify.file_name().unwrap_or_default().to_string_lossy())
-        );
-    }
-    let _ = writeln!(w, "}}");
-    let _ = writeln!(w);
-}
+// Resource and gatherer pages carry only their own name in the title and
+// heading — the package is evident from the book tree on the left.
 
 fn emit_resource(w: &mut String, pkg: &str, res: &crate::model::ResourceDecl) {
     let _ = writeln!(
         w,
-        "page res_{}_{} {{ sites = [:main]  title = \"Resource: {}.{}\"",
+        "page res_{}_{} {{ sites = [:main]  title = \"Resource: {}\"",
         ident(pkg),
         ident(&res.name),
-        esc(pkg),
         esc(&res.name)
     );
-    let _ = writeln!(w, "  h1 \"Resource: {}.{}\"", esc(pkg), esc(&res.name));
+    let _ = writeln!(w, "  h1 \"Resource: {}\"", esc(&res.name));
     let _ = writeln!(w, "  p \"{}\"", esc(&res.description));
     let _ = writeln!(w, "  p \"Concurrency class: {}\"", res.concurrency.as_str());
     emit_param_table(w, &res.params);
+
+    // A generated `step` example: required params with type placeholders,
+    // optional params commented out with their defaults.
+    let mut ex = String::new();
+    let _ = writeln!(ex, "step \"{}\" {{", esc(&res.name));
+    let _ = writeln!(ex, "  description = \"{}\"", esc(&res.description));
+    let _ = writeln!(ex, "  resource = \"{}.{}\"", esc(pkg), esc(&res.name));
+    if !res.params.is_empty() {
+        let _ = writeln!(ex, "  properties {{");
+        for line in example_param_lines(&res.params, "    ") {
+            let _ = writeln!(ex, "{line}");
+        }
+        let _ = writeln!(ex, "  }}");
+    }
+    let _ = writeln!(ex, "}}");
+    emit_example(w, &ex);
+
     let _ = writeln!(w, "}}");
     let _ = writeln!(w);
+}
+
+fn emit_gatherer(w: &mut String, pkg: &str, g: &crate::model::GathererDecl) {
+    let _ = writeln!(
+        w,
+        "page gath_{}_{} {{ sites = [:main]  title = \"Gatherer: {}\"",
+        ident(pkg),
+        ident(&g.name),
+        esc(&g.name)
+    );
+    let _ = writeln!(w, "  h1 \"Gatherer: {}\"", esc(&g.name));
+    let _ = writeln!(w, "  p \"{}\"", esc(&g.description));
+    emit_param_table(w, &g.params);
+
+    // A generated `gather` example — the label is the variable the
+    // gathered value lands in.
+    let mut ex = String::new();
+    let _ = writeln!(ex, "gather \"{}\" {{", esc(&g.name));
+    let _ = writeln!(ex, "  description = \"{}\"", esc(&g.description));
+    let _ = writeln!(ex, "  from = \"{}.{}\"", esc(pkg), esc(&g.name));
+    if !g.params.is_empty() {
+        let _ = writeln!(ex, "  params {{");
+        for line in example_param_lines(&g.params, "    ") {
+            let _ = writeln!(ex, "{line}");
+        }
+        let _ = writeln!(ex, "  }}");
+    }
+    let _ = writeln!(ex, "}}");
+    emit_example(w, &ex);
+
+    let _ = writeln!(w, "}}");
+    let _ = writeln!(w);
+}
+
+/// An "Example" section holding generated WCL in a raw-heredoc code block —
+/// verbatim, so the body needs no wdoc-level escaping.
+fn emit_example(w: &mut String, body: &str) {
+    let _ = writeln!(w, "  h2 \"Example\"");
+    let _ = writeln!(w, "  code wcl {{");
+    let _ = writeln!(w, "    source = <<'WEAVE_EX'");
+    let _ = write!(w, "{body}");
+    let _ = writeln!(w, "WEAVE_EX");
+    let _ = writeln!(w, "  }}");
+}
+
+/// The property lines of a generated example: required params get a
+/// type-based placeholder, optional ones are commented out with their
+/// default; each line carries the param's description, aligned.
+fn example_param_lines(params: &[ParamDecl], indent: &str) -> Vec<String> {
+    let assigns: Vec<String> = params
+        .iter()
+        .map(|p| {
+            if p.required {
+                format!("{indent}{} = {}", p.name, placeholder(p.ty))
+            } else {
+                let default = p
+                    .default
+                    .as_ref()
+                    .map(crate::convert::canonicalise)
+                    .unwrap_or_else(|| placeholder(p.ty).to_string());
+                format!("{indent}// {} = {}", p.name, default)
+            }
+        })
+        .collect();
+    let width = assigns.iter().map(|a| a.chars().count()).max().unwrap_or(0);
+    assigns
+        .iter()
+        .zip(params)
+        .map(|(a, p)| {
+            if p.description.is_empty() {
+                a.clone()
+            } else {
+                let pad = width - a.chars().count();
+                format!("{a}{:pad$}  // {}", "", p.description)
+            }
+        })
+        .collect()
+}
+
+/// Placeholder literal for a required example parameter, by declared type.
+fn placeholder(ty: CoarseType) -> &'static str {
+    match ty {
+        CoarseType::String => "\"...\"",
+        CoarseType::Int => "0",
+        CoarseType::Float => "0.0",
+        CoarseType::Bool => "true",
+        CoarseType::List => "[]",
+        CoarseType::Map => "{}",
+    }
 }
 
 /// The payoff for mandatory descriptions and declared schemas (PRD §12).
 fn emit_param_table(w: &mut String, params: &[ParamDecl]) {
     let _ = writeln!(w, "  h2 \"Parameters\"");
     if params.is_empty() {
-        let _ = writeln!(w, "  p \"This resource takes no parameters.\"");
+        let _ = writeln!(w, "  p \"Takes no parameters.\"");
         return;
     }
     let _ = writeln!(w, "  table {{\n    rows:");

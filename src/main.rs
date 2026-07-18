@@ -147,6 +147,10 @@ enum Command {
         /// Listen address for --serve (default 127.0.0.1:8080).
         #[arg(long, requires = "serve")]
         addr: Option<String>,
+        /// Document only the packages — skip the playbook's plays,
+        /// variables and gathered facts.
+        #[arg(long)]
+        pkg_only: bool,
     },
     /// Emit .wscripti interface files for the host API plus a starter wscript.toml.
     Wscripti { outdir: Option<PathBuf> },
@@ -248,7 +252,14 @@ fn main() -> ExitCode {
             outdir,
             serve,
             addr,
-        } => cmd_docs(playbook_dir, outdir.as_deref(), *serve, addr.as_deref()),
+            pkg_only,
+        } => cmd_docs(
+            playbook_dir,
+            outdir.as_deref(),
+            *serve,
+            addr.as_deref(),
+            *pkg_only,
+        ),
         Command::Wscripti { outdir } => {
             let dir = outdir.clone().unwrap_or_else(|| PathBuf::from("."));
             match scaffold::wscripti(&dir) {
@@ -920,6 +931,7 @@ fn cmd_docs(
     outdir: Option<&std::path::Path>,
     serve: bool,
     addr: Option<&str>,
+    pkg_only: bool,
 ) -> u8 {
     // Docs share the validation pipeline: a playbook that doesn't
     // validate doesn't document (PRD §12).
@@ -933,7 +945,7 @@ fn cmd_docs(
     let out = outdir
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| dir.join("docs"));
-    match docsgen::generate(&pb, &out) {
+    match docsgen::generate(&pb, &out, pkg_only) {
         Ok(pages) => println!("rendered {pages} page(s) to {}", out.display()),
         Err(d) => {
             eprintln!("{}", d.rendered);

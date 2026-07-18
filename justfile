@@ -88,14 +88,14 @@ test-pkgs: build
 	target/debug/config-weave test ../config-weave-pkgs \
 		--binary target-cross/x86_64-unknown-linux-musl/release/config-weave \
 		--binary-windows target-cross/x86_64-pc-windows-gnu/release/config-weave.exe
-	target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs
+	target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs --pkg-only
 
 # Build config-weave, render the sibling package docs, and serve them with
 # WCL's own watch-rebuild dev server (live reload). Needs `wcl` on PATH.
 [group('docs'), doc("Render + serve the sibling package docs with live reload (needs wcl)")]
 serve-pkgs-docs: build
 	test -d ../config-weave-pkgs
-	target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs --serve --addr {{pkgs_docs_addr}}
+	target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs --pkg-only --serve --addr {{pkgs_docs_addr}}
 
 # Serve config-weave's own documentation site (landing at /, the config-weave
 # reference book under /wskills/config-weave/) with live reload and comment mode

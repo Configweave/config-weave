@@ -270,6 +270,9 @@ impl Expect {
 #[derive(Debug)]
 pub struct TestGather {
     pub name: String,
+    /// Mandatory in the vocab like every description; nothing renders it
+    /// since tests left the generated docs.
+    #[allow(dead_code)]
     pub description: String,
     pub package: String,
     pub gatherer: String,

@@ -170,12 +170,26 @@ fn init_validate_apply_docs() {
         "package page missing resource link"
     );
     assert!(
-        pkg.contains("href=\"test_example_greeting_converges.html\""),
-        "package page missing test link"
+        pkg.contains("href=\"gath_example_os_info.html\""),
+        "package page missing gatherer link"
+    );
+    // Tests are deliberately not documented.
+    assert!(
+        !pkg.contains("test_example_greeting_converges.html"),
+        "package page should not link test pages"
+    );
+    assert!(
+        !docs.join("test_example_greeting_converges.html").exists(),
+        "test pages should not be rendered"
     );
 
-    // Per-resource page carries the parameter table from the schema.
+    // Per-resource page carries the parameter table from the schema; the
+    // heading is unqualified — the package is evident from the sidebar.
     let res = std::fs::read_to_string(docs.join("res_example_file_present.html")).unwrap();
+    assert!(
+        !res.contains("Resource: example.file_present"),
+        "resource heading should not repeat the package name"
+    );
     assert!(
         res.contains("Parameters"),
         "resource page missing param table"
@@ -187,5 +201,65 @@ fn init_validate_apply_docs() {
     assert!(
         res.contains("required") || res.contains("yes"),
         "requiredness missing"
+    );
+
+    // Generated usage examples — asserted on the emitted wdoc source
+    // (the rendered HTML is syntax-highlighted, so raw substrings of the
+    // code block are unstable there).
+    assert!(res.contains("Example"), "resource page missing example");
+    let src = std::fs::read_to_string(docs.join("_weave_docs.wcl")).unwrap();
+    assert!(
+        src.contains("step \"file_present\"")
+            && src.contains("resource = \"example.file_present\""),
+        "resource example step missing from emitted source"
+    );
+    assert!(
+        src.contains("path = \"...\""),
+        "required param placeholder missing"
+    );
+    assert!(
+        src.contains("// content = \"\""),
+        "optional param should be commented out with its default"
+    );
+    assert!(
+        src.contains("gather \"os_info\"") && src.contains("from = \"example.os_info\""),
+        "gatherer example missing from emitted source"
+    );
+
+    // --pkg-only: only the packages are documented — the playbook's
+    // plays, variables and gathered facts are skipped.
+    let docs2 = dir.path().join("site-pkg-only");
+    let out = Command::new(bin())
+        .args([
+            "docs",
+            root.to_str().unwrap(),
+            docs2.to_str().unwrap(),
+            "--pkg-only",
+        ])
+        .env("CONFIG_WEAVE_WCL", &wcl)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !docs2.join("play_baseline.html").exists(),
+        "--pkg-only should not render play pages"
+    );
+    let index = std::fs::read_to_string(docs2.join("index.html")).unwrap();
+    assert!(
+        !index.contains("play_baseline"),
+        "--pkg-only index should not link plays"
+    );
+    assert!(
+        index.contains("href=\"pkg_example.html\""),
+        "--pkg-only index missing package link"
+    );
+    assert!(
+        docs2.join("res_example_file_present.html").exists(),
+        "--pkg-only should still render resource pages"
     );
 }
