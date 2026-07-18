@@ -6,6 +6,7 @@ mod engine;
 mod hostapi;
 mod logging;
 mod model;
+mod pkgrepo;
 mod report;
 mod scaffold;
 mod testlab;
@@ -156,6 +157,15 @@ enum Command {
     Wscripti { outdir: Option<PathBuf> },
     /// Scaffold a skeleton playbook.
     Init { dir: PathBuf },
+    /// Manage packages installed from git package repositories
+    /// (recorded in pkgs/repo.wcl).
+    Pkg {
+        /// Playbook directory.
+        #[arg(long, global = true, value_name = "PLAYBOOK", default_value = ".")]
+        dir: PathBuf,
+        #[command(subcommand)]
+        action: PkgCommand,
+    },
     /// Print version information.
     Version,
     /// (internal) Run one gatherer and print its value as JSON.
@@ -195,6 +205,45 @@ enum Command {
     Templates,
 }
 
+#[derive(Subcommand)]
+enum PkgCommand {
+    /// Install a package from a registered repository into pkgs/.
+    /// Seeds the public stdlib repo when none are registered.
+    Add { package: String },
+    /// Delete an installed package and its repo.wcl entry.
+    Remove { package: String },
+    /// Re-sync and re-copy installed packages (all when no name given).
+    /// pkgs/<name> is managed: local edits are lost when the source
+    /// repo has moved.
+    Update { package: Option<String> },
+    /// Search package names and descriptions across registered repos.
+    Search { term: String },
+    /// Manage the registered package repositories.
+    Repo {
+        #[command(subcommand)]
+        action: PkgRepoCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum PkgRepoCommand {
+    /// Register a git repository of packages (and sync it now).
+    Add {
+        name: String,
+        url: String,
+        /// Branch to track (the remote's default branch when unset).
+        #[arg(long)]
+        branch: Option<String>,
+        /// Subdirectory holding the package dirs (checkout root when unset).
+        #[arg(long)]
+        subdir: Option<String>,
+    },
+    /// Unregister a repository (installed packages stay).
+    Remove { name: String },
+    /// List registered repositories and their cache state.
+    List,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     logging::set_verbosity(cli.verbose);
@@ -209,6 +258,7 @@ fn main() -> ExitCode {
     let code = match &cli.command {
         Command::Validate { playbook_dir } => cmd_validate(&cli, playbook_dir),
         Command::List { playbook_dir } => cmd_list(&cli, playbook_dir),
+        Command::Pkg { dir, action } => pkgrepo::cmd_pkg(dir, action),
         Command::Version => {
             println!("config-weave {}", env!("CARGO_PKG_VERSION"));
             EXIT_OK

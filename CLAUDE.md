@@ -35,6 +35,11 @@ AST-preserving round-tripping) lives in the `docjson/` crate
 A web GUI (`weave-server`) and CI/CD daemon (`config-weave-pipeline`)
 were built and later removed to refocus on the CLI — see git history
 before 2026-07 for that code.
+`config-weave pkg` (`src/pkgrepo/`) installs packages from git repos:
+`pkgs/repo.wcl` records registered repos + installed packages with
+their source commit; add/remove/update/search plus `pkg repo
+add/remove/list` shell out to the `git` binary (private repos work via
+ambient credentials), caching shallow clones in `.repo-cache/`.
 `docs/notes.md` records how the PRD's illustrative
 sketches were bound to the real WCL and wscript APIs, plus the testlab's
 bindings — read it before changing the vocabulary,

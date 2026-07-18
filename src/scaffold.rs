@@ -52,6 +52,8 @@ pub fn init(dir: &Path) -> Result<(), Diag> {
     write("pkgs/example/tests/greeting_verify.wscript", VERIFY)?;
     write("lib/README.md", LIB_README)?;
     write("pkgs/example/lib/README.md", LIB_README)?;
+    // `config-weave pkg` clones package repos here.
+    write(".gitignore", ".repo-cache/\n")?;
 
     // Authoring support: the LSP and `wscript check` pick these up.
     wscripti(dir)?;

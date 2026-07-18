@@ -22,10 +22,20 @@ windows 0.6x.
 ## WCL binding (PRD §4/§5 sketches → real WCL)
 
 - The vocabulary ships as WCL **system imports** embedded in the binary
-  (`import <weave/playbook.wcl>` / `<weave/package.wcl>`), exactly how
-  wdoc ships its stdlib. The engine appends the import line at the *end*
-  of user sources, so user spans are untouched and authors never write
-  import lines.
+  (`import <weave/playbook.wcl>` / `<weave/package.wcl>` /
+  `<weave/repo.wcl>`), exactly how wdoc ships its stdlib. The engine
+  appends the import line at the *end* of user sources, so user spans
+  are untouched and authors never write import lines.
+- `pkgs/repo.wcl` (`<weave/repo.wcl>`, PRD §17's "config-weave fetch")
+  is **tooling metadata, not playbook semantics**: `repo` blocks list
+  registered git package repos, `package` blocks record installed
+  packages with source repo + exact commit. The model loader never
+  reads it (`load_packages` skips non-dir entries under `pkgs/`); only
+  `config-weave pkg` does, which shells out to the `git` binary
+  (ambient credentials → private repos work) and caches shallow clones
+  under `{playbook}/.repo-cache/<repo>`. The file is regenerated from
+  structs on every pkg command — hand edits to values survive, comments
+  do not.
 - `var x = expr` (PRD sketch) became a `vars { x = expr }` block.
 - `params schema { version: string { … } }` (PRD sketch) became
   `param "version" { type = "string" … }` blocks; coarse types are

@@ -1,0 +1,30 @@
+// Config Weave package-distribution vocabulary (`pkgs/repo.wcl` schema).
+// Served as the system import <weave/repo.wcl>; `config-weave pkg`
+// appends the import automatically when opening the file.
+
+@document
+type WeaveRepoDoc {
+  @children("repo") repos: list<WeaveRepoDef>
+  @children("package") packages: list<WeaveInstalledPkg>
+}
+
+// One registered git repository of config-weave packages.
+@block("repo")
+type WeaveRepoDef {
+  @inline(0) name: utf8
+  url: utf8
+  // Subdirectory of the checkout holding the package dirs (e.g. "pkgs"
+  // for the stdlib); the checkout root when unset.
+  subdir: utf8?
+  // Branch to track; the remote's default branch when unset.
+  branch: utf8?
+}
+
+// One installed package and its provenance: the source repository and
+// the exact commit the copy in pkgs/ was taken from.
+@block("package")
+type WeaveInstalledPkg {
+  @inline(0) name: utf8
+  repo: utf8
+  commit: utf8
+}

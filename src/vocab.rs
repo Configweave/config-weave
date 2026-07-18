@@ -14,9 +14,13 @@ pub const PLAYBOOK_VOCAB: &str = include_str!("vocab/playbook.wcl");
 /// Schema for `package.wcl`.
 pub const PACKAGE_VOCAB: &str = include_str!("vocab/package.wcl");
 
+/// Schema for `pkgs/repo.wcl` (package repositories + installed set).
+pub const REPO_VOCAB: &str = include_str!("vocab/repo.wcl");
+
 /// Registry-relative names the engine appends as imports.
 pub const PLAYBOOK_IMPORT: &str = "weave/playbook.wcl";
 pub const PACKAGE_IMPORT: &str = "weave/package.wcl";
+pub const REPO_IMPORT: &str = "weave/repo.wcl";
 pub const VARS_IMPORT: &str = "weave/vars.wcl";
 
 /// Build the system-import loader. `vars` is the generated variables file
@@ -26,6 +30,7 @@ pub fn loader(vars: Option<String>) -> FileLoader {
     let mut reg = Registry::new();
     reg.register(PLAYBOOK_IMPORT, PLAYBOOK_VOCAB);
     reg.register(PACKAGE_IMPORT, PACKAGE_VOCAB);
+    reg.register(REPO_IMPORT, REPO_VOCAB);
     if let Some(v) = vars {
         reg.register(VARS_IMPORT, v);
     }
