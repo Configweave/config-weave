@@ -76,3 +76,9 @@ wdoc_repeater { each = all_slides  as = :s
     }
   }
 }
+
+// Hide the renderer's auto-numbered "§ N" heading markers — they read
+// like PRD section references, which stay in the PRD only.
+stylesheet no_section_markers {
+  css = ".heading-marker{display:none}"
+}

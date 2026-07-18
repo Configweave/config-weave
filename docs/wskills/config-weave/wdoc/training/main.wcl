@@ -114,3 +114,9 @@ wdoc_repeater { each = all_lessons  as = :l
     }
   }
 }
+
+// Hide the renderer's auto-numbered "§ N" heading markers — they read
+// like PRD section references, which stay in the PRD only.
+stylesheet no_section_markers {
+  css = ".heading-marker{display:none}"
+}
