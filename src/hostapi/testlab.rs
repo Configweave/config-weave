@@ -267,6 +267,60 @@ fn apply_resource(
     ))
 }
 
+/// Run one gatherer in-guest through the `__gather` protocol and return
+/// the gathered value.
+fn gather_fact(
+    state: &mut LabState,
+    name: &str,
+    key: &str,
+    params: &DynValue,
+) -> Result<DynValue, Diag> {
+    ensure_prepared(state, name)?;
+    let (package, _gatherer) = key
+        .split_once('.')
+        .ok_or_else(|| Diag::bare(format!("gatherer key '{key}' must be 'package.gatherer'")))?;
+    let synthd = synth::synthesize_gather(&state.playbook, package)?;
+    let os = state.machines[name].instance.os();
+    let bin = GuestPaths::bin_for(os);
+
+    let n = {
+        let ms = state.machines.get_mut(name).unwrap();
+        ms.counter += 1;
+        ms.counter
+    };
+    let (dir, pb_path) = scenario_dir(os, name, n);
+    let ms = &state.machines[name];
+    mkdir_guest(ms.instance.as_ref(), os, &dir)?;
+    ms.instance.copy_in(synthd.dir.path(), &pb_path)?;
+
+    let mut argv = vec![bin, "__gather", pb_path.as_str(), key];
+    let params_json;
+    if !matches!(params, DynValue::Null) {
+        params_json = crate::convert::dyn_to_json(params).to_string();
+        argv.extend(["--params-json", &params_json]);
+    }
+    let out = ms.instance.exec(&argv)?;
+    let parsed: serde_json::Value = serde_json::from_str(out.stdout.trim()).map_err(|_| {
+        let tail = if out.stderr.is_empty() {
+            &out.stdout
+        } else {
+            &out.stderr
+        };
+        Diag::bare(format!(
+            "gather '{key}' produced no parseable protocol output (exit {}): {}",
+            out.exit_code,
+            tail.trim()
+        ))
+    })?;
+    if parsed["ok"] != serde_json::Value::Bool(true) {
+        return Err(Diag::bare(format!(
+            "gather '{key}' failed: {}",
+            parsed["error"].as_str().unwrap_or("(no error message)")
+        )));
+    }
+    crate::convert::json_to_dyn(&parsed["value"]).map_err(Diag::bare)
+}
+
 /// Apply or check a whole authored playbook directory (relative to the
 /// scenario's package) and return a queryable report.
 fn apply_playbook(
@@ -400,6 +454,13 @@ pub fn module() -> Module {
             |m: &Machine, key: String, props: DynValue| -> Result<StepResult, String> {
                 let mut st = m.state.borrow_mut();
                 apply_resource(&mut st, &m.name, &key, &props, "apply").map_err(ds)
+            },
+        )
+        .method(
+            "gather",
+            |m: &Machine, key: String, params: DynValue| -> Result<DynValue, String> {
+                let mut st = m.state.borrow_mut();
+                gather_fact(&mut st, &m.name, &key, &params).map_err(ds)
             },
         )
         .method(

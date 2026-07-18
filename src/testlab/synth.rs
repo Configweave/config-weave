@@ -302,6 +302,27 @@ pub fn synthesize_resource(
     Ok((SynthesizedTest { dir }, step.to_string()))
 }
 
+/// Synthesize a playbook carrying one package and a step-less play, for a
+/// scenario's `gather` — `__gather <dir> <package>.<gatherer>` needs a
+/// valid playbook dir containing the package.
+pub fn synthesize_gather(pb: &Playbook, package: &str) -> Result<SynthesizedTest, Diag> {
+    let dir = tempfile::tempdir()
+        .map_err(|e| Diag::bare(format!("cannot create a synthesis tempdir: {e}")))?;
+    let p = pb
+        .packages
+        .get(package)
+        .ok_or_else(|| Diag::bare(format!("scenario references unknown package '{package}'")))?;
+    copy_dir(&p.dir, &dir.path().join("pkgs").join(package))?;
+    let out = format!(
+        "playbook \"weave-scenario\" {{\n  description = {}\n  version = \"0.0.0\"\n\n  \
+         play \"{PLAY}\" {{\n    description = \"gather only — no steps\"\n  }}\n}}\n",
+        wcl_str(&format!("Synthesized to gather from {package}"))
+    );
+    std::fs::write(dir.path().join("playbook.wcl"), out)
+        .map_err(|e| Diag::bare(format!("cannot write the synthesized playbook: {e}")))?;
+    Ok(SynthesizedTest { dir })
+}
+
 /// Render a wscript map value as a WCL `properties { … }` block. Resource
 /// params are scalars (string/int/float/bool); anything else is rendered
 /// as a string for a best-effort pass.
