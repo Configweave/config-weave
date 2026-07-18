@@ -39,8 +39,13 @@ windows 0.6x.
 - `var x = expr` (PRD sketch) became a `vars { x = expr }` block.
 - `params schema { version: string { … } }` (PRD sketch) became
   `param "version" { type = "string" … }` blocks; coarse types are
-  `string|int|float|bool|list|map`. §8 validation behaviour is engine-side
-  and unchanged from the PRD contract.
+  `string|int|float|bool|list|map|symbol`. §8 validation behaviour is
+  engine-side and unchanged from the PRD contract. `symbol` is for
+  enumerated tokens (the `ensure = :present|:absent` idiom): WCL symbols
+  and strings both convert to the same script-side string, so a symbol
+  param accepts either spelling — the type documents the `:symbol` form
+  and the generated docs render it (`default = :present` in package.wcl
+  reaches scripts as `"present"`).
 - Step `properties = { … }` became a `properties { … }` child block;
   gather `params = { … }` likewise a `params { … }` block.
 - Variables (gatherer results, declared vars, `--var`/`--var-file`

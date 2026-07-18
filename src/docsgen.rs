@@ -536,6 +536,18 @@ fn emit_example(w: &mut String, body: &str) {
     let _ = writeln!(w, "  }}");
 }
 
+/// A parameter's default rendered as a WCL literal — symbol-typed
+/// params show the `:symbol` spelling their docs advertise.
+fn default_literal(p: &ParamDecl) -> Option<String> {
+    let d = p.default.as_ref()?;
+    if p.ty == CoarseType::Symbol
+        && let wscript_std::DynValue::String(s) = d
+    {
+        return Some(format!(":{s}"));
+    }
+    Some(crate::convert::canonicalise(d))
+}
+
 /// The property lines of a generated example: required params get a
 /// type-based placeholder, optional ones are commented out with their
 /// default; each line carries the param's description, aligned.
@@ -546,11 +558,7 @@ fn example_param_lines(params: &[ParamDecl], indent: &str) -> Vec<String> {
             if p.required {
                 format!("{indent}{} = {}", p.name, placeholder(p.ty))
             } else {
-                let default = p
-                    .default
-                    .as_ref()
-                    .map(crate::convert::canonicalise)
-                    .unwrap_or_else(|| placeholder(p.ty).to_string());
+                let default = default_literal(p).unwrap_or_else(|| placeholder(p.ty).to_string());
                 format!("{indent}// {} = {}", p.name, default)
             }
         })
@@ -579,6 +587,7 @@ fn placeholder(ty: CoarseType) -> &'static str {
         CoarseType::Bool => "true",
         CoarseType::List => "[]",
         CoarseType::Map => "{}",
+        CoarseType::Symbol => ":...",
     }
 }
 
@@ -595,11 +604,7 @@ fn emit_param_table(w: &mut String, params: &[ParamDecl]) {
         "      | \"Name\" | \"Type\" | \"Required\" | \"Default\" | \"Description\" |"
     );
     for p in params {
-        let default = p
-            .default
-            .as_ref()
-            .map(crate::convert::canonicalise)
-            .unwrap_or_else(|| "—".to_string());
+        let default = default_literal(p).unwrap_or_else(|| "—".to_string());
         let _ = writeln!(
             w,
             "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",

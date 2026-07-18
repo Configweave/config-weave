@@ -1205,7 +1205,7 @@ fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
             ctx.err(
                 format!(
                     "parameter '{name}' has invalid type '{ty_str}' (expected string, int, \
-                     float, bool, list or map)"
+                     float, bool, list, map or symbol)"
                 ),
                 wcl_span(b.span()),
             );

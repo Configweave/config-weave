@@ -290,6 +290,12 @@ pub enum CoarseType {
     Bool,
     List,
     Map,
+    /// An enumerated token (e.g. `ensure = :present`). WCL symbols and
+    /// strings both convert to `DynValue::String` before scripts see
+    /// them, so this validates exactly like `String` — declaring it
+    /// documents the symbol spelling, and docs render the values as
+    /// `:symbol` literals.
+    Symbol,
 }
 
 impl CoarseType {
@@ -301,6 +307,7 @@ impl CoarseType {
             "bool" => Some(CoarseType::Bool),
             "list" => Some(CoarseType::List),
             "map" => Some(CoarseType::Map),
+            "symbol" => Some(CoarseType::Symbol),
             _ => None,
         }
     }
@@ -313,10 +320,12 @@ impl CoarseType {
             CoarseType::Bool => "bool",
             CoarseType::List => "list",
             CoarseType::Map => "map",
+            CoarseType::Symbol => "symbol",
         }
     }
 
-    /// Coarse match: ints are acceptable where floats are declared.
+    /// Coarse match: ints are acceptable where floats are declared, and
+    /// symbols are strings post-conversion (see `Symbol`).
     pub fn matches(&self, v: &DynValue) -> bool {
         matches!(
             (self, v),
@@ -327,6 +336,7 @@ impl CoarseType {
                 | (CoarseType::Bool, DynValue::Bool(_))
                 | (CoarseType::List, DynValue::List(_))
                 | (CoarseType::Map, DynValue::Map(_))
+                | (CoarseType::Symbol, DynValue::String(_))
         )
     }
 
