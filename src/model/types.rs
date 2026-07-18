@@ -165,6 +165,17 @@ pub struct GathererDecl {
     pub description: String,
     pub script: PathBuf,
     pub params: Vec<ParamDecl>,
+    /// Documented keys of the gathered value (docs metadata; the engine
+    /// does not validate gathered values against them).
+    pub returns: Vec<ReturnDecl>,
+}
+
+/// One documented key of a gatherer's returned value.
+#[derive(Debug, Clone)]
+pub struct ReturnDecl {
+    pub name: String,
+    pub description: String,
+    pub ty: CoarseType,
 }
 
 #[derive(Debug, Clone)]

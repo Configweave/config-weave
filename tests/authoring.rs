@@ -225,6 +225,13 @@ fn init_validate_apply_docs() {
         src.contains("gather \"os_info\"") && src.contains("from = \"example.os_info\""),
         "gatherer example missing from emitted source"
     );
+    // The gatherer's declared return keys render as a Returns table.
+    let gath = std::fs::read_to_string(docs.join("gath_example_os_info.html")).unwrap();
+    assert!(gath.contains("Returns"), "gatherer page missing Returns");
+    assert!(
+        gath.contains("Logical CPU count"),
+        "returns row missing from gatherer page"
+    );
 
     // --pkg-only: only the packages are documented — the playbook's
     // plays, variables and gathered facts are skipped.

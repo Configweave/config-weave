@@ -48,6 +48,11 @@ windows 0.6x.
   reaches scripts as `"present"`).
 - Step `properties = { … }` became a `properties { … }` child block;
   gather `params = { … }` likewise a `params { … }` block.
+- Gatherers document their gathered value with `returns "key" {
+  description type }` child blocks (same coarse types as params).
+  Documentation metadata only: the docs render a Returns table, the
+  engine does not validate gathered values against the declarations
+  (gathered maps may legitimately carry dynamic keys).
 - Variables (gatherer results, declared vars, `--var`/`--var-file`
   overrides) bind by generating an in-memory system import
   `<weave/vars.wcl>` containing `let` declarations. Gatherer results are

@@ -14,7 +14,7 @@ Late-bound COM via IDispatch and WMI; returns ComObject handles; STA initialised
 
 ### ComObject
 
-`ComObject` is an opaque handle with methods `get` / `get_object` / `set` / `call(name, args: List[Value])` / `call_object` / `items()`. VT_DISPATCH results must come through \`get_object`/`call_object`/`items()` because the dynamic `Value\` cannot hold an object handle.
+`ComObject` is an opaque handle with methods `get` / `get_object` / `set` / `call(name, args: List[Value])` / `call_object` / `items()`. VT_DISPATCH results must come through `get_object`/`call_object`/`items()` because the dynamic `Value` cannot hold an object handle.
 
 ```rust
 use com

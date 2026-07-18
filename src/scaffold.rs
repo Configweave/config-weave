@@ -96,6 +96,11 @@ pub(crate) const PACKAGE: &str = r#"package "example" {
   gatherer "os_info" {
     description = "Report basic operating system facts"
     script = "gatherers/os_info.wscript"
+    returns "family"  { description = "OS family (linux, windows, macos)" type = "string" }
+    returns "name"    { description = "OS name" type = "string" }
+    returns "version" { description = "OS version" type = "string" }
+    returns "arch"    { description = "CPU architecture" type = "string" }
+    returns "cpus"    { description = "Logical CPU count" type = "int" }
   }
 
   resource "file_present" {

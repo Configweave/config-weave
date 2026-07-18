@@ -777,6 +777,7 @@ fn load_package(
                     continue;
                 };
                 let params = load_params(&block, &mut ctx);
+                let returns = load_returns(&block, &mut ctx);
                 if gatherers
                     .insert(
                         gname.clone(),
@@ -785,6 +786,7 @@ fn load_package(
                             description: gdesc,
                             script,
                             params,
+                            returns,
                         },
                     )
                     .is_some()
@@ -1186,6 +1188,43 @@ fn static_pairs(block: &Block<'_>, noun: &str, what: &str, ctx: &mut Ctx<'_>) ->
 fn block_source(block: &Block<'_>, source: &str) -> Option<String> {
     let span = block.span();
     source.get(span.start..span.end).map(str::to_string)
+}
+
+/// The documented keys of a gatherer's returned value (`returns` blocks) —
+/// docs metadata, so only name/description/type.
+fn load_returns(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ReturnDecl> {
+    let mut returns = Vec::new();
+    let mut seen = HashSet::new();
+    for b in block.blocks().filter(|b| b.kind() == "returns") {
+        let Some(name) = label_string(&b) else {
+            continue;
+        };
+        if !seen.insert(name.clone()) {
+            ctx.err(
+                format!("duplicate returns key '{name}'"),
+                wcl_span(b.span()),
+            );
+            continue;
+        }
+        let description = string_field(&b, "description", ctx).unwrap_or_default();
+        let ty_str = string_field(&b, "type", ctx).unwrap_or_else(|| "string".into());
+        let Some(ty) = CoarseType::parse(&ty_str) else {
+            ctx.err(
+                format!(
+                    "returns key '{name}' has invalid type '{ty_str}' (expected string, int, \
+                     float, bool, list, map or symbol)"
+                ),
+                wcl_span(b.span()),
+            );
+            continue;
+        };
+        returns.push(ReturnDecl {
+            name,
+            description,
+            ty,
+        });
+    }
+    returns
 }
 
 fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {

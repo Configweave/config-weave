@@ -136,6 +136,13 @@ fn page_link(label: &str, page: &str) -> String {
     format!("[{}]({})", md_text(label), page)
 }
 
+/// An identifier rendered as inline code. Code spans are verbatim in the
+/// wdoc inline engine, so snake_case names survive — bare in a table cell,
+/// `_mode_` inside `safe_mode_password` would italicize.
+fn code(s: &str) -> String {
+    format!("`{s}`")
+}
+
 fn emit(pb: &Playbook, pkg_only: bool) -> String {
     let mut w = String::new();
     let _ = writeln!(w, "import <wdoc.wcl>");
@@ -244,10 +251,9 @@ fn emit_index(w: &mut String, pb: &Playbook, pkg_only: bool) {
         for g in &pb.gathers {
             let _ = writeln!(
                 w,
-                "      | \"{}\" | \"{}.{}\" |",
-                esc(&g.name),
-                esc(&g.package),
-                esc(&g.gatherer)
+                "      | \"{}\" | \"{}\" |",
+                esc(&code(&g.name)),
+                esc(&code(&format!("{}.{}", g.package, g.gatherer)))
             );
         }
         let _ = writeln!(w, "  }}");
@@ -261,8 +267,8 @@ fn emit_index(w: &mut String, pb: &Playbook, pkg_only: bool) {
             let _ = writeln!(
                 w,
                 "      | \"{}\" | \"{}\" |",
-                esc(&v.name),
-                esc(&v.expr_src)
+                esc(&code(&v.name)),
+                esc(&code(&v.expr_src))
             );
         }
         let _ = writeln!(w, "  }}");
@@ -342,8 +348,12 @@ fn emit_play(w: &mut String, pb: &Playbook, play: &Play) {
             let _ = writeln!(
                 w,
                 "      | \"{}\" | \"{}\" | \"{}\" |",
-                esc(&c.name),
-                esc(c.condition_src.as_deref().unwrap_or("—")),
+                esc(&code(&c.name)),
+                esc(&c
+                    .condition_src
+                    .as_deref()
+                    .map(code)
+                    .unwrap_or_else(|| "—".into())),
                 esc(&c.description)
             );
         }
@@ -366,16 +376,24 @@ fn emit_play(w: &mut String, pb: &Playbook, play: &Play) {
         let _ = writeln!(
             w,
             "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" |  \"{}\" |",
-            esc(&path),
+            esc(&code(&path)),
             esc(&page_link(
                 &format!("{}.{}", s.package, s.resource),
                 &resource_page(&s.package, &s.resource)
             )),
-            esc(s.condition_src.as_deref().unwrap_or("—")),
+            esc(&s
+                .condition_src
+                .as_deref()
+                .map(code)
+                .unwrap_or_else(|| "—".into())),
             esc(&if s.requires.is_empty() {
                 "—".to_string()
             } else {
-                s.requires.join(", ")
+                s.requires
+                    .iter()
+                    .map(|r| code(r))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             }),
             esc(&s.description)
         );
@@ -504,6 +522,7 @@ fn emit_gatherer(w: &mut String, pkg: &str, g: &crate::model::GathererDecl) {
     let _ = writeln!(w, "  h1 \"Gatherer: {}\"", esc(&g.name));
     let _ = writeln!(w, "  p \"{}\"", esc(&g.description));
     emit_param_table(w, &g.params);
+    emit_returns_table(w, &g.returns);
 
     // A generated `gather` example — the label is the variable the
     // gathered value lands in.
@@ -578,6 +597,31 @@ fn example_param_lines(params: &[ParamDecl], indent: &str) -> Vec<String> {
         .collect()
 }
 
+/// The documented shape of a gatherer's returned value (PRD §12 spirit:
+/// declared metadata pays off as docs).
+fn emit_returns_table(w: &mut String, returns: &[crate::model::ReturnDecl]) {
+    let _ = writeln!(w, "  h2 \"Returns\"");
+    if returns.is_empty() {
+        let _ = writeln!(
+            w,
+            "  p \"The returned value is undocumented — see the gatherer script.\""
+        );
+        return;
+    }
+    let _ = writeln!(w, "  table {{\n    rows:");
+    let _ = writeln!(w, "      | \"Key\" | \"Type\" | \"Description\" |");
+    for r in returns {
+        let _ = writeln!(
+            w,
+            "      | \"{}\" | \"{}\" | \"{}\" |",
+            esc(&code(&r.name)),
+            r.ty.as_str(),
+            esc(&r.description)
+        );
+    }
+    let _ = writeln!(w, "  }}");
+}
+
 /// Placeholder literal for a required example parameter, by declared type.
 fn placeholder(ty: CoarseType) -> &'static str {
     match ty {
@@ -604,11 +648,13 @@ fn emit_param_table(w: &mut String, params: &[ParamDecl]) {
         "      | \"Name\" | \"Type\" | \"Required\" | \"Default\" | \"Description\" |"
     );
     for p in params {
-        let default = default_literal(p).unwrap_or_else(|| "—".to_string());
+        let default = default_literal(p)
+            .map(|d| code(&d))
+            .unwrap_or_else(|| "—".to_string());
         let _ = writeln!(
             w,
             "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",
-            esc(&p.name),
+            esc(&code(&p.name)),
             p.ty.as_str(),
             if p.required { "yes" } else { "no" },
             esc(&default),

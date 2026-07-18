@@ -37,6 +37,17 @@ type WeaveGathererDecl {
   description: utf8
   script: utf8
   @children("param") params: list<WeaveParamDecl>
+  @children("returns") returns: list<WeaveReturnDecl>
+}
+
+// One key of the value a gatherer returns — documentation metadata (the
+// docs render a Returns table); the engine does not validate gathered
+// values against it.
+@block("returns")
+type WeaveReturnDecl {
+  @inline(0) name: utf8
+  description: utf8
+  type: utf8
 }
 
 @block("resource")

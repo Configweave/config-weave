@@ -7,9 +7,10 @@ fact package_blocks {
       header = ["Block", "Fields", "Notes"]
       rows = [
         ["`package \"name\"`", "`description` (required), `gatherer*`, `resource*`, `test*`", "name qualifies playbook refs: `core.file_present`"],
-        ["`gatherer \"name\"`", "`description`, `script`, `param*`", "script exports `gather(params: Value) -> Value`"],
+        ["`gatherer \"name\"`", "`description`, `script`, `param*`, `returns*`", "script exports `gather(params: Value) -> Value`"],
         ["`resource \"name\"`", "`description`, `script`, `concurrency` (default `\"parallel\"`), `param*`", "script exports `check()` + `apply()`"],
-        ["`param \"name\"`", "`description`, `type`, `required` (default `false`), `default?`", "types: `string|int|float|bool|list|map`"],
+        ["`param \"name\"`", "`description`, `type`, `required` (default `false`), `default?`", "types: `string|int|float|bool|list|map|symbol`"],
+        ["`returns \"key\"`", "`description`, `type`", "documents one key of the gathered value; docs metadata only — the engine does not validate against it"],
         ["`test \"name\"`", "see the Test block reference", "run by `config-weave test` in disposable instances"],
       ]
     }
