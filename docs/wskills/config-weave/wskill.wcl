@@ -19,7 +19,7 @@ import "./data/main.wcl"
 import "./data/presentation/main.wcl"
 import "./data/training/main.wcl"
 
-schema_version = "1.0.0"
+schema_version = "1.3.0"
 
 topic config_weave {
   name    = "config-weave"
@@ -79,8 +79,12 @@ artifact training {
 }
 
 // Skill-projection config (→ SKILL.md frontmatter). Auto-activation and the agent
-// guardrails carried over from the previous hand-authored skill.
+// guardrails carried over from the previous hand-authored skill. The identity
+// overrides (schema 1.3) keep the install name hyphenated (the topic id is
+// `config_weave`) and the trigger description topic-specific.
 wcl.wskill::skill {
+  name        = "config-weave"
+  description = "Expertise skill for config-weave: authoring WCL playbooks and packages, writing wscript resource/gatherer/verify scripts, the host API surface, running and testing playbooks. Single-binary configuration management driven by WCL playbooks and wscript resource scripts, with a check → apply → re-check convergence contract and a disposable-instance testlab. Auto-activated when working with playbook.wcl, package.wcl, .wscript scripts, the config-weave CLI, or the testlab."
   allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent"]
   summary {
     overview = [
