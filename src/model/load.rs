@@ -405,7 +405,17 @@ impl PlaybookLoader<'_> {
             };
             match f.value() {
                 Ok(v) => match wcl_to_dyn(v) {
-                    Ok(dv) => check_param_type(decl, &dv, what, span, &mut self.ctx),
+                    Ok(dv) => {
+                        check_symbol_spelling(
+                            decl,
+                            is_symbol_literal(v),
+                            &dv,
+                            what,
+                            span,
+                            &mut self.ctx,
+                        );
+                        check_param_type(decl, &dv, what, span, &mut self.ctx)
+                    }
                     Err(e) => {
                         self.ctx
                             .err(format!("parameter '{}' of {what}: {e}", f.name()), span);
@@ -479,9 +489,17 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
     packages
 }
 
-/// One statically evaluated params/properties/expect field:
-/// (name, value, source span).
-type StaticPair = (String, DynValue, (usize, usize));
+/// One statically evaluated params/properties/expect field. `symbol_literal`
+/// records whether the value was *written* as `:name`: WCL symbols and
+/// strings converge on the same `DynValue`, so the source form is the only
+/// thing that still distinguishes them here.
+#[derive(Clone)]
+struct StaticPair {
+    name: String,
+    value: DynValue,
+    span: (usize, usize),
+    symbol_literal: bool,
+}
 
 /// Test reference checks deferred to the second pass: resource/gatherer
 /// refs plus their statically evaluated params, with everything needed to
@@ -595,6 +613,38 @@ fn lookup_param<'a>(
     }
 }
 
+/// Whether a WCL value was written as a `:symbol` (or a bare identifier,
+/// which lexes the same way). Both spellings convert to `DynValue::String`,
+/// so this is the only place the distinction survives.
+fn is_symbol_literal(v: &Value) -> bool {
+    matches!(v, Value::Symbol(_) | Value::Identifier(_))
+}
+
+/// A symbol param must be *written* as `:name`. The string spelling reaches
+/// scripts as exactly the same text, so accepting it would leave two ways
+/// to say one thing and let `ensure = "absent"` drift into playbooks
+/// alongside `ensure = :absent`.
+fn check_symbol_spelling(
+    decl: &ParamDecl,
+    symbol_literal: bool,
+    value: &DynValue,
+    what: &str,
+    span: (usize, usize),
+    ctx: &mut Ctx<'_>,
+) {
+    if decl.ty != CoarseType::Symbol || symbol_literal {
+        return;
+    }
+    let DynValue::String(s) = value else { return };
+    ctx.err(
+        format!(
+            "parameter '{}' of {what} is a symbol: write :{s}, not \"{s}\"",
+            decl.name
+        ),
+        span,
+    );
+}
+
 /// Emit the shared coarse type-mismatch diagnostic when `value` doesn't fit
 /// the declared type.
 fn check_param_type(
@@ -676,12 +726,13 @@ fn check_params_static(
 ) {
     let declared = declared_params(decls);
     let mut present = HashSet::new();
-    for (name, value, vspan) in pairs.unwrap_or_default() {
-        present.insert(name.as_str());
-        let Some(decl) = lookup_param(&declared, name, what, *vspan, ctx) else {
+    for p in pairs.unwrap_or_default() {
+        present.insert(p.name.as_str());
+        let Some(decl) = lookup_param(&declared, &p.name, what, p.span, ctx) else {
             continue;
         };
-        check_param_type(decl, value, what, *vspan, ctx);
+        check_symbol_spelling(decl, p.symbol_literal, &p.value, what, p.span, ctx);
+        check_param_type(decl, &p.value, what, p.span, ctx);
     }
     check_missing_required(decls, what, span, ctx, |n| present.contains(n));
 }
@@ -1092,7 +1143,7 @@ fn load_test(
                     .map(|p| static_pairs(&p, "expectation", &what, ctx))
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|(k, v, _)| (k, v))
+                    .map(|p| (p.name, p.value))
                     .collect();
                 if !seen_gathers.insert(gname.clone()) {
                     ctx.err(
@@ -1115,7 +1166,7 @@ fn load_test(
                     params: params
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|(k, v, _)| (k, v))
+                        .map(|p| (p.name, p.value))
                         .collect(),
                     expect,
                 });
@@ -1205,7 +1256,12 @@ fn static_pairs(block: &Block<'_>, noun: &str, what: &str, ctx: &mut Ctx<'_>) ->
         let fspan = wcl_span(f.span());
         match f.value() {
             Ok(v) => match wcl_to_dyn(v) {
-                Ok(dv) => out.push((f.name().to_string(), dv, fspan)),
+                Ok(dv) => out.push(StaticPair {
+                    name: f.name().to_string(),
+                    value: dv,
+                    span: fspan,
+                    symbol_literal: is_symbol_literal(v),
+                }),
                 Err(e) => ctx.err(format!("{noun} '{}' of {what}: {e}", f.name()), fspan),
             },
             Err(EvalError::UnresolvedReference { .. }) => {
@@ -1340,6 +1396,18 @@ fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
         let default = default_field.and_then(|f| match f.value() {
             Ok(v) => match wcl_to_dyn(v) {
                 Ok(dv) => {
+                    if ty == CoarseType::Symbol
+                        && !is_symbol_literal(v)
+                        && let DynValue::String(s) = &dv
+                    {
+                        ctx.err(
+                            format!(
+                                "default for parameter '{name}' is a symbol: \
+                                 write :{s}, not \"{s}\""
+                            ),
+                            wcl_span(f.span()),
+                        );
+                    }
                     if !ty.matches(&dv) {
                         ctx.err(
                             format!(

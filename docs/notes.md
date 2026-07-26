@@ -42,10 +42,15 @@ windows 0.6x.
   `string|int|float|bool|list|map|symbol`. §8 validation behaviour is
   engine-side and unchanged from the PRD contract. `symbol` is for
   enumerated tokens (the `ensure = :present|:absent` idiom): WCL symbols
-  and strings both convert to the same script-side string, so a symbol
-  param accepts either spelling — the type documents the `:symbol` form
-  and the generated docs render it (`default = :present` in package.wcl
-  reaches scripts as `"present"`).
+  and strings both convert to the same script-side string, so scripts see
+  `"present"` for `default = :present`. Because the two spellings are
+  indistinguishable after conversion, validation enforces the `:symbol`
+  form at the source: `ensure = "absent"` is an error telling you to write
+  `:absent`. `is_symbol_literal` in the loader is the only place the
+  distinction survives, so every path that checks a symbol property has to
+  carry it — which is why `StaticPair` records `symbol_literal`. A value
+  that only resolves at run time (from a variable) cannot be checked this
+  way; the set membership still is.
 - A symbol param may enumerate its legal values with `symbol "name" {
   description }` child blocks. Declaring any *closes* the set: the
   declared `default`, every step `properties` / gather `params` value,

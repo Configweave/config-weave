@@ -288,3 +288,43 @@ fn symbol_param_without_declared_values_stays_open() {
     let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
     assert_eq!(code, 0, "stderr: {stderr}");
 }
+
+/// A symbol param must be *written* as `:name`. Both spellings reach
+/// scripts as the same text, so nothing but the source form distinguishes
+/// them — accepting the string would leave two ways to say one thing.
+#[test]
+fn string_spelling_of_a_symbol_fails_validation() {
+    let dir = sample_with_symbol_param(ENSURE_PARAM, Some("\"absent\""));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("is a symbol: write :absent, not \"absent\""),
+        "{stderr}"
+    );
+}
+
+/// The rule holds even when the param enumerates nothing.
+#[test]
+fn string_spelling_fails_for_an_open_symbol_param_too() {
+    let param = "    param \"ensure\" {\n      description = \"Desired state\"\n      \
+                 type = \"symbol\"\n      default = :present\n    }\n";
+    let dir = sample_with_symbol_param(param, Some("\"whatever\""));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("is a symbol: write :whatever"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn string_spelling_of_a_symbol_default_fails_validation() {
+    let param = ENSURE_PARAM.replace("default = :present", "default = \"present\"");
+    let dir = sample_with_symbol_param(&param, None);
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("default for parameter 'ensure' is a symbol"),
+        "{stderr}"
+    );
+}
