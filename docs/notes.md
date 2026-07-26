@@ -358,6 +358,13 @@ below). Bindings fixed here:
 
 ## wscript binding (PRD §6/§7)
 
+- **File extension: `.ws`.** Resource, gatherer, verify, scenario and
+  `lib/` scripts are all `*.ws`, matching vmlab (the other wscript host).
+  The PRD writes `.wscript`; that spelling is superseded. Only `lib/` scans
+  the extension (`engine/scripts.rs`) — every other path is a literal
+  `script =` / `verify =` string in WCL, so the extension is convention,
+  not contract. The two *interface* names keep their upstream wscript-cli
+  spelling and are **not** renamed: `weave.wscripti` and `wscript.toml`.
 - Script entry points accept two signatures each: plain
   (`fn check(params: Value) -> CheckResult`) or fallible
   (`-> Result[CheckResult, string]`), because `?` requires a `Result`

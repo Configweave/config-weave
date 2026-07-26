@@ -19,7 +19,7 @@ Declare a new resource in a package and implement its check/apply wscript script
 ```wcl
 resource "file_present" {
   description = "Ensure a file exists with the given content"
-  script = "resources/file_present.wscript"
+  script = "resources/file_present.ws"
   concurrency = "parallel"
   param "path"    { description = "Absolute path"  type = "string"  required = true }
   param "content" { description = "File content"   type = "string"  default = "" }

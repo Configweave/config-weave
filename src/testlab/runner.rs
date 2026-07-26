@@ -964,18 +964,18 @@ mod tests {
 
     #[test]
     fn verify_path_maps_into_the_container() {
-        let p = Path::new("/host/playbook/pkgs/core/tests/verify.wscript");
+        let p = Path::new("/host/playbook/pkgs/core/tests/verify.ws");
         let linux = GuestPaths::for_test(GuestOs::Linux, "0-core__t");
         assert_eq!(
             in_container_script(p, &linux).unwrap(),
-            "/weave/t/0-core__t/playbook/pkgs/core/tests/verify.wscript"
+            "/weave/t/0-core__t/playbook/pkgs/core/tests/verify.ws"
         );
         let windows = GuestPaths::for_test(GuestOs::Windows, "0-core__t");
         assert_eq!(
             in_container_script(p, &windows).unwrap(),
-            "C:/weave/t/0-core__t/playbook/pkgs/core/tests/verify.wscript"
+            "C:/weave/t/0-core__t/playbook/pkgs/core/tests/verify.ws"
         );
-        assert!(in_container_script(Path::new("/elsewhere/verify.wscript"), &linux).is_err());
+        assert!(in_container_script(Path::new("/elsewhere/verify.ws"), &linux).is_err());
     }
 
     #[test]

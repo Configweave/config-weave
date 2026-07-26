@@ -3,14 +3,14 @@
 Each entry point accepts two signatures — plain, or fallible when you want `?`:
 
 ```rust
-// resources/<name>.wscript
+// resources/<name>.ws
 fn check(params: Value) -> CheckResult            // or -> Result[CheckResult, string]
 fn apply(params: Value) -> ApplyResult            // or -> Result[ApplyResult, string]
 
-// gatherers/<name>.wscript
+// gatherers/<name>.ws
 fn gather(params: Value) -> Value                 // or -> Result[Value, string]
 
-// tests/<name>.wscript (testlab verify)
+// tests/<name>.ws (testlab verify)
 fn verify(facts: Value) -> bool                   // or -> Result[bool, string]
 
 // scenario driver (host-side, testlab module)

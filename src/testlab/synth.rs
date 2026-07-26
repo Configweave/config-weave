@@ -414,7 +414,7 @@ mod tests {
 
   resource "touch" {
     description = "Create a file"
-    script = "resources/touch.wscript"
+    script = "resources/touch.ws"
     param "path" {
       description = "Where"
       type = "string"
@@ -449,7 +449,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
-            pkg_dir.join("resources/touch.wscript"),
+            pkg_dir.join("resources/touch.ws"),
             r#"use value
 use fs
 

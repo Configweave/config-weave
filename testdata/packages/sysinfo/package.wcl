@@ -3,7 +3,7 @@ package "sysinfo" {
 
   gatherer "os_info" {
     description = "Report OS family, name, version, arch and CPU count"
-    script = "gatherers/os_info.wscript"
+    script = "gatherers/os_info.ws"
   }
 
   test "reports_linux" {

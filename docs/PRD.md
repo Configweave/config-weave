@@ -51,21 +51,21 @@ Division of labour between the three languages:
 my-playbook/
   playbook.wcl              # Plays, variables, gatherer invocations
   lib/                      # Playbook-level shared wscript code (importable)
-    util.wscript
+    util.ws
   pkgs/
     <package-name>/
       package.wcl           # Gatherer + Resource declarations (schemas, concurrency)
       lib/                  # Package-level shared wscript code
-        helpers.wscript
+        helpers.ws
       resources/
-        <resource-name>.wscript    # exports check() and apply()
+        <resource-name>.ws         # exports check() and apply()
       gatherers/
-        <gatherer-name>.wscript    # exports gather()
+        <gatherer-name>.ws         # exports gather()
 ```
 
 - All paths in a `package.wcl` are relative to the package folder.
 - `playbook.wcl` references packages by folder name under `pkgs/` and resources/gatherers as `package.name`.
-- One `.wscript` file per resource containing **both** `check` and `apply` (replacing the old two-file convention). One file per gatherer.
+- One `.ws` file per resource containing **both** `check` and `apply` (replacing the old two-file convention). One file per gatherer.
 - `description` fields are **mandatory** on every meaningful schema element — playbook, play, step, container, resource, gatherer, and every declared parameter. Enforced by `validate` and consumed by `docs`.
 
 ---
@@ -146,7 +146,7 @@ package "runtime" {
 
     gatherer "installed_versions" {
         description = "Enumerate installed runtime versions"
-        script = "gatherers/installed_versions.wscript"
+        script = "gatherers/installed_versions.ws"
         params schema {
             # WCL schema declaring this gatherer's parameters.
             channel: string { description = "Release channel to enumerate" }
@@ -155,7 +155,7 @@ package "runtime" {
 
     resource "dotnet" {
         description = "Manage a .NET runtime installation"
-        script = "resources/dotnet.wscript"
+        script = "resources/dotnet.ws"
         concurrency = "exclusive"     # parallel | exclusive | global
         params schema {
             version: string {
@@ -197,11 +197,11 @@ WCL and wscript never see each other. The engine:
 ### Script contracts
 
 ```
-# resources/<name>.wscript
+# resources/<name>.ws
 fn check(params: Value) -> CheckResult     # AlreadyConfigured | NotConfigured | RebootRequired
 fn apply(params: Value) -> ApplyResult     # Success | RebootRequired
 
-# gatherers/<name>.wscript
+# gatherers/<name>.ws
 fn gather(params: Value) -> Value
 ```
 

@@ -138,8 +138,8 @@ fn compile_one(
     }
 }
 
-/// Shared wscript code under `lib/` must compile too. wscript v1 has no
-/// script-to-script imports, so lib files are compiled standalone; once
+/// Shared wscript code under `lib/` (`*.ws`) must compile too. wscript v1 has
+/// no script-to-script imports, so lib files are compiled standalone; once
 /// wscript ships imports, these folders become resolution roots.
 fn compile_lib(ctx: &Context, dir: &Path, diags: &mut Vec<Diag>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -148,7 +148,7 @@ fn compile_lib(ctx: &Context, dir: &Path, diags: &mut Vec<Diag>) {
     let mut paths: Vec<PathBuf> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "wscript"))
+        .filter(|p| p.extension().is_some_and(|x| x == "ws"))
         .collect();
     paths.sort();
     for path in paths {

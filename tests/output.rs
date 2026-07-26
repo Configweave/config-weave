@@ -56,7 +56,7 @@ fn write_playbook(root: &Path, marker: &Path) {
 
   resource "marker" {
     description = "Ensure a marker file exists"
-    script = "resources/marker.wscript"
+    script = "resources/marker.ws"
 
     param "path" {
       description = "Marker path"
@@ -69,7 +69,7 @@ fn write_playbook(root: &Path, marker: &Path) {
     )
     .unwrap();
     std::fs::write(
-        pkg.join("resources/marker.wscript"),
+        pkg.join("resources/marker.ws"),
         r#"use value
 use fs
 use log

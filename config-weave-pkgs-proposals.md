@@ -183,7 +183,7 @@ as `RebootRequired` via installer exit code 3010/1641):
   `Add-Computer`). All `global`; promotion/join is reboot-prone, so apply returns
   `RebootRequired` and the playbook must install the `AD-Domain-Services` role first via
   `windows_features.windows_server_feature` (the resources only promote/join).
-  **Convergence-tested** by the `ad_matrix` *scenario* (`tests/ad_matrix.wscript`): a
+  **Convergence-tested** by the `ad_matrix` *scenario* (`tests/ad_matrix.ws`): a
   wscript driver that spins up a forest root (serving DNS), an additional DC, a member
   server and a second forest on vmlab, applying each resource across the reboot it
   requires — the multi-stage/multi-VM flow the three-run `test` protocol can't express.

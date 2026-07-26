@@ -36,7 +36,7 @@ fn write_playbook(root: &Path, witness: &Path) {
             r#"
   resource "{name}" {{
     description = "Concurrency probe ({concurrency})"
-    script = "resources/probe.wscript"
+    script = "resources/probe.ws"
     concurrency = "{concurrency}"
 
     param "id" {{
@@ -70,7 +70,7 @@ fn write_playbook(root: &Path, witness: &Path) {
 
     // The probe sleeps via shell to give real overlap a window.
     std::fs::write(
-        pkg.join("resources/probe.wscript"),
+        pkg.join("resources/probe.ws"),
         r#"use value
 use fs
 use path

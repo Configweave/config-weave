@@ -126,11 +126,11 @@ package "core" {
   description = "Core sample package"
 
   gatherer "os_info" {
-    script = "gatherers/os_info.wscript"
+    script = "gatherers/os_info.ws"
   }
 
   resource "file_present" {
-    script      = "resources/file_present.wscript"
+    script      = "resources/file_present.ws"
     concurrency = "parallel"
 
     param "path" {

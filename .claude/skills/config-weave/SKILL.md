@@ -1,6 +1,6 @@
 ---
 name: config-weave
-description: "Expertise skill for config-weave: authoring WCL playbooks and packages, writing wscript resource/gatherer/verify scripts, the host API surface, running and testing playbooks. Single-binary configuration management driven by WCL playbooks and wscript resource scripts, with a check → apply → re-check convergence contract and a disposable-instance testlab. Auto-activated when working with playbook.wcl, package.wcl, .wscript scripts, the config-weave CLI, or the testlab."
+description: "Expertise skill for config-weave: authoring WCL playbooks and packages, writing wscript resource/gatherer/verify scripts, the host API surface, running and testing playbooks. Single-binary configuration management driven by WCL playbooks and wscript resource scripts, with a check → apply → re-check convergence contract and a disposable-instance testlab. Auto-activated when working with playbook.wcl, package.wcl, .ws scripts, the config-weave CLI, or the testlab."
 allowed-tools:
   - Read
   - Write

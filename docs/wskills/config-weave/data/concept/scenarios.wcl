@@ -15,7 +15,7 @@ PROSE
 scenario "ad_matrix" {
   description = "Forest, additional DC and a member join over real reboots"
   lab    = "tests/ad-lab"          // dir holding a vmlab.wcl (vmlab only)
-  script = "tests/ad_matrix.wscript"
+  script = "tests/ad_matrix.ws"
 }
 SRC
     }

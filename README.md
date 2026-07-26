@@ -43,8 +43,8 @@ my-playbook/
   lib/                      # shared wscript code (compiled at validate time)
   pkgs/<name>/
     package.wcl             # gatherer + resource declarations (schemas)
-    resources/<r>.wscript      # exports check() and apply()
-    gatherers/<g>.wscript      # exports gather()
+    resources/<r>.ws        # exports check() and apply()
+    gatherers/<g>.ws        # exports gather()
 ```
 
 ## Building

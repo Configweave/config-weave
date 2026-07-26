@@ -3,7 +3,7 @@ package "demo_files" {
 
   resource "file_present" {
     description = "Ensure a file exists with the given content"
-    script = "resources/file_present.wscript"
+    script = "resources/file_present.ws"
 
     param "path" {
       description = "Absolute path of the file"
@@ -19,7 +19,7 @@ package "demo_files" {
 
   resource "dir_present" {
     description = "Ensure a directory exists"
-    script = "resources/dir_present.wscript"
+    script = "resources/dir_present.ws"
 
     param "path" {
       description = "Absolute path of the directory"
@@ -30,7 +30,7 @@ package "demo_files" {
 
   resource "file_absent" {
     description = "Ensure a file does not exist"
-    script = "resources/file_absent.wscript"
+    script = "resources/file_absent.ws"
 
     param "path" {
       description = "Absolute path of the file to remove"
@@ -42,7 +42,7 @@ package "demo_files" {
   test "files_converge" {
     description = "Directory and file converge; absence is idempotent"
     image = "debian:12"
-    verify = "tests/files_verify.wscript"
+    verify = "tests/files_verify.ws"
 
     step "make-dir" {
       description = "Create the demo directory"

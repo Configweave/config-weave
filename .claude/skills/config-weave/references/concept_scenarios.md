@@ -13,7 +13,7 @@ the lab's VMs up by name, applies config-weave, reboots, and asserts.
 scenario "ad_matrix" {
   description = "Forest, additional DC and a member join over real reboots"
   lab    = "tests/ad-lab"          // dir holding a vmlab.wcl (vmlab only)
-  script = "tests/ad_matrix.wscript"
+  script = "tests/ad_matrix.ws"
 }
 ```
 

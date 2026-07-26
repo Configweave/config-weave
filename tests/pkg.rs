@@ -44,7 +44,7 @@ fn fixture_remote(root: &Path) -> (String, PathBuf) {
 
   resource "widget" {
     description = "Ensure a widget exists"
-    script = "resources/widget.wscript"
+    script = "resources/widget.ws"
     concurrency = "parallel"
     param "name" { description = "Widget name" type = "string" required = true }
   }
@@ -52,7 +52,7 @@ fn fixture_remote(root: &Path) -> (String, PathBuf) {
 "#,
     )
     .unwrap();
-    std::fs::write(seed.join("pkgs/demo/resources/widget.wscript"), "// stub\n").unwrap();
+    std::fs::write(seed.join("pkgs/demo/resources/widget.ws"), "// stub\n").unwrap();
     push(&seed, "seed");
     (format!("file://{}", bare.display()), seed)
 }
@@ -125,7 +125,7 @@ fn pkg_lifecycle_against_a_local_fixture_repo() {
     );
     assert!(!stdout.contains("seeded"), "{stdout}");
     assert!(pb.join("pkgs/demo/package.wcl").exists());
-    assert!(pb.join("pkgs/demo/resources/widget.wscript").exists());
+    assert!(pb.join("pkgs/demo/resources/widget.ws").exists());
     let recorded = repo_wcl(&pb);
     assert!(recorded.contains("package \"demo\""), "{recorded}");
     assert!(recorded.contains("repo = \"fixture\""), "{recorded}");
@@ -147,11 +147,7 @@ fn pkg_lifecycle_against_a_local_fixture_repo() {
     assert!(stdout.contains("demo: up to date"), "{stdout}");
 
     // Remote moves; update re-copies and re-records.
-    std::fs::write(
-        seed.join("pkgs/demo/resources/widget.wscript"),
-        "// improved\n",
-    )
-    .unwrap();
+    std::fs::write(seed.join("pkgs/demo/resources/widget.ws"), "// improved\n").unwrap();
     push(&seed, "improve widget");
     let (code, stdout, stderr) = pkg(&pb, &["update", "demo"]);
     assert_eq!(code, 0, "{stderr}");
@@ -159,7 +155,7 @@ fn pkg_lifecycle_against_a_local_fixture_repo() {
         stdout.contains("demo: ") && stdout.contains(" -> "),
         "{stdout}"
     );
-    let script = std::fs::read_to_string(pb.join("pkgs/demo/resources/widget.wscript")).unwrap();
+    let script = std::fs::read_to_string(pb.join("pkgs/demo/resources/widget.ws")).unwrap();
     assert_eq!(script, "// improved\n");
     assert!(!repo_wcl(&pb).contains(commit), "commit was re-recorded");
 

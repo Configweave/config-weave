@@ -47,9 +47,9 @@ pub fn init(dir: &Path) -> Result<(), Diag> {
 
     write("playbook.wcl", PLAYBOOK)?;
     write("pkgs/example/package.wcl", PACKAGE)?;
-    write("pkgs/example/resources/file_present.wscript", RESOURCE)?;
-    write("pkgs/example/gatherers/os_info.wscript", GATHERER)?;
-    write("pkgs/example/tests/greeting_verify.wscript", VERIFY)?;
+    write("pkgs/example/resources/file_present.ws", RESOURCE)?;
+    write("pkgs/example/gatherers/os_info.ws", GATHERER)?;
+    write("pkgs/example/tests/greeting_verify.ws", VERIFY)?;
     write("lib/README.md", LIB_README)?;
     write("pkgs/example/lib/README.md", LIB_README)?;
     // `config-weave pkg` clones package repos here.
@@ -95,7 +95,7 @@ pub(crate) const PACKAGE: &str = r#"package "example" {
 
   gatherer "os_info" {
     description = "Report basic operating system facts"
-    script = "gatherers/os_info.wscript"
+    script = "gatherers/os_info.ws"
     returns "family"  { description = "OS family (linux, windows, macos)" type = "string" }
     returns "name"    { description = "OS name" type = "string" }
     returns "version" { description = "OS version" type = "string" }
@@ -105,7 +105,7 @@ pub(crate) const PACKAGE: &str = r#"package "example" {
 
   resource "file_present" {
     description = "Ensure a file exists with the given content"
-    script = "resources/file_present.wscript"
+    script = "resources/file_present.ws"
     concurrency = "parallel"
 
     param "path" {
@@ -131,7 +131,7 @@ pub(crate) const PACKAGE: &str = r#"package "example" {
   test "greeting_converges" {
     description = "file_present creates the greeting file and is idempotent"
     image = "debian:12"
-    verify = "tests/greeting_verify.wscript"
+    verify = "tests/greeting_verify.ws"
 
     step "greet" {
       description = "Create the greeting file"

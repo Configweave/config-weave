@@ -3,7 +3,7 @@ package "demo_users" {
 
   resource "user_present" {
     description = "Ensure a local user account exists"
-    script = "resources/user_present.wscript"
+    script = "resources/user_present.ws"
 
     param "name" {
       description = "Account name"
@@ -20,7 +20,7 @@ package "demo_users" {
   test "creates_a_user" {
     description = "user_present creates the account and is idempotent"
     image = "debian:12"
-    verify = "tests/user_verify.wscript"
+    verify = "tests/user_verify.ws"
 
     step "svc-account" {
       description = "Create the demo service account"

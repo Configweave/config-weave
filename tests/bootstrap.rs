@@ -100,7 +100,7 @@ fn write_playbook(root: &Path, url: &str, sha: &str, install_dir: &Path) {
 
   resource "fetch_install" {
     description = "Download a tar.gz, verify its sha256, extract and install"
-    script = "resources/fetch_install.wscript"
+    script = "resources/fetch_install.ws"
 
     param "url" {
       description = "Artifact URL"
@@ -123,7 +123,7 @@ fn write_playbook(root: &Path, url: &str, sha: &str, install_dir: &Path) {
     )
     .unwrap();
     std::fs::write(
-        pkg.join("resources/fetch_install.wscript"),
+        pkg.join("resources/fetch_install.ws"),
         r#"use value
 use fs
 use path

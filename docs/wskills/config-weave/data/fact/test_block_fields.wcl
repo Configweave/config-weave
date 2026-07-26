@@ -12,7 +12,7 @@ test "file_present_converges" {
   memory = "4GiB"                       // optional; instance RAM (containers default to 256MiB)
   group = "files"                       // optional; share one instance with same-group tests
   setup = "..."                         // optional
-  verify = "tests/file_present_verify.wscript"   // optional custom assertions
+  verify = "tests/file_present_verify.ws"    // optional custom assertions
 
   step "create" {
     description = "Create a marker file"

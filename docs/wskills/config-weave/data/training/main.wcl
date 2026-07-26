@@ -129,7 +129,7 @@ package "mypkg" {
   description = "My first package"
   resource "dir_present" {
     description = "Ensure a directory exists"
-    script      = "resources/dir_present.wscript"
+    script      = "resources/dir_present.ws"
     concurrency = "parallel"
     param "path" { description = "Absolute path"  type = "string"  required = true }
   }
