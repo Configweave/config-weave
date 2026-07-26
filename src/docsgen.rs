@@ -491,6 +491,7 @@ fn emit_resource(w: &mut String, pkg: &str, res: &crate::model::ResourceDecl) {
     let _ = writeln!(w, "  p \"{}\"", esc(&res.description));
     let _ = writeln!(w, "  p \"Concurrency class: {}\"", res.concurrency.as_str());
     emit_param_table(w, &res.params);
+    emit_symbol_values(w, &res.params);
 
     // A generated `step` example: required params with type placeholders,
     // optional params commented out with their defaults.
@@ -523,6 +524,7 @@ fn emit_gatherer(w: &mut String, pkg: &str, g: &crate::model::GathererDecl) {
     let _ = writeln!(w, "  h1 \"Gatherer: {}\"", esc(&g.name));
     let _ = writeln!(w, "  p \"{}\"", esc(&g.description));
     emit_param_table(w, &g.params);
+    emit_symbol_values(w, &g.params);
     emit_returns_table(w, &g.returns);
 
     // A generated `gather` example — the label is the variable the
@@ -576,9 +578,9 @@ fn example_param_lines(params: &[ParamDecl], indent: &str) -> Vec<String> {
         .iter()
         .map(|p| {
             if p.required {
-                format!("{indent}{} = {}", p.name, placeholder(p.ty))
+                format!("{indent}{} = {}", p.name, example_value(p))
             } else {
-                let default = default_literal(p).unwrap_or_else(|| placeholder(p.ty).to_string());
+                let default = default_literal(p).unwrap_or_else(|| example_value(p));
                 format!("{indent}// {} = {}", p.name, default)
             }
         })
@@ -623,6 +625,16 @@ fn emit_returns_table(w: &mut String, returns: &[crate::model::ReturnDecl]) {
     let _ = writeln!(w, "  }}");
 }
 
+/// The stand-in value a parameter gets in a generated example: the first
+/// declared symbol when the param enumerates a set (a real, valid value
+/// beats `:...`), otherwise the type placeholder.
+fn example_value(p: &ParamDecl) -> String {
+    match p.symbols.first() {
+        Some(s) => format!(":{}", s.name),
+        None => placeholder(p.ty).to_string(),
+    }
+}
+
 /// Placeholder literal for a required example parameter, by declared type.
 fn placeholder(ty: CoarseType) -> &'static str {
     match ty {
@@ -634,6 +646,33 @@ fn placeholder(ty: CoarseType) -> &'static str {
         CoarseType::Map => "{}",
         CoarseType::Symbol => ":...",
     }
+}
+
+/// The legal values of every parameter that enumerates a symbol set, as a
+/// nested bullet list under the parameter table. Params that declare no
+/// symbols (and pages with none at all) emit nothing — the section only
+/// appears where there is something closed to say.
+fn emit_symbol_values(w: &mut String, params: &[ParamDecl]) {
+    let enumerated: Vec<&ParamDecl> = params.iter().filter(|p| !p.symbols.is_empty()).collect();
+    if enumerated.is_empty() {
+        return;
+    }
+    let _ = writeln!(w, "  h2 \"Symbol values\"");
+    let _ = writeln!(w, "  list {{");
+    for p in enumerated {
+        let _ = writeln!(w, "    li \"{}\" {{", esc(&code(&p.name)));
+        for s in &p.symbols {
+            let label = code(&format!(":{}", s.name));
+            let text = if s.description.is_empty() {
+                label
+            } else {
+                format!("{label} — {}", s.description)
+            };
+            let _ = writeln!(w, "      li \"{}\"", esc(&text));
+        }
+        let _ = writeln!(w, "    }}");
+    }
+    let _ = writeln!(w, "  }}");
 }
 
 /// The payoff for mandatory descriptions and declared schemas (PRD §12).

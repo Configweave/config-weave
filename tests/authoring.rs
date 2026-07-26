@@ -202,6 +202,20 @@ fn init_validate_apply_docs() {
         res.contains("required") || res.contains("yes"),
         "requiredness missing"
     );
+    // A symbol param that enumerates its legal values lists them, with
+    // their descriptions, under "Symbol values".
+    assert!(
+        res.contains("Symbol values"),
+        "resource page missing the symbol values section"
+    );
+    assert!(
+        res.contains(":present") && res.contains(":absent"),
+        "declared symbols missing from the resource page"
+    );
+    assert!(
+        res.contains("Remove the file if it exists"),
+        "symbol description missing from the resource page"
+    );
 
     // Generated usage examples — asserted on the emitted wdoc source
     // (the rendered HTML is syntax-highlighted, so raw substrings of the
@@ -220,6 +234,17 @@ fn init_validate_apply_docs() {
     assert!(
         src.contains("// content = \"\""),
         "optional param should be commented out with its default"
+    );
+    assert!(
+        src.contains("// ensure = :present"),
+        "symbol param should render its default as a `:symbol` literal"
+    );
+    // The gatherer page has no enumerated params, so it gets no section.
+    assert!(
+        !std::fs::read_to_string(docs.join("gath_example_os_info.html"))
+            .unwrap()
+            .contains("Symbol values"),
+        "symbol values section should be omitted when nothing enumerates"
     );
     assert!(
         src.contains("gather \"os_info\"") && src.contains("from = \"example.os_info\""),

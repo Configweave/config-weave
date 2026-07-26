@@ -118,6 +118,18 @@ pub(crate) const PACKAGE: &str = r#"package "example" {
       type = "string"
       default = ""
     }
+    // A `symbol` param may enumerate its legal values with `symbol`
+    // blocks. Declaring any closes the set: validation rejects anything
+    // else, and the generated docs list the values. Declaring none leaves
+    // the param open to any token.
+    param "ensure" {
+      description = "Desired state of the file"
+      type = "symbol"
+      default = :present
+
+      symbol "present" { description = "Create the file and converge its content" }
+      symbol "absent"  { description = "Remove the file if it exists" }
+    }
   }
 
   // Run with `config-weave test <playbook-dir>` (needs vmlab). `image`
@@ -159,10 +171,18 @@ fn param_str(params: Value, key: string, fallback: string) -> string {
     fallback
 }
 
+// A `symbol` param arrives as a plain string: `ensure = :absent` in the
+// playbook reaches the script as "absent".
 fn check(params: Value) -> Result[CheckResult, string] {
     let p = param_str(params, "path", "")
     if p == "" {
         return Err("missing 'path' parameter")
+    }
+    if param_str(params, "ensure", "present") == "absent" {
+        if fs::exists(p) {
+            return Ok(CheckResult::NotConfigured)
+        }
+        return Ok(CheckResult::AlreadyConfigured)
     }
     if !fs::exists(p) {
         return Ok(CheckResult::NotConfigured)
@@ -176,6 +196,11 @@ fn check(params: Value) -> Result[CheckResult, string] {
 
 fn apply(params: Value) -> Result[ApplyResult, string] {
     let p = param_str(params, "path", "")
+    if param_str(params, "ensure", "present") == "absent" {
+        log::info("removing " + p)
+        fs::delete(p)?
+        return Ok(ApplyResult::Success)
+    }
     log::info("writing " + p)
     fs::mkdir(path::parent(p))?
     fs::write(p, param_str(params, "content", ""))?

@@ -46,6 +46,19 @@ windows 0.6x.
   param accepts either spelling — the type documents the `:symbol` form
   and the generated docs render it (`default = :present` in package.wcl
   reaches scripts as `"present"`).
+- A symbol param may enumerate its legal values with `symbol "name" {
+  description }` child blocks. Declaring any *closes* the set: the
+  declared `default`, every step `properties` / gather `params` value,
+  and every value that only resolves at run time (from a variable) are
+  checked against it, and the generated resource/gatherer pages list the
+  values under a "Symbol values" heading. Declaring none leaves the param
+  open to any token, which is what every symbol param did before the
+  blocks existed — so the feature is opt-in and adding it broke no
+  existing package. Only `symbol` params may enumerate; the blocks are an
+  error on any other coarse type. Symbols name themselves in their
+  WCL-spellable form (`symbol "on_demand"`, not `"on-demand"` — the lexer
+  stops a `:symbol` at `[A-Za-z0-9_]`), and a script that needs the
+  hyphenated spelling translates it itself.
 - Step `properties = { … }` became a `properties { … }` child block;
   gather `params = { … }` likewise a `params { … }` block.
 - Gatherers document their gathered value with `returns "key" {

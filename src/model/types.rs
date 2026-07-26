@@ -178,6 +178,13 @@ pub struct ReturnDecl {
     pub ty: CoarseType,
 }
 
+/// One declared legal value of a symbol-typed parameter.
+#[derive(Debug, Clone)]
+pub struct SymbolDecl {
+    pub name: String,
+    pub description: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ParamDecl {
     pub name: String,
@@ -185,6 +192,38 @@ pub struct ParamDecl {
     pub ty: CoarseType,
     pub required: bool,
     pub default: Option<DynValue>,
+    /// The legal symbols, in declaration order. Empty means unconstrained —
+    /// a symbol param without `symbol` blocks accepts any token, as it
+    /// always has.
+    pub symbols: Vec<SymbolDecl>,
+}
+
+impl ParamDecl {
+    /// The declared symbols rendered as `:symbol` literals, comma-joined —
+    /// the tail of every "expected one of" diagnostic.
+    pub fn symbol_list(&self) -> String {
+        self.symbols
+            .iter()
+            .map(|s| format!(":{}", s.name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// `None` when `v` is an allowed symbol, or when this param declares no
+    /// symbol set; otherwise the diagnostic body naming what was got and
+    /// what was expected.
+    pub fn symbol_violation(&self, v: &DynValue) -> Option<String> {
+        if self.symbols.is_empty() {
+            return None;
+        }
+        let DynValue::String(s) = v else {
+            return None; // the coarse type check already rejected this
+        };
+        if self.symbols.iter().any(|d| &d.name == s) {
+            return None;
+        }
+        Some(format!("got :{s}, expected one of: {}", self.symbol_list()))
+    }
 }
 
 /// What a test is provisioned into. Both kinds are vmlab machines; the

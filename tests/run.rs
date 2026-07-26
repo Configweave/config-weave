@@ -64,6 +64,13 @@ fn write_lifecycle_playbook(root: &Path, plays: &str) {
       type = "string"
       default = "success"
     }
+    param "mode" {
+      description = "Enumerated selector; the script ignores it"
+      type = "symbol"
+      default = :normal
+      symbol "normal" { description = "The default behaviour" }
+      symbol "strict" { description = "Reserved" }
+    }
   }
 }
 "#,
@@ -340,4 +347,45 @@ fn var_precedence() {
     assert_eq!(code, 0);
     assert!(d2.exists());
     assert!(!dir.path().join("from-file").exists());
+}
+
+/// A symbol that only resolves at run time (it comes from a variable) skips
+/// the load-time set check, so the engine has to enforce the declared set
+/// itself before the script ever sees the value.
+#[test]
+fn undeclared_symbol_from_a_variable_fails_at_run_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("m");
+    write_lifecycle_playbook(
+        dir.path(),
+        &format!(
+            r#"  vars {{
+    chosen = :strikt
+  }}
+
+  play "p" {{
+    description = "one step"
+{}  }}"#,
+            step(
+                "s",
+                &format!(
+                    "        path = \"{}\"\n        mode = chosen",
+                    marker.display()
+                ),
+                ""
+            )
+        ),
+    );
+
+    // Nothing is statically wrong — the value is a variable reference.
+    let (code, _, stderr) = run_in(dir.path(), &["validate", "."]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    let (code, stdout, _) = run_in(dir.path(), &["apply", ".", "p"]);
+    assert_eq!(code, 1, "{stdout}");
+    assert!(
+        stdout.contains("not a declared symbol") && stdout.contains(":normal, :strict"),
+        "{stdout}"
+    );
+    assert!(!marker.exists(), "the step must not have run");
 }

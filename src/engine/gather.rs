@@ -193,6 +193,14 @@ pub fn apply_param_defaults(
                         decl.ty.as_str(),
                         crate::model::CoarseType::describe(v)
                     ));
+                } else if let Some(why) = decl.symbol_violation(v) {
+                    // Values that came from variables skip the load-time
+                    // check (they don't evaluate statically), so the
+                    // declared symbol set is enforced here too.
+                    errors.push(format!(
+                        "parameter '{}' is not a declared symbol: {why}",
+                        decl.name
+                    ));
                 }
             }
             None => {

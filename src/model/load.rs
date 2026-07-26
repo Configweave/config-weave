@@ -614,6 +614,16 @@ fn check_param_type(
             ),
             span,
         );
+        return;
+    }
+    if let Some(why) = decl.symbol_violation(value) {
+        ctx.err(
+            format!(
+                "parameter '{}' of {what} is not a declared symbol: {why}",
+                decl.name
+            ),
+            span,
+        );
     }
 }
 
@@ -1261,6 +1271,45 @@ fn load_returns(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ReturnDecl> {
     returns
 }
 
+/// The `symbol` child blocks of one `param`, in declaration order. Only
+/// meaningful on a symbol-typed param; declaring none leaves the param
+/// unconstrained.
+fn load_symbols(
+    block: &Block<'_>,
+    param: &str,
+    ty: CoarseType,
+    ctx: &mut Ctx<'_>,
+) -> Vec<SymbolDecl> {
+    let mut symbols = Vec::new();
+    let mut seen = HashSet::new();
+    for b in block.blocks().filter(|b| b.kind() == "symbol") {
+        if ty != CoarseType::Symbol {
+            ctx.err(
+                format!(
+                    "parameter '{param}' declares symbol values but its type is {} \
+                     (only 'symbol' params can enumerate values)",
+                    ty.as_str()
+                ),
+                wcl_span(b.span()),
+            );
+            continue;
+        }
+        let Some(name) = label_string(&b) else {
+            continue;
+        };
+        if !seen.insert(name.clone()) {
+            ctx.err(
+                format!("duplicate symbol ':{name}' for parameter '{param}'"),
+                wcl_span(b.span()),
+            );
+            continue;
+        }
+        let description = string_field(&b, "description", ctx).unwrap_or_default();
+        symbols.push(SymbolDecl { name, description });
+    }
+    symbols
+}
+
 fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
     let mut params = Vec::new();
     let mut seen = HashSet::new();
@@ -1284,48 +1333,63 @@ fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
             );
             continue;
         };
+        let symbols = load_symbols(&b, &name, ty, ctx);
         let required = bool_field(&b, "required", ctx).unwrap_or(false);
-        let default = b
-            .fields()
-            .find(|f| f.name() == "default")
-            .and_then(|f| match f.value() {
-                Ok(v) => match wcl_to_dyn(v) {
-                    Ok(dv) => {
-                        if !ty.matches(&dv) {
-                            ctx.err(
-                                format!(
-                                    "default for parameter '{name}' does not match its \
-                                     declared type {}",
-                                    ty.as_str()
-                                ),
-                                wcl_span(f.span()),
-                            );
-                            None
-                        } else {
-                            Some(dv)
-                        }
-                    }
-                    Err(e) => {
+        let default_field = b.fields().find(|f| f.name() == "default");
+        let default_span = default_field.as_ref().map(|f| wcl_span(f.span()));
+        let default = default_field.and_then(|f| match f.value() {
+            Ok(v) => match wcl_to_dyn(v) {
+                Ok(dv) => {
+                    if !ty.matches(&dv) {
                         ctx.err(
-                            format!("default for parameter '{name}': {e}"),
+                            format!(
+                                "default for parameter '{name}' does not match its \
+                                 declared type {}",
+                                ty.as_str()
+                            ),
                             wcl_span(f.span()),
                         );
                         None
+                    } else {
+                        Some(dv)
                     }
-                },
+                }
                 Err(e) => {
-                    ctx.diags
-                        .push(Diag::from_eval(e.clone(), ctx.file, ctx.source));
+                    ctx.err(
+                        format!("default for parameter '{name}': {e}"),
+                        wcl_span(f.span()),
+                    );
                     None
                 }
-            });
-        params.push(ParamDecl {
+            },
+            Err(e) => {
+                ctx.diags
+                    .push(Diag::from_eval(e.clone(), ctx.file, ctx.source));
+                None
+            }
+        });
+        let decl = ParamDecl {
             name,
             description,
             ty,
             required,
             default,
-        });
+            symbols,
+        };
+        // The declaration has to satisfy its own symbol set, or every use
+        // that relies on the default would fail validation instead.
+        if let Some(d) = &decl.default
+            && let Some(why) = decl.symbol_violation(d)
+        {
+            ctx.err(
+                format!(
+                    "default for parameter '{}' is not a declared symbol: {why}",
+                    decl.name
+                ),
+                default_span.unwrap_or_else(|| wcl_span(b.span())),
+            );
+        }
+        params.push(decl);
     }
     params
 }

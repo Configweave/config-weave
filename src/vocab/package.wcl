@@ -67,6 +67,20 @@ type WeaveParamDecl {
   type: utf8
   @default(false) required: bool
   @schemaless default: utf8?
+  @children("symbol") symbols: list<WeaveSymbolDecl>
+}
+
+// One legal value of a `type = "symbol"` parameter. Declaring any narrows
+// the parameter to exactly this set — validation rejects anything else and
+// the generated docs list the values with their descriptions. Declaring
+// none leaves the parameter unconstrained (any token is accepted).
+//
+// Name the symbol in its WCL-spellable form (`"on_demand"`, not
+// `"on-demand"`): the lexer stops a `:symbol` at [A-Za-z0-9_].
+@block("symbol")
+type WeaveSymbolDecl {
+  @inline(0) name: utf8
+  description: utf8
 }
 
 // An isolated convergence test for this package, run by `config-weave

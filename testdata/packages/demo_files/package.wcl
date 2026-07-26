@@ -37,6 +37,17 @@ package "demo_files" {
       type = "string"
       required = true
     }
+    // An enumerated symbol param: the declared set is validated and the
+    // generated docs list it. The script ignores this one — it is here so
+    // the docs/validation path has coverage.
+    param "on_missing" {
+      description = "What a missing file counts as"
+      type = "symbol"
+      default = :already_configured
+
+      symbol "already_configured" { description = "Nothing to remove — the desired state already holds" }
+      symbol "error"              { description = "Fail the step instead" }
+    }
   }
 
   test "files_converge" {

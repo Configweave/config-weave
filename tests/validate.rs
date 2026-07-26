@@ -166,3 +166,125 @@ fn unknown_resource_fails_validation() {
     assert_eq!(code, 2);
     assert!(stderr.contains("no resource 'nope'"), "{stderr}");
 }
+
+// ------------------------------------------------- enumerated symbol params
+
+/// miette wraps diagnostics inside box art, so a message can break across
+/// lines mid-phrase. Collapse the gutter and whitespace before asserting.
+fn flat(s: &str) -> String {
+    s.replace(['\u{2502}', '\u{00d7}'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A copy of the sample whose `core.file_present` grows a symbol param,
+/// optionally with an enumerated set, and whose `make-a` step passes
+/// `ensure = <prop>`. Returns the temp dir (kept alive by the caller).
+fn sample_with_symbol_param(param_body: &str, prop: Option<&str>) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    copy_sample(dir.path());
+
+    let pkg = dir.path().join("pkgs/core/package.wcl");
+    let src = std::fs::read_to_string(&pkg).unwrap();
+    let anchor = "    param \"content\" {\n      description = \"File content\"\n      \
+                  type = \"string\"\n      default = \"\"\n    }\n";
+    assert!(src.contains(anchor), "sample package.wcl drifted");
+    std::fs::write(&pkg, src.replace(anchor, &format!("{anchor}{param_body}"))).unwrap();
+
+    if let Some(prop) = prop {
+        let pb = dir.path().join("playbook.wcl");
+        let src = std::fs::read_to_string(&pb).unwrap();
+        std::fs::write(
+            &pb,
+            src.replace(
+                "        content = \"alpha\"\n",
+                &format!("        content = \"alpha\"\n        ensure = {prop}\n"),
+            ),
+        )
+        .unwrap();
+    }
+    dir
+}
+
+const ENSURE_PARAM: &str = r#"    param "ensure" {
+      description = "Desired state"
+      type = "symbol"
+      default = :present
+      symbol "present" { description = "Create it" }
+      symbol "absent"  { description = "Remove it" }
+    }
+"#;
+
+#[test]
+fn declared_symbol_is_accepted() {
+    let dir = sample_with_symbol_param(ENSURE_PARAM, Some(":absent"));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+}
+
+#[test]
+fn undeclared_symbol_fails_validation() {
+    let dir = sample_with_symbol_param(ENSURE_PARAM, Some(":presnt"));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(flat(&stderr).contains("not a declared symbol"), "{stderr}");
+    // The diagnostic names the whole legal set, not just the failure.
+    assert!(
+        flat(&stderr).contains(":present") && flat(&stderr).contains(":absent"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symbol_default_outside_its_own_set_fails_validation() {
+    let param = ENSURE_PARAM.replace("default = :present", "default = :nope");
+    let dir = sample_with_symbol_param(&param, None);
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("default for parameter 'ensure' is not a declared symbol"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symbol_blocks_on_a_non_symbol_param_fail_validation() {
+    let param = ENSURE_PARAM
+        .replace("type = \"symbol\"", "type = \"string\"")
+        .replace("default = :present", "default = \"present\"");
+    let dir = sample_with_symbol_param(&param, None);
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("declares symbol values but its type is string"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn duplicate_symbol_fails_validation() {
+    let param = ENSURE_PARAM.replace(
+        "symbol \"absent\"  { description = \"Remove it\" }",
+        "symbol \"present\" { description = \"Again\" }",
+    );
+    let dir = sample_with_symbol_param(&param, None);
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("duplicate symbol ':present'"),
+        "{stderr}"
+    );
+}
+
+/// Enumeration is opt-in: a symbol param that declares no values keeps
+/// accepting any token, which is what every symbol param did before the
+/// `symbol` block existed.
+#[test]
+fn symbol_param_without_declared_values_stays_open() {
+    let param = "    param \"ensure\" {\n      description = \"Desired state\"\n      \
+                 type = \"symbol\"\n      default = :present\n    }\n";
+    let dir = sample_with_symbol_param(param, Some(":anything_at_all"));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+}
