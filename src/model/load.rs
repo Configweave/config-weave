@@ -865,16 +865,17 @@ fn load_package(
     // Tests sharing a group provision one instance, so every member must
     // agree on what that instance is. (A runtime --image / --template
     // override makes every test uniform and never trips this.)
-    let mut groups: HashMap<&str, &TestTarget> = HashMap::new();
+    let mut groups: HashMap<&str, (&TestTarget, Option<&str>)> = HashMap::new();
     for t in &tests {
         let Some(g) = t.group.as_deref() else {
             continue;
         };
+        let mem = t.memory.as_deref();
         match groups.get(g) {
             None => {
-                groups.insert(g, &t.target);
+                groups.insert(g, (&t.target, mem));
             }
-            Some(first) => {
+            Some((first, first_mem)) => {
                 if **first != t.target {
                     ctx.err(
                         format!(
@@ -882,6 +883,19 @@ fn load_package(
                              another member provisions a {first}; grouped tests share \
                              one instance and must agree",
                             t.name, t.target
+                        ),
+                        t.span,
+                    );
+                }
+                if *first_mem != mem {
+                    ctx.err(
+                        format!(
+                            "test '{}' is in group '{g}' but asks for memory {} while \
+                             another member asks for {}; grouped tests share one \
+                             instance and must agree",
+                            t.name,
+                            mem.unwrap_or("(default)"),
+                            first_mem.unwrap_or("(default)")
                         ),
                         t.span,
                     );
@@ -953,6 +967,7 @@ fn load_test(
             return None;
         }
     };
+    let memory = string_field_optional(block, "memory", ctx).filter(|m| !m.is_empty());
     // Empty `group = ""` reads as ungrouped (its own instance).
     let group = string_field_optional(block, "group", ctx).filter(|g| !g.is_empty());
     let setup = string_field_optional(block, "setup", ctx);
@@ -1161,6 +1176,7 @@ fn load_test(
         name,
         description,
         target,
+        memory,
         group,
         setup,
         verify,

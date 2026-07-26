@@ -6,6 +6,7 @@ test "file_present_converges" {
   image = "debian:12"                   // an OCI image → a vmlab container (linux, seconds)
                                         // …or template = "x86_64/ubuntu-24.04" → a full VM.
                                         // Exactly one of the two is required.
+  memory = "4GiB"                       // optional; instance RAM (containers default to 256MiB)
   group = "files"                       // optional; share one instance with same-group tests
   setup = "..."                         // optional
   verify = "tests/file_present_verify.wscript"   // optional custom assertions

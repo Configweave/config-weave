@@ -14,6 +14,7 @@ Unlike an unprivileged container runtime, it holds a full capability set and its
 | guest OS | Linux, always |
 | requires | an image with a shell; no host container runtime |
 | parallelism | --container-jobs N (default min(cpu, 8)) |
+| memory | 256MiB by default; raise with memory = "4GiB" on the test |
 
 Two measured gotchas: `dnf5` loads its repositories fine in a Fedora container but then wedges for minutes on the transaction itself (use a [VM](../references/entity_vm_instance.md) for real dnf installs), and a test needing a live init system, a reboot or a Windows guest must use a VM.
 

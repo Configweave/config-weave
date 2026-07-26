@@ -217,6 +217,7 @@ fn sync_test(b: &mut Block, doc: &TestDoc, diags: &mut Diags) {
     set_or_insert_field(b, "description", string_literal_expr(&doc.description));
     set_opt_string(b, "image", doc.image.as_deref());
     set_opt_string(b, "template", doc.template.as_deref());
+    set_opt_string(b, "memory", doc.memory.as_deref());
     set_opt_string(b, "group", doc.group.as_deref());
     set_opt_string(b, "setup", doc.setup.as_deref());
     set_opt_string(b, "verify", doc.verify.as_deref());

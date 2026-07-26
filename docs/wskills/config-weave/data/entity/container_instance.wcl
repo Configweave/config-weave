@@ -14,6 +14,7 @@ entity container_instance {
         ["guest OS",      "Linux, always"],
         ["requires",      "an image with a shell; no host container runtime"],
         ["parallelism",   "--container-jobs N (default min(cpu, 8))"],
+        ["memory",        "256MiB by default; raise with memory = \"4GiB\" on the test"],
       ]
     }
     p "Two measured gotchas: `dnf5` loads its repositories fine in a Fedora container but then wedges for minutes on the transaction itself (use a [VM](entity_vm_instance) for real dnf installs), and a test needing a live init system, a reboot or a Windows guest must use a VM."

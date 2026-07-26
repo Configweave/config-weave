@@ -161,11 +161,16 @@ runs each in a disposable **vmlab** instance. vmlab is the only backend
 (the docker/podman one was removed 2026-07-26 — see "Why vmlab only"
 below). Bindings fixed here:
 
-- **Shape.** `test "name" { description, image | template, group?,
-  setup?, verify?, step…, gather… }`. Exactly one of `image` (an OCI
-  ref → a vmlab **container**) or `template` (a vmlab template ref → a
-  full **VM**) is required; neither and both are validation errors that
-  name the fix. Steps mirror
+- **Shape.** `test "name" { description, image | template, memory?,
+  group?, setup?, verify?, step…, gather… }`. Exactly one of `image` (an
+  OCI ref → a vmlab **container**) or `template` (a vmlab template ref →
+  a full **VM**) is required; neither and both are validation errors that
+  name the fix. `memory` is a WCL byte size emitted **unquoted** into the
+  lab file (`memory = 4GiB`; quoting fails vmlab's `std.ByteSize` field)
+  and overrides the instance's RAM — a container defaults to 256MiB,
+  which SQL Server refuses to start under, and guest memory is allocated
+  on demand so raising it for one heavy image costs the light ones
+  nothing. Grouped tests must agree on it. Steps mirror
   playbook steps plus `expect = converge (default) | already_configured
   | error | skip | reboot_required`; gathers carry static `params` and an
   `expect` block of top-level key equality assertions. All test values

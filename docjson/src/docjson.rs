@@ -181,6 +181,9 @@ pub struct TestDoc {
     /// A vmlab template ref, cloned into a full VM.
     #[serde(default, skip_serializing_if = "is_none")]
     pub template: Option<String>,
+    /// Guest RAM override for the instance, e.g. "4GiB".
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub memory: Option<String>,
     #[serde(default, skip_serializing_if = "is_none")]
     pub group: Option<String>,
     #[serde(default, skip_serializing_if = "is_none")]

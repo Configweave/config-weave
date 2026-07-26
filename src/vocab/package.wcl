@@ -82,6 +82,12 @@ type WeaveTestDecl {
   description: utf8
   image: utf8?
   template: utf8?
+  // Guest RAM for the instance, as a WCL byte size ("4GiB", "512MiB").
+  // Omitted = the vmlab default (256MiB for a container, the template's
+  // own sizing for a VM). Guest memory is allocated on demand, so raising
+  // it for a heavy image costs nothing for the light ones. Grouped tests
+  // share an instance and so must agree on it.
+  memory: utf8?
   // Tests sharing a non-empty `group` (within a package) run sequentially
   // inside one shared instance instead of each provisioning its own —
   // amortizing container start / VM boot. They must agree on `image` /

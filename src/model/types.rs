@@ -226,6 +226,9 @@ pub struct TestDecl {
     pub description: String,
     /// The container image or VM template this test provisions.
     pub target: TestTarget,
+    /// Guest RAM override for the instance ("4GiB"); `None` = the vmlab
+    /// default. Grouped tests must agree.
+    pub memory: Option<String>,
     /// Tests sharing a non-empty group (within a package) run in one
     /// shared instance; `None`/empty means the test gets its own.
     pub group: Option<String>,

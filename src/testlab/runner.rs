@@ -131,6 +131,8 @@ const RUN_LABELS: [&str; 3] = ["check", "first apply", "second apply"];
 /// restore output order after parallel execution.
 pub struct GroupSpec<'a> {
     pub target: TestTarget,
+    /// Guest RAM override; grouped tests are validated to agree on it.
+    pub memory: Option<String>,
     pub tests: Vec<(usize, &'a Package, &'a TestDecl)>,
 }
 
@@ -273,7 +275,7 @@ fn run_group(
         machine_kind: kind,
         source: source.clone(),
     });
-    let mut instance = match backend.provision(target, opts.keep) {
+    let mut instance = match backend.provision(target, group.memory.as_deref(), opts.keep) {
         Ok(i) => i,
         Err(d) => {
             fail_all(&mut reports, &d);

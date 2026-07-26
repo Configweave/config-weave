@@ -580,6 +580,7 @@ fn bucket_groups<'a>(
                         group_index.insert(key, groups.len());
                         groups.push(testlab::runner::GroupSpec {
                             target: effective_target(t),
+                            memory: t.memory.clone(),
                             tests: vec![member],
                         });
                     }
@@ -587,6 +588,7 @@ fn bucket_groups<'a>(
             }
             None => groups.push(testlab::runner::GroupSpec {
                 target: effective_target(t),
+                memory: t.memory.clone(),
                 tests: vec![member],
             }),
         }

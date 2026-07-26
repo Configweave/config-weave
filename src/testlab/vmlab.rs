@@ -82,7 +82,12 @@ impl VmlabBackend {
 
     /// Provision a running instance of `target`, ready for `exec`. With
     /// `keep`, automatic teardown is disabled for post-mortem debugging.
-    pub fn provision(&self, target: &TestTarget, keep: bool) -> Result<VmlabInstance, Diag> {
+    pub fn provision(
+        &self,
+        target: &TestTarget,
+        memory: Option<&str>,
+        keep: bool,
+    ) -> Result<VmlabInstance, Diag> {
         // The tempdir's unique suffix doubles as the lab name, keeping
         // concurrent runs out of each other's way in vmlab's registry.
         let dir = tempfile::Builder::new()
@@ -98,8 +103,11 @@ impl VmlabBackend {
             std::fs::create_dir_all(dir.path().join(PAYLOAD_DIR))
                 .map_err(|e| Diag::bare(format!("cannot create the container payload dir: {e}")))?;
         }
-        std::fs::write(dir.path().join("vmlab.wcl"), lab_wcl(&lab_name, target))
-            .map_err(|e| Diag::bare(format!("cannot write the lab file: {e}")))?;
+        std::fs::write(
+            dir.path().join("vmlab.wcl"),
+            lab_wcl(&lab_name, target, memory),
+        )
+        .map_err(|e| Diag::bare(format!("cannot write the lab file: {e}")))?;
 
         let mut instance = VmlabInstance {
             cmd: self.cmd.clone(),
@@ -182,7 +190,11 @@ impl VmlabBackend {
 /// payload directory read-write at [`CONTAINER_MOUNT`] and runs as root
 /// with no entrypoint — the instance exists to be exec'd into, not to run
 /// the image's own process. A VM is a plain clone of the template.
-pub fn lab_wcl(lab_name: &str, target: &TestTarget) -> String {
+pub fn lab_wcl(lab_name: &str, target: &TestTarget, memory: Option<&str>) -> String {
+    // A WCL byte-size literal is unquoted (`memory = 4GiB`).
+    let mem = memory
+        .map(|m| format!("    memory = {m}\n"))
+        .unwrap_or_default();
     let machine = match target {
         // `mode = :idle` keeps the micro-VM up without starting the image's
         // entrypoint; `user = "0:0"` forces root, since the testlab
@@ -190,11 +202,11 @@ pub fn lab_wcl(lab_name: &str, target: &TestTarget) -> String {
         // usual root images, but images like mssql default to non-root).
         TestTarget::Container(image) => format!(
             "  container \"{MACHINE}\" {{\n    image = \"{image}\"\n    \
-             mode  = :idle\n    user  = \"0:0\"\n    nic {{ nat = true }}\n    \
+             mode  = :idle\n    user  = \"0:0\"\n{mem}    nic {{ nat = true }}\n    \
              volume {{ host = \"./{PAYLOAD_DIR}\" target = \"{CONTAINER_MOUNT}\" }}\n  }}\n"
         ),
         TestTarget::Vm(template) => format!(
-            "  vm \"{MACHINE}\" {{\n    template = \"{template}\"\n    \
+            "  vm \"{MACHINE}\" {{\n    template = \"{template}\"\n{mem}    \
              nic {{ nat = true }}\n  }}\n"
         ),
     };
@@ -613,6 +625,7 @@ mod tests {
         let wcl = lab_wcl(
             "cw-test-Ab12",
             &TestTarget::Vm("x86_64/linux-modern".into()),
+            None,
         );
         assert!(wcl.starts_with("import <vmlab.wcl>\n"), "{wcl}");
         assert!(wcl.contains("lab \"cw-test-Ab12\""), "{wcl}");
@@ -627,7 +640,11 @@ mod tests {
 
     #[test]
     fn container_lab_wcl_mounts_the_payload_and_idles_the_image() {
-        let wcl = lab_wcl("cw-test-Ab12", &TestTarget::Container("debian:12".into()));
+        let wcl = lab_wcl(
+            "cw-test-Ab12",
+            &TestTarget::Container("debian:12".into()),
+            None,
+        );
         assert!(wcl.contains("container \"box\""), "{wcl}");
         assert!(wcl.contains("image = \"debian:12\""), "{wcl}");
         // Without :idle the image's own entrypoint would run instead of
@@ -638,6 +655,22 @@ mod tests {
             wcl.contains("volume { host = \"./payload\" target = \"/weave\" }"),
             "{wcl}"
         );
+    }
+
+    #[test]
+    fn memory_is_emitted_as_an_unquoted_byte_size() {
+        let wcl = lab_wcl(
+            "cw-test-Ab12",
+            &TestTarget::Container("mssql:2022".into()),
+            Some("4GiB"),
+        );
+        // A WCL byte size is a literal, not a string — quoting it fails
+        // vmlab's schema ("declared as std.ByteSize but value is utf8").
+        assert!(wcl.contains("memory = 4GiB"), "{wcl}");
+        assert!(!wcl.contains("\"4GiB\""), "{wcl}");
+
+        let vm = lab_wcl("l", &TestTarget::Vm("x86_64/t".into()), Some("8GiB"));
+        assert!(vm.contains("memory = 8GiB"), "{vm}");
     }
 
     #[test]

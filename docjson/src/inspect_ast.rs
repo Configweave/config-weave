@@ -220,6 +220,7 @@ fn extract_test(b: &Block, diags: &mut Diags) -> TestDoc {
         description: req_lit_string(b, "description", &ctx, diags),
         image: opt_lit_string(b, "image", &ctx, diags),
         template: opt_lit_string(b, "template", &ctx, diags),
+        memory: opt_lit_string(b, "memory", &ctx, diags),
         group: opt_lit_string(b, "group", &ctx, diags),
         setup: opt_lit_string(b, "setup", &ctx, diags),
         verify: opt_lit_string(b, "verify", &ctx, diags),
