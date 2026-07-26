@@ -56,8 +56,9 @@ pub fn generate(pb: &Playbook, outdir: &Path, pkg_only: bool) -> Result<usize, D
     Ok(page_count(pb, pkg_only))
 }
 
-/// Serve a generated site with `wcl wdoc serve` (watch-rebuild dev server
-/// with live reload) on the emitted source. Blocks until the server exits.
+/// Serve a generated site with `wcl wdoc serve` on the emitted source. The
+/// dev server watches for `.wcl` changes but rebuilds only when asked
+/// (Enter in its console). Blocks until the server exits.
 pub fn serve(outdir: &Path, addr: Option<&str>) -> Result<(), Diag> {
     let src_path = outdir.join("_weave_docs.wcl");
     let bin = wcl_bin();

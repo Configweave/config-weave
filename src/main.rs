@@ -144,7 +144,7 @@ enum Command {
         playbook_dir: PathBuf,
         outdir: Option<PathBuf>,
         /// After rendering, serve the site with `wcl wdoc serve`
-        /// (watch-rebuild dev server with live reload).
+        /// (dev server; rebuild on demand from its console).
         #[arg(long)]
         serve: bool,
         /// Listen address for --serve (default 127.0.0.1:8080).
