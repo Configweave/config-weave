@@ -7,7 +7,7 @@ Prove a package's resources converge and stay converged using the testlab's thre
 ## Prerequisites
 
 - A package with at least one test block.
-- docker (or podman) available for the default backend.
+- vmlab available on PATH (plus KVM for VM tests).
 
 ## Flowchart
 
@@ -61,6 +61,6 @@ On failure, re-run with `--keep` to leave the instance up (its handle is reporte
 
 - [Test block reference](../references/fact_test_block_fields.md)
 
-- [docker backend](../references/entity_docker_backend.md)
+- [container instance](../references/entity_container_instance.md)
 
 [← Back to SKILL.md](../SKILL.md)

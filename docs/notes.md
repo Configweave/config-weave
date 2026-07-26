@@ -157,10 +157,15 @@ windows 0.6x.
 ## Testlab (`config-weave test` — post-v1 extension)
 
 Packages declare `test` blocks in `package.wcl`; `config-weave test`
-runs each in a disposable backend instance. Bindings fixed here:
+runs each in a disposable **vmlab** instance. vmlab is the only backend
+(the docker/podman one was removed 2026-07-26 — see "Why vmlab only"
+below). Bindings fixed here:
 
-- **Shape.** `test "name" { description, backend = "docker" (default),
-  image, group?, setup?, verify?, step…, gather… }`. Steps mirror
+- **Shape.** `test "name" { description, image | template, group?,
+  setup?, verify?, step…, gather… }`. Exactly one of `image` (an OCI
+  ref → a vmlab **container**) or `template` (a vmlab template ref → a
+  full **VM**) is required; neither and both are validation errors that
+  name the fix. Steps mirror
   playbook steps plus `expect = converge (default) | already_configured
   | error | skip | reboot_required`; gathers carry static `params` and an
   `expect` block of top-level key equality assertions. All test values
@@ -171,8 +176,9 @@ runs each in a disposable backend instance. Bindings fixed here:
 - **Grouping.** A non-empty `group` field puts a test in a shared
   instance: every test in the same package with the same group name runs
   sequentially inside **one** provisioned instance, amortizing container
-  start / VM boot. Grouped tests must agree on `backend` and `image`
-  (validated at load — a group provisions one instance from one image),
+  start / VM boot. Grouped tests must agree on their target — same kind,
+  same ref (validated at load — a group provisions one instance), so a
+  container member and a VM member cannot share a group,
   and they share the instance's OS state with **no reset between them**
   (vmlab has no snapshot verb), so only group tests that target distinct
   state — the three-run protocol still needs each test's own resources to
@@ -199,7 +205,7 @@ runs each in a disposable backend instance. Bindings fixed here:
 
 - **Execution model.** The host copies a config-weave binary matched to
   the instance's guest OS, resolved lazily once an instance reports it
-  (`TestInstance::os()`): linux = `--binary` /
+  (`VmlabInstance::os()`): linux = `--binary` /
   `$CONFIG_WEAVE_TEST_BINARY` → the running exe if it has no
   `PT_INTERP` header → newest static workspace cross-build artifact;
   windows = `--binary-windows` / `$CONFIG_WEAVE_TEST_BINARY_WINDOWS` →
@@ -216,63 +222,97 @@ runs each in a disposable backend instance. Bindings fixed here:
   `sh -c` on linux and `cmd /C` on windows, cd'd into that per-test dir
   (created first — exec has no working directory guarantee), and
   `chmod +x` is linux-only.
-- **In-container protocol.** Two hidden subcommands on the copied
+- **In-instance protocol.** Two hidden subcommands on the copied
   binary: `__gather <dir> <pkg.gatherer> [--params-json …]` prints
   `{"ok":…,"value"|"error":…}`; `__verify <script> [--facts <json>]`
   compiles the script against the host API and runs
   `verify(facts) -> bool` (or `Result[bool, string]`), exit 0/1/2 =
   pass/fail/broken. Verify scripts compile during stage-5 validation
   but only ever execute inside instances.
-- **Backend selection.** Each test's `backend` field (or the global
-  `--backend` override) picks its backend; `cmd_test` discovers every
-  backend the selected tests use once, up front, so a broken
-  environment is exit 2 before any test runs. The
-  `TestBackend`/`TestInstance` traits live in `src/testlab/backend.rs`
-  (`TestBackend: Sync`, so one backend is shared across the parallel
-  group runners); instances report a `GuestOs` the runner derives
-  paths/shell/binary from.
+- **Instance selection.** The declared `image`/`template` is the whole
+  choice — modelled as `model::TestTarget::{Container,Vm}`, which carries
+  the ref and prints as `container debian:12` / `vm x86_64/ubuntu-24.04`
+  in reports and events. `--image REF` / `--template REF` override the
+  ref for tests of the matching kind only; neither can convert a test
+  between kinds, because the two refs name entirely different things.
+  `cmd_test` probes vmlab once, up front, so a broken environment is
+  exit 2 before any test runs. There is no backend trait any more:
+  `VmlabBackend`/`VmlabInstance`/`VmlabLab` are used concretely and
+  instances report a `GuestOs` the runner derives paths/shell/binary from.
 - **Concurrency.** `runner::run_groups` runs independent groups in
-  parallel via scoped `std::thread` workers pulling from per-backend
-  cursors — **separate caps per backend** because VMs cost far more than
-  containers: `--docker-jobs` (default `min(cpu, 8)`) and `--vmlab-jobs`
-  (default 2). Total live instances ≤ docker_cap + vmlab_cap. Within a
+  parallel via scoped `std::thread` workers pulling from per-kind
+  cursors — **separate caps per kind** because VMs cost far more than
+  containers: `--container-jobs` (default `min(cpu, 8)`) and `--vm-jobs`
+  (default 2). Total live instances ≤ container_cap + vm_cap. Within a
   group tests stay sequential (shared state). `--jobs` is unchanged — the
   in-instance engine pool, still forwarded as `--jobs` to each
   check/apply run. Provision/smoke failure errors every test in the
   group; a single test's transport trouble errors only that test and the
   rest of the group proceeds.
-- **Docker backend.** CLI discovery `$CONFIG_WEAVE_CONTAINER_CMD` →
-  `docker` → `podman`; keep-alive via `run -d --entrypoint sleep`;
-  images must contain `sleep` and `sh` (distroless unsupported — the
-  vmlab backend lifts this). One container per group (an ungrouped test
-  is its own one-test group), its tests run sequentially sharing the
-  container's filesystem; `--keep` disables teardown and reports the
-  handle. Guests are always linux.
-- **vmlab backend.** CLI discovery `$CONFIG_WEAVE_VMLAB_CMD` → `vmlab`
-  (probed with `--version`). `image` is a vmlab template ref. Each
-  provision writes a one-VM lab (`vm "box"`, `nic { nat = true }`,
-  template defaults for sizing) into a tempdir whose unique name is the
-  lab name (`cw-test-…`), runs `vmlab up` there, then **polls** `vmlab
-  osinfo box` until the guest agent answers (up to 300s, 3s between
-  tries) — `id == "mswindows"` selects the windows protocol, anything
-  else linux. The poll is required because `vmlab up` only blocks on
-  agent readiness for VMs something *depends on*, and this lab's single
-  VM has no dependents, so a slow (Windows) boot would otherwise hit
-  osinfo's own 30s agent wait. exec = `vmlab exec --timeout 3600 box --
+- **Why vmlab only.** Docker bought fast linux containers at the cost of
+  a second host dependency and a permanently weaker guest: an
+  unprivileged container has no `NET_ADMIN`, no live init and no kernel
+  of its own, which is why whole resource families (nftables/ufw/
+  firewalld, OpenRC, runit, snap, sysvinit `service_state`) were marked
+  "untested by design" in the stdlib. vmlab's `container {}` block runs
+  the *same* OCI images in a micro-VM — measured ~2-4s to ready with the
+  image cached, full capability set, own kernel — so dropping docker cost
+  no speed and lifted every one of those exclusions. Verified on the
+  guest: `CapEff` is the full set, `id -u` is 0, virtiofs preserves the
+  binary's executable bit, and the rootfs is writable.
+- **The backend.** CLI discovery `$CONFIG_WEAVE_VMLAB_CMD` → `vmlab`
+  (probed with `--version`). Each provision writes a one-machine lab into
+  a tempdir whose unique name is the lab name (`cw-test-…`) and runs
+  `vmlab up` there. Teardown = `vmlab destroy` + tempdir removal;
+  `--keep` leaves the lab up and reports its directory so `vmlab exec` /
+  `vmlab container exec` / `vmlab console` work post-mortem. A group
+  provisions **one** instance and runs all its tests inside it
+  sequentially (the big win — boot is paid once per group, not per test).
+- **VM instances (`template`).** `vm "box" { template, nic { nat = true } }`,
+  template defaults for sizing. Readiness **polls** `vmlab osinfo box`
+  until the guest agent answers (up to 300s, 3s between tries); the poll
+  is required because `vmlab up` only blocks on agent readiness for VMs
+  something *depends on*, and this lab's single VM has no dependents, so
+  a slow (Windows) boot would otherwise hit osinfo's own 30s agent wait.
+  `osinfo`'s `id` picks the protocol: **`windows`** (what the vmlab agent
+  reports) or `mswindows` (what the QEMU guest agent reported before
+  vmlab replaced it, still accepted) → windows, anything else → linux.
+  Getting this wrong is silent and nasty — it copies the linux binary
+  into a windows guest, which fails as "not a valid Win32 application" —
+  so `guest_os` is unit-tested. exec = `vmlab exec --timeout 3600 box --
   …` (the CLI propagates the guest exit code); copy = `vmlab cp src
-  box:dest` — `src` is canonicalized to an absolute path first, since
-  vmlab verbs run with the lab tempdir as cwd (creates parent
-  directories); teardown = `vmlab destroy` + tempdir
-  removal; `--keep` leaves the lab up and reports its directory so
-  `vmlab exec`/`console` work post-mortem. A group provisions **one** VM
-  and runs all its tests inside it sequentially (the big win — VM boot is
-  paid once per group, not per test); `--vmlab-jobs` bounds how many VMs
-  boot at once. Windows guests need the guest agent in the template
-  (vmlab requires this anyway for readiness) and `setup` written for
-  `cmd /C`.
+  box:dest`, with `src` canonicalized to an absolute path first since
+  vmlab verbs run with the lab tempdir as cwd. Windows guests need the
+  guest agent in the template and `setup` written for `cmd /C`.
+- **Container instances (`image`).** `container "box" { image, mode = :idle,
+  user = "0:0", nic { nat = true }, volume { host = "./payload" target =
+  "/weave" } }`. `mode = :idle` is what `--entrypoint sleep` used to be —
+  the instance exists to be exec'd into, not to run the image's own
+  process — and `user = "0:0"` forces root for images that default
+  otherwise (mssql). exec = `vmlab container exec box --timeout 3600 --
+  …`. **copy_in is a host-side file write**, not a guest transfer:
+  everything the runner copies lives under `/weave` (see `GuestPaths`),
+  so the bind-mounted `payload/` directory *is* the guest's `/weave`,
+  modes included. That also sidesteps vmlab's `cp`/`osinfo` being
+  VM-only verbs (`lab.vm()` rejects a container by name), so the testlab
+  needs no change in vmlab. Readiness probes a trivial `exec` rather than
+  `osinfo`, and the guest is linux by construction.
+- **Choosing one.** `image` for anything that is really just a userland
+  (file/package/config resources) — seconds to run. `template` when the
+  test needs a real init system, its own kernel, a reboot, or a windows
+  guest. Three measured gotchas. `dnf5` loads its repositories fine in a
+  Fedora *container* but then wedges for many minutes on the transaction
+  itself (the same command in a Fedora VM takes seconds). The
+  `x86_64/debian-13` template in the local store has no working vmlab
+  agent — use `x86_64/ubuntu-24.04` for apt-family VM tests. And the
+  guest agent runs execs with **`HOME=/`**, not the target user's home
+  (docker exec used to set `HOME=/root`), so a resource that defaults a
+  path to `$HOME` writes somewhere unexpected — tests should pass `home`
+  (or the equivalent) explicitly instead of leaning on the ambient
+  environment. That one cost a green `linux_ssh` run.
 - **Reporting.** Exit 0 = all passed, 1 = any failed/error, 2 =
   validation/environment. `--json` emits a schema-stable object with
-  `mode: "test"`; the runner parses in-container reports with the same
+  `mode: "test"`; the runner parses in-instance reports with the same
   `JsonRunReport` types that produce them.
 - **Scenarios (scripted, multi-stage, over a declared vmlab lab).** The
   three-run protocol can't reboot or network multiple machines, which a
@@ -282,8 +322,8 @@ runs each in a disposable backend instance. Bindings fixed here:
   IPs, DC-as-DNS, depends_on), and `script` is a driver
   (`fn run(lab: Lab) -> bool`/`Result[bool,string]`) that runs
   **host-side** against the live lab via the `testlab` wscript host module
-  (`src/hostapi/testlab.rs`): `Lab`/`Machine` opaque handles over the
-  `TestLab`/`TestInstance` traits. The handles hold `Rc<RefCell<LabState>>`
+  (`src/hostapi/testlab.rs`): `Lab`/`Machine` opaque handles over
+  `VmlabLab`/`VmlabInstance`. The handles hold `Rc<RefCell<LabState>>`
   — wscript opaque values are `Rc`-backed and single-threaded, so scenarios
   run on one thread (no `Arc` needed, unlike vmlab's own scripting which
   bridges to tokio). **Why a declared lab, not script-provisioned:** the
@@ -299,9 +339,11 @@ runs each in a disposable backend instance. Bindings fixed here:
   block), copies the binary in once per machine, runs `config-weave
   {check,apply} --json`, and returns the step's status; `machine.reboot()`
   = `vmlab vm restart` + osinfo re-poll (900s, DC promotion finalizes on
-  boot). New trait methods `reboot`/`wait_ready` and
-  `TestBackend::open_lab`/`TestLab` carry this; the single-VM `box` path is
-  unchanged (its instance owns lab teardown, lab machines don't). Scenarios
+  boot). `VmlabInstance::reboot`/`wait_ready` and
+  `VmlabBackend::open_lab`/`VmlabLab` carry this; the single-machine `box`
+  path is unchanged (its instance owns lab teardown, lab machines don't).
+  Scenario machines are always VMs — the author's own `vmlab.wcl` declares
+  them, and reboots and multi-machine topologies are the point. Scenarios
   compile in stage-5 against `hostapi::scenario_context()` (host API +
   `testlab`), so `validate` catches a broken driver; at run time they
   execute sequentially after the parallel test groups, each owning its lab.

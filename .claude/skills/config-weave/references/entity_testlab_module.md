@@ -19,7 +19,7 @@ stage-5 validation against this module.
 
 - [Scenarios](../references/concept_scenarios.md)
 
-- [vmlab backend](../references/entity_vmlab_backend.md)
+- [VM instance](../references/entity_vm_instance.md)
 
 - [Host API](../references/concept_host_api.md)
 

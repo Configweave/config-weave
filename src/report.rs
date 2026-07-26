@@ -395,8 +395,8 @@ pub fn test_plain(report: &TestRunReport) -> String {
             t.outcome.as_str(),
             t.package,
             t.name,
-            t.backend,
-            t.image,
+            t.machine_kind,
+            t.source,
             t.duration.as_secs_f64()
         );
         if let Some(kept) = &t.kept {
@@ -426,8 +426,8 @@ pub fn test_rich(report: &TestRunReport) -> String {
             "  {colour}{ic}{RESET} {:<40} {:<7} {DIM}{} {} {:.1}s{RESET}",
             format!("{}:{}", t.package, t.name),
             t.outcome.as_str(),
-            t.backend,
-            t.image,
+            t.machine_kind,
+            t.source,
             t.duration.as_secs_f64()
         );
         if let Some(kept) = &t.kept {
@@ -479,8 +479,8 @@ pub fn test_json(report: &TestRunReport) -> String {
     struct JsonTest<'a> {
         package: &'a str,
         name: &'a str,
-        backend: &'a str,
-        image: &'a str,
+        machine_kind: &'a str,
+        source: &'a str,
         outcome: &'static str,
         duration_secs: f64,
         steps: Vec<JsonTestStep<'a>>,
@@ -509,8 +509,8 @@ pub fn test_json(report: &TestRunReport) -> String {
             .map(|t| JsonTest {
                 package: &t.package,
                 name: &t.name,
-                backend: &t.backend,
-                image: &t.image,
+                machine_kind: t.machine_kind,
+                source: &t.source,
                 outcome: t.outcome.as_str(),
                 duration_secs: t.duration.as_secs_f64(),
                 steps: t

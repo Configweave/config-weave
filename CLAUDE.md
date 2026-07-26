@@ -21,11 +21,13 @@ validation pipeline, sequential + parallel execution with concurrency
 classes, full host API (Linux + Windows modules), three output modes with
 NDJSON file logging, and authoring/docs (`wscripti`, `init`, `docs`).
 Post-v1: `config-weave test` (the testlab, `src/testlab/`) runs package
-convergence tests in disposable instances — docker containers (linux) or
-vmlab VMs (linux + windows guests, shelling out to the sibling `../vmlab`
-CLI) — with `test` blocks in package.wcl, a three-run idempotence
-protocol, `just test-lab` for the docker-gated suite, and `just
-test-lab-vm` for a vmlab smoke. `config-weave docs` renders a static
+convergence tests in disposable vmlab instances (shelling out to the
+sibling `../vmlab` CLI) — a `test` block declares either `image` (an OCI
+ref, run as a vmlab container: linux, seconds) or `template` (a vmlab
+template ref, run as a full VM: linux or windows, real init, reboots).
+vmlab is the only backend; the docker/podman one was removed 2026-07-26.
+Plus a three-run idempotence protocol, `just test-lab` for the
+vmlab-gated suite, and `just test-lab-vm` for a full-VM smoke. `config-weave docs` renders a static
 wdoc site from the playbook/package metadata (emits `_weave_docs.wcl`,
 shells out to `wcl wdoc build`; `--serve` hands off to `wcl wdoc serve`)
 — the sibling `../config-weave-pkgs` stdlib repo uses it for its package

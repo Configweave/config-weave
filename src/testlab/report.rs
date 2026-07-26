@@ -53,8 +53,10 @@ pub struct VerifyResult {
 pub struct TestReport {
     pub package: String,
     pub name: String,
-    pub backend: String,
-    pub image: String,
+    /// "container" or "vm" — which kind of vmlab instance ran it.
+    pub machine_kind: &'static str,
+    /// The OCI image or vmlab template it was provisioned from.
+    pub source: String,
     pub outcome: TestOutcome,
     pub steps: Vec<TestStepResult>,
     pub gathers: Vec<TestGatherResult>,

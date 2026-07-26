@@ -25,7 +25,7 @@ The driver exports `fn run(lab: Lab) -> bool` (or `Result[bool, string]`) and ru
 
 - [Three-run protocol](../references/concept_three_run_protocol.md)
 
-- [vmlab backend](../references/entity_vmlab_backend.md)
+- [VM instance](../references/entity_vm_instance.md)
 
 - [testlab](../references/entity_testlab_module.md)
 

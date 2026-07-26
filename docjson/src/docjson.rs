@@ -174,10 +174,13 @@ pub struct TestDoc {
     #[serde(default, rename = "_orig", skip_serializing_if = "is_none")]
     pub orig: Option<String>,
     pub description: String,
-    /// None = schema default ("docker").
+    /// An OCI image ref, run as a vmlab container. Exactly one of
+    /// `image`/`template` is set.
     #[serde(default, skip_serializing_if = "is_none")]
-    pub backend: Option<String>,
-    pub image: String,
+    pub image: Option<String>,
+    /// A vmlab template ref, cloned into a full VM.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub template: Option<String>,
     #[serde(default, skip_serializing_if = "is_none")]
     pub group: Option<String>,
     #[serde(default, skip_serializing_if = "is_none")]

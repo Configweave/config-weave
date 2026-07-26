@@ -862,26 +862,26 @@ fn load_package(
         }
     }
 
-    // Tests sharing a group provision one instance from one image on one
-    // backend, so every member must agree on both. (Runtime --backend /
-    // --image overrides make every test uniform and never trip this.)
-    let mut groups: HashMap<&str, (&str, &str)> = HashMap::new();
+    // Tests sharing a group provision one instance, so every member must
+    // agree on what that instance is. (A runtime --image / --template
+    // override makes every test uniform and never trips this.)
+    let mut groups: HashMap<&str, &TestTarget> = HashMap::new();
     for t in &tests {
         let Some(g) = t.group.as_deref() else {
             continue;
         };
         match groups.get(g) {
             None => {
-                groups.insert(g, (t.backend.as_str(), t.image.as_str()));
+                groups.insert(g, &t.target);
             }
-            Some((backend, image)) => {
-                if *backend != t.backend || *image != t.image {
+            Some(first) => {
+                if **first != t.target {
                     ctx.err(
                         format!(
-                            "test '{}' is in group '{g}' but its backend/image \
-                             ({}/{}) differ from another member's ({backend}/{image}); \
-                             grouped tests share one instance and must agree",
-                            t.name, t.backend, t.image
+                            "test '{}' is in group '{g}' but provisions a {} while \
+                             another member provisions a {first}; grouped tests share \
+                             one instance and must agree",
+                            t.name, t.target
                         ),
                         t.span,
                     );
@@ -926,14 +926,33 @@ fn load_test(
         );
     }
     let description = string_field(block, "description", ctx).unwrap_or_default();
-    let backend = string_field_optional(block, "backend", ctx).unwrap_or_else(|| "docker".into());
-    if backend != "docker" && backend != "vmlab" {
-        ctx.err(
-            format!("unknown test backend '{backend}' (supported: 'docker', 'vmlab')"),
-            span,
-        );
-    }
-    let image = string_field(block, "image", ctx)?;
+    // Exactly one of `image` (an OCI ref → a vmlab container) or
+    // `template` (a vmlab template ref → a full VM). Neither is the common
+    // authoring slip, both is ambiguous — reject each with the fix named.
+    let image = string_field_optional(block, "image", ctx).filter(|s| !s.is_empty());
+    let template = string_field_optional(block, "template", ctx).filter(|s| !s.is_empty());
+    let target = match (image, template) {
+        (Some(i), None) => TestTarget::Container(i),
+        (None, Some(t)) => TestTarget::Vm(t),
+        (None, None) => {
+            ctx.err(
+                "test declares neither 'image' nor 'template'; set image = \"debian:12\" \
+                 to run in a container, or template = \"x86_64/ubuntu-24.04\" to run in a VM"
+                    .to_string(),
+                span,
+            );
+            return None;
+        }
+        (Some(_), Some(_)) => {
+            ctx.err(
+                "test declares both 'image' and 'template'; they are alternatives — \
+                 'image' runs an OCI image as a container, 'template' clones a vmlab VM"
+                    .to_string(),
+                span,
+            );
+            return None;
+        }
+    };
     // Empty `group = ""` reads as ungrouped (its own instance).
     let group = string_field_optional(block, "group", ctx).filter(|g| !g.is_empty());
     let setup = string_field_optional(block, "setup", ctx);
@@ -1141,8 +1160,7 @@ fn load_test(
     Some(TestDecl {
         name,
         description,
-        backend,
-        image,
+        target,
         group,
         setup,
         verify,

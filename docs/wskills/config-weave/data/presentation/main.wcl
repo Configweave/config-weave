@@ -104,12 +104,12 @@ presentation intro {
     }
     pres_slide backends {
       title = "Disposable instances"
-      unit  = docker_backend
+      unit  = container_instance
       body {
-        p "**docker** — fast Linux containers for the everyday loop."
-        p "**vmlab** — real VMs when you need Windows or systemd."
+        p "`image = \"debian:12\"` — an OCI image in a micro-VM, ready in seconds."
+        p "`template = \"x86_64/ubuntu-24.04\"` — a full VM for init, reboots, Windows."
       }
-      speaker_notes = "Same tests, two backends. Scenarios script multi-VM stories the three-run protocol can't express."
+      speaker_notes = "One backend, vmlab, two kinds of instance. Containers for the everyday loop; VMs when the test needs a real system. Scenarios script multi-VM stories the three-run protocol can't express."
     }
   }
 

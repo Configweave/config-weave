@@ -7,8 +7,8 @@ concept container {
     p <<PROSE
 A container is a grouping block inside a play, used purely for organisation and
 documentation — it is nestable. A `condition` set on a container applies to **all
-of its child steps**. Containers do not change scheduling; they are not a docker
-container (see the [Docker backend](entity_docker_backend) for that).
+of its child steps**. Containers do not change scheduling; they are not an OCI
+container (see [container instance](entity_container_instance) for that).
 PROSE
   }
 }

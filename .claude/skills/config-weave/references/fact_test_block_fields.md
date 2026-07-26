@@ -3,8 +3,9 @@
 ```wcl
 test "file_present_converges" {
   description = "file_present creates the file and is idempotent"
-  backend = "docker"                    // default; or "vmlab" (QEMU/KVM VMs)
-  image = "debian:12"                   // required; vmlab: template ref like "x86_64/linux-modern"
+  image = "debian:12"                   // an OCI image → a vmlab container (linux, seconds)
+                                        // …or template = "x86_64/ubuntu-24.04" → a full VM.
+                                        // Exactly one of the two is required.
   group = "files"                       // optional; share one instance with same-group tests
   setup = "..."                         // optional
   verify = "tests/file_present_verify.wscript"   // optional custom assertions
@@ -17,7 +18,7 @@ test "file_present_converges" {
   }
 
   gather "os" {                         // gatherer invocation with assertions
-    description = "OS facts inside the container"
+    description = "OS facts inside the instance"
     from = "os_info"
     expect {                            // top-level key equality assertions
       family = "linux"
@@ -41,5 +42,9 @@ Verify scripts: `fn verify(facts: Value) -> bool` (or `Result[bool, string]`) ru
 - [Three-run protocol](../references/concept_three_run_protocol.md)
 
 - [Step expectation table](../references/fact_step_expectation_table.md)
+
+- [container instance](../references/entity_container_instance.md)
+
+- [VM instance](../references/entity_vm_instance.md)
 
 [← Back to SKILL.md](../SKILL.md)

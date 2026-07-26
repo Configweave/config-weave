@@ -68,7 +68,7 @@ config-weave list ./my-playbook
 
 ## config-weave test
 
-Run package convergence tests in disposable instances (docker containers or vmlab VMs) using the three-run protocol.
+Run package convergence tests in disposable vmlab instances (containers or VMs) using the three-run protocol.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -77,11 +77,11 @@ Run package convergence tests in disposable instances (docker containers or vmla
 
 | Switch | Value | Description |
 | --- | --- | --- |
-| --backend | NAME | Override every test's backend (docker or vmlab). |
-| --image | IMAGE | Run every test against this image instead of its own. |
+| --image | IMAGE | Run every container test against this OCI image instead of its own. |
+| --template | REF | Run every VM test against this vmlab template instead of its own. |
 | --keep | — | Leave instances running for post-mortem debugging (handle reported). |
 | --binary | PATH | Static linux config-weave binary to copy into instances. |
-| --binary-windows | PATH | Windows config-weave binary for windows vmlab guests. |
+| --binary-windows | PATH | Windows config-weave binary for windows guests. |
 
 ```console
 config-weave test ./my-playbook core:file_present_converges

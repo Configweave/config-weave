@@ -1,19 +1,17 @@
-//! The backend seam: anything that can run a disposable instance of an
-//! image, with just enough surface for the test runner — copy files in,
-//! exec argv, tear down. Docker (linux containers) and vmlab (linux or
-//! windows VMs) implement it.
+//! Shared vocabulary for the testlab's instances: what OS is inside, what
+//! one exec produced, and how an external tool reattaches to a live
+//! instance. The instances themselves are vmlab machines — see `vmlab`.
 
 use std::path::Path;
 use std::process::{Command, Output};
 
 use crate::diag::Diag;
 
-/// Find a working CLI for a backend: the `$env_var` override if set and
-/// non-empty, otherwise each of `candidates`, probed with `probe_arg`
-/// (e.g. `version` / `--version`) so a CLI present but non-functional —
-/// say, a container tool with no running daemon — also fails here. The
-/// first that exits zero wins; otherwise `not_found` (which should name
-/// the tried candidates and the override env var) becomes the error.
+/// Find a working CLI: the `$env_var` override if set and non-empty,
+/// otherwise each of `candidates`, probed with `probe_arg` (e.g. `version`
+/// / `--version`) so a CLI present but non-functional also fails here. The
+/// first that exits zero wins; otherwise `not_found` (which should name the
+/// tried candidates and the override env var) becomes the error.
 pub fn discover_cli(
     env_var: &str,
     default_candidates: &[&str],
@@ -74,83 +72,14 @@ pub struct ExecOutput {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AttachInfo {
-    Docker {
-        /// Full container id (the 64-hex form `docker run -d` printed).
-        container_id: String,
-        image: String,
-        /// The discovered CLI ("docker" or "podman") to exec/clean with.
-        cli: String,
-    },
     Vmlab {
         /// The synthesized lab root; vmlab verbs run with this as cwd.
         lab_dir: String,
         lab: String,
         machine: String,
-        template: String,
+        /// "vm" or "container" — which vmlab verb group reaches it.
+        machine_kind: &'static str,
+        /// The template (VMs) or OCI image (containers) it was made from.
+        source: String,
     },
-}
-
-/// `Sync` so a single backend can be shared by reference across the
-/// parallel group-runner threads; both implementations are plain structs
-/// (`cmd`, `quiet`) that already qualify.
-pub trait TestBackend: Sync {
-    /// Backend id as written in `backend = "…"` test fields.
-    fn name(&self) -> &'static str;
-
-    /// Provision a running instance of `image`, ready for `exec`. With
-    /// `keep`, automatic teardown is disabled for post-mortem debugging.
-    fn provision(&self, image: &str, keep: bool) -> Result<Box<dyn TestInstance>, Diag>;
-
-    /// Open a declared lab for a scripted scenario from `lab_dir` (a
-    /// directory holding the backend's lab definition). VMs are brought up
-    /// by name on demand via `TestLab::machine`. With `keep`, teardown is
-    /// disabled for post-mortem debugging. Only the vmlab backend supports
-    /// this.
-    fn open_lab(&self, lab_dir: &Path, keep: bool) -> Result<Box<dyn TestLab>, Diag>;
-}
-
-/// A declared multi-machine lab driven by a scenario script. Its VMs are
-/// defined up front in the lab file; `machine` brings one up by name and
-/// returns a handle; teardown removes the whole lab.
-pub trait TestLab {
-    /// Bring up the declared machine `name` (idempotent if already up) and
-    /// return a handle on it.
-    fn machine(&self, name: &str) -> Result<Box<dyn TestInstance>, Diag>;
-
-    /// Human-readable handle for `--keep` messages.
-    fn handle(&self) -> String;
-
-    /// Tear the whole lab down; no-op when kept or already gone.
-    fn teardown(&mut self) -> Result<(), Diag>;
-}
-
-pub trait TestInstance {
-    /// The instance's guest operating system.
-    fn os(&self) -> GuestOs;
-
-    /// Copy a host file or directory tree to `dest` inside the instance,
-    /// creating parent directories.
-    fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag>;
-
-    /// Run argv inside the instance. The working directory is
-    /// unspecified — the runner always passes absolute paths.
-    fn exec(&self, argv: &[&str]) -> Result<ExecOutput, Diag>;
-
-    /// Reboot the instance and wait until it is ready for `exec` again.
-    /// Only the vmlab backend supports this; docker returns an error.
-    fn reboot(&self) -> Result<(), Diag>;
-
-    /// Block until the instance is ready for `exec`, up to `secs`. vmlab
-    /// polls the guest agent; docker is always ready (a no-op).
-    fn wait_ready(&self, secs: u64) -> Result<(), Diag>;
-
-    /// Human-readable handle for `--keep` messages.
-    fn handle(&self) -> String;
-
-    /// Raw attach/cleanup coordinates for external tooling (the
-    /// `instance_ready` event of `--events-ndjson`).
-    fn attach_info(&self) -> AttachInfo;
-
-    /// Tear down the instance; no-op when kept or already gone.
-    fn teardown(&mut self) -> Result<(), Diag>;
 }

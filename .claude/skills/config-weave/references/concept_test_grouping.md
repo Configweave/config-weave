@@ -9,7 +9,7 @@ shared instance — amortizing container start, and especially VM boot.
 
 Grouped tests must agree on `backend` and `image`, and they \*\*share OS state with
 no reset between them\*\*, so use distinct paths/state per test. Independent groups
-run **in parallel**, throttled by `--docker-jobs` / `--vmlab-jobs` (see
+run **in parallel**, throttled by `--container-jobs` / `--vm-jobs` (see
 [testlab flags](../references/fact_testlab_flags.md)).
 
 

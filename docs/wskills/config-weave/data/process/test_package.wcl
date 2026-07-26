@@ -1,8 +1,8 @@
 procedure test_package {
   title    = "Test a package for idempotence"
   purpose  = "Prove a package's resources converge and stay converged using the testlab's three-run protocol in a disposable instance."
-  preconditions = ["A package with at least one test block.", "docker (or podman) available for the default backend."]
-  related  = [testlab, three_run_protocol, test_block_fields, docker_backend]
+  preconditions = ["A package with at least one test block.", "vmlab available on PATH (plus KVM for VM tests)."]
+  related  = [testlab, three_run_protocol, test_block_fields, container_instance]
   audience = :both
 
   step declare { n = 1

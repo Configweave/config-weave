@@ -187,16 +187,45 @@ pub struct ParamDecl {
     pub default: Option<DynValue>,
 }
 
+/// What a test is provisioned into. Both kinds are vmlab machines; the
+/// distinction is what vmlab clones them from, which in turn decides
+/// cost, guest OS range and how much of a real system is available.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TestTarget {
+    /// An OCI image run as a vmlab container (a micro-VM around the image).
+    /// Linux only, starts in seconds — the default for most tests.
+    Container(String),
+    /// A vmlab template cloned into a full VM. Linux or windows, and the
+    /// only kind with a real init system, its own kernel, and reboots.
+    Vm(String),
+}
+
+impl TestTarget {
+    /// The image or template reference, whichever this is.
+    pub fn reference(&self) -> &str {
+        match self {
+            TestTarget::Container(r) | TestTarget::Vm(r) => r,
+        }
+    }
+}
+
+impl std::fmt::Display for TestTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TestTarget::Container(r) => write!(f, "container {r}"),
+            TestTarget::Vm(r) => write!(f, "vm {r}"),
+        }
+    }
+}
+
 /// An isolated convergence test declared in `package.wcl`, executed by
-/// `config-weave test` inside a disposable backend instance.
+/// `config-weave test` inside a disposable vmlab instance.
 #[derive(Debug)]
 pub struct TestDecl {
     pub name: String,
     pub description: String,
-    /// Backend selector; only "docker" exists in v1 ("vmlab" is planned).
-    pub backend: String,
-    /// Backend-specific image reference (docker image ref in v1).
-    pub image: String,
+    /// The container image or VM template this test provisions.
+    pub target: TestTarget,
     /// Tests sharing a non-empty group (within a package) run in one
     /// shared instance; `None`/empty means the test gets its own.
     pub group: Option<String>,

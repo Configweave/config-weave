@@ -22,14 +22,15 @@ use crate::convert::dyn_to_json;
 use crate::diag::Diag;
 use crate::engine::status::StepStatus;
 use crate::hostapi::testlab::{Lab, LabState, lab_value};
-use crate::model::{Expect, Package, Playbook, ScenarioDecl, TestDecl};
+use crate::model::{Expect, Package, Playbook, ScenarioDecl, TestDecl, TestTarget};
 use crate::report::JsonRunReport;
 
-use super::backend::{GuestOs, TestBackend, TestInstance};
+use super::backend::GuestOs;
 use super::events::{TestEvent, TestEventSink, TestPhase, tail_chunk};
 use super::report::{TestGatherResult, TestOutcome, TestReport, TestStepResult, VerifyResult};
 use super::synth;
 use super::synth::BinaryResolver;
+use super::vmlab::{VmlabBackend, VmlabInstance};
 
 pub struct RunnerOptions {
     /// Resolves the static binary copied into instances, per guest OS.
@@ -41,10 +42,10 @@ pub struct RunnerOptions {
     /// Receives every lifecycle event; the human progress renderer and
     /// the `--events-ndjson` emitter are both sinks (see testlab::events).
     pub sink: TestEventSink,
-    /// Max docker groups (containers) running at once.
-    pub docker_cap: usize,
-    /// Max vmlab groups (VMs) running at once — kept small, VMs are heavy.
-    pub vmlab_cap: usize,
+    /// Max container groups running at once.
+    pub container_cap: usize,
+    /// Max VM groups running at once — kept small, VMs are heavy.
+    pub vm_cap: usize,
 }
 
 /// The in-instance locations everything runs from, per guest OS. Forward
@@ -124,49 +125,49 @@ fn expectations(e: Expect) -> [Option<StepStatus>; 3] {
 
 const RUN_LABELS: [&str; 3] = ["check", "first apply", "second apply"];
 
-/// One shared-instance unit of work: a backend, the image to provision,
-/// and the ordered tests that run sequentially inside that one instance.
-/// The `usize` in each tuple is the test's index in the original
-/// selection — used to restore output order after parallel execution.
+/// One shared-instance unit of work: what to provision, and the ordered
+/// tests that run sequentially inside that one instance. The `usize` in
+/// each tuple is the test's index in the original selection — used to
+/// restore output order after parallel execution.
 pub struct GroupSpec<'a> {
-    pub backend: &'a dyn TestBackend,
-    pub image: String,
+    pub target: TestTarget,
     pub tests: Vec<(usize, &'a Package, &'a TestDecl)>,
 }
 
 /// Run every group, with independent groups executing in parallel under
-/// per-backend caps — containers and VMs throttled separately, since VMs
-/// cost far more host resources. Returns one report per test, restored to
-/// the original selection order.
+/// per-kind caps — containers and VMs throttled separately, since VMs cost
+/// far more host resources. Returns one report per test, restored to the
+/// original selection order.
 pub fn run_groups(
     pb: &Playbook,
     groups: Vec<GroupSpec<'_>>,
+    backend: &VmlabBackend,
     opts: &RunnerOptions,
 ) -> Vec<TestReport> {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // Bucket groups by backend so each cap throttles only its own kind of
-    // instance; both buckets drain concurrently. The enumeration index is
+    // Bucket groups by machine kind so each cap throttles only its own kind
+    // of instance; both buckets drain concurrently. The enumeration index is
     // the group id events refer to.
-    let mut docker: Vec<(usize, &GroupSpec)> = Vec::new();
-    let mut vmlab: Vec<(usize, &GroupSpec)> = Vec::new();
+    let mut containers: Vec<(usize, &GroupSpec)> = Vec::new();
+    let mut vms: Vec<(usize, &GroupSpec)> = Vec::new();
     for (gid, g) in groups.iter().enumerate() {
-        match g.backend.name() {
-            "vmlab" => vmlab.push((gid, g)),
-            _ => docker.push((gid, g)),
+        match g.target {
+            TestTarget::Container(_) => containers.push((gid, g)),
+            TestTarget::Vm(_) => vms.push((gid, g)),
         }
     }
 
     // Cursors live for the whole scope; the per-bucket workers share them.
-    let docker_cursor = AtomicUsize::new(0);
-    let vmlab_cursor = AtomicUsize::new(0);
+    let container_cursor = AtomicUsize::new(0);
+    let vm_cursor = AtomicUsize::new(0);
     let results: Mutex<Vec<(usize, TestReport)>> = Mutex::new(Vec::new());
 
     std::thread::scope(|s| {
         for (bucket, cap, cursor) in [
-            (&docker, opts.docker_cap, &docker_cursor),
-            (&vmlab, opts.vmlab_cap, &vmlab_cursor),
+            (&containers, opts.container_cap, &container_cursor),
+            (&vms, opts.vm_cap, &vm_cursor),
         ] {
             let workers = cap.max(1).min(bucket.len());
             for _ in 0..workers {
@@ -177,7 +178,7 @@ pub fn run_groups(
                         let Some((gid, group)) = bucket.get(i) else {
                             break;
                         };
-                        let reports = run_group(pb, *gid, group, opts);
+                        let reports = run_group(pb, *gid, group, backend, opts);
                         results.lock().unwrap().extend(reports);
                     }
                 });
@@ -188,6 +189,15 @@ pub fn run_groups(
     let mut out = results.into_inner().unwrap();
     out.sort_by_key(|(idx, _)| *idx);
     out.into_iter().map(|(_, r)| r).collect()
+}
+
+/// The instance kind a target provisions, as it appears in reports and
+/// events.
+fn machine_kind(target: &TestTarget) -> &'static str {
+    match target {
+        TestTarget::Container(_) => "container",
+        TestTarget::Vm(_) => "vm",
+    }
 }
 
 /// A short label for a group's progress/diagnostic lines.
@@ -209,10 +219,12 @@ fn run_group(
     pb: &Playbook,
     gid: usize,
     group: &GroupSpec,
+    backend: &VmlabBackend,
     opts: &RunnerOptions,
 ) -> Vec<(usize, TestReport)> {
-    let backend = group.backend;
-    let image = group.image.clone();
+    let target = &group.target;
+    let kind = machine_kind(target);
+    let source = target.reference().to_string();
     let label = group_label(group);
 
     // One report per test, defaulting to Passed.
@@ -225,8 +237,8 @@ fn run_group(
                 TestReport {
                     package: pkg.name.clone(),
                     name: test.name.clone(),
-                    backend: backend.name().to_string(),
-                    image: image.clone(),
+                    machine_kind: kind,
+                    source: source.clone(),
                     outcome: TestOutcome::Passed,
                     steps: Vec::new(),
                     gathers: Vec::new(),
@@ -258,17 +270,17 @@ fn run_group(
     (opts.sink)(TestEvent::GroupProvisioning {
         group: gid,
         label: label.clone(),
-        backend: backend.name().to_string(),
-        image: image.clone(),
+        machine_kind: kind,
+        source: source.clone(),
     });
-    let mut instance = match backend.provision(&image, opts.keep) {
+    let mut instance = match backend.provision(target, opts.keep) {
         Ok(i) => i,
         Err(d) => {
             fail_all(&mut reports, &d);
             return reports;
         }
     };
-    if let Err(d) = prepare_instance(instance.as_mut(), opts, &image) {
+    if let Err(d) = prepare_instance(&mut instance, opts, target) {
         fail_all(&mut reports, &d);
         if !opts.keep {
             let _ = instance.teardown();
@@ -278,8 +290,8 @@ fn run_group(
     (opts.sink)(TestEvent::InstanceReady {
         group: gid,
         label: label.clone(),
-        backend: backend.name().to_string(),
-        image: image.clone(),
+        machine_kind: kind,
+        source: source.clone(),
         attach: instance.attach_info(),
     });
 
@@ -301,22 +313,20 @@ fn run_group(
         let t0 = Instant::now();
         let slug = test_slug(*idx, &pkg.name, &test.name);
         match synth::synthesize(pb, pkg, test) {
-            Ok(synth) => {
-                match drive_one(test, instance.as_mut(), opts, &ctx, &synth, &slug, report) {
-                    Ok(()) => {
-                        if report.steps.iter().any(|s| !s.failures.is_empty())
-                            || report.gathers.iter().any(|g| !g.failures.is_empty())
-                            || report.verify.as_ref().is_some_and(|v| !v.passed)
-                        {
-                            report.outcome = TestOutcome::Failed;
-                        }
-                    }
-                    Err(d) => {
-                        report.outcome = TestOutcome::Error;
-                        report.error = Some(d.message);
+            Ok(synth) => match drive_one(test, &mut instance, opts, &ctx, &synth, &slug, report) {
+                Ok(()) => {
+                    if report.steps.iter().any(|s| !s.failures.is_empty())
+                        || report.gathers.iter().any(|g| !g.failures.is_empty())
+                        || report.verify.as_ref().is_some_and(|v| !v.passed)
+                    {
+                        report.outcome = TestOutcome::Failed;
                     }
                 }
-            }
+                Err(d) => {
+                    report.outcome = TestOutcome::Error;
+                    report.error = Some(d.message);
+                }
+            },
             Err(d) => {
                 report.outcome = TestOutcome::Error;
                 report.error = Some(d.message);
@@ -387,25 +397,26 @@ impl TestCtx<'_> {
 /// Copy the binary into the shared bin path and smoke-test it. Done once
 /// per group, before any test runs.
 fn prepare_instance(
-    instance: &mut dyn TestInstance,
+    instance: &mut VmlabInstance,
     opts: &RunnerOptions,
-    image: &str,
+    target: &TestTarget,
 ) -> Result<(), Diag> {
     let os = instance.os();
     let bin = GuestPaths::bin_for(os);
     let binary = opts.binaries.resolve(os)?;
 
     instance.copy_in(&binary, bin)?;
-    // docker cp preserves the executable bit; chmod defensively for
-    // backends/umasks that do not. Best-effort: images without chmod
-    // surface at the smoke test below. Windows has no execute bit.
+    // The container payload mount and vmlab's file transfer both preserve
+    // the executable bit; chmod defensively anyway for odd umasks.
+    // Best-effort: images without chmod surface at the smoke test below.
+    // Windows has no execute bit.
     if os == GuestOs::Linux {
         let _ = instance.exec(&["chmod", "+x", bin]);
     }
     let smoke = instance.exec(&[bin, "version"])?;
     if smoke.exit_code != 0 {
         return Err(Diag::bare(format!(
-            "the test binary failed to run inside '{image}' (exit {}): {} — host/image \
+            "the test binary failed to run inside {target} (exit {}): {} — host/guest \
              architecture mismatch?",
             smoke.exit_code,
             tail(&smoke.stderr)
@@ -419,7 +430,7 @@ fn prepare_instance(
 /// gathers, the three-run protocol, and verify.
 fn drive_one(
     test: &TestDecl,
-    instance: &mut dyn TestInstance,
+    instance: &mut VmlabInstance,
     opts: &RunnerOptions,
     ctx: &TestCtx,
     synthesized: &synth::SynthesizedTest,
@@ -451,7 +462,7 @@ fn drive_one(
         ctx.phase(TestPhase::Setup);
         let script;
         let argv: [&str; 3] = match os {
-            // The exec working directory is backend-dependent; pin it.
+            // The exec working directory is unspecified; pin it.
             GuestOs::Linux => {
                 script = format!("cd {} || exit 1\n{setup}", paths.dir);
                 ["sh", "-c", &script]
@@ -484,7 +495,7 @@ fn drive_one(
 /// collect results into the facts map handed to verify().
 fn run_gathers(
     test: &TestDecl,
-    instance: &mut dyn TestInstance,
+    instance: &mut VmlabInstance,
     ctx: &TestCtx,
     results: &mut Vec<TestGatherResult>,
     paths: &GuestPaths,
@@ -562,7 +573,7 @@ fn run_gathers(
 /// The three engine runs and the expectation table.
 fn run_steps(
     test: &TestDecl,
-    instance: &mut dyn TestInstance,
+    instance: &mut VmlabInstance,
     opts: &RunnerOptions,
     ctx: &TestCtx,
     results: &mut Vec<TestStepResult>,
@@ -670,7 +681,7 @@ fn run_steps(
 /// gathered facts.
 fn run_verify(
     test: &TestDecl,
-    instance: &mut dyn TestInstance,
+    instance: &mut VmlabInstance,
     ctx: &TestCtx,
     facts: &serde_json::Map<String, serde_json::Value>,
     paths: &GuestPaths,
@@ -750,11 +761,11 @@ fn tail(s: &str) -> String {
 
 // ------------------------------------------------------------- scenarios
 
-/// One scenario to run: its package, declaration, and resolved backend.
+/// One scenario to run: its package and declaration. Scenarios always
+/// drive a declared vmlab lab of VMs.
 pub struct ScenarioUnit<'a> {
     pub package: &'a Package,
     pub scenario: &'a ScenarioDecl,
-    pub backend: &'a dyn TestBackend,
 }
 
 /// How a scenario's `run` ended.
@@ -768,9 +779,11 @@ enum ScenarioEnd {
 /// Run each scenario sequentially (each may bring up several machines, so
 /// they are not parallelized). Returns one `TestReport` per scenario,
 /// reusing the test report shape for uniform formatting.
+#[allow(clippy::too_many_arguments)]
 pub fn run_scenarios(
     pb: &Rc<Playbook>,
     scenarios: Vec<ScenarioUnit<'_>>,
+    backend: &VmlabBackend,
     bin_linux: Option<std::path::PathBuf>,
     bin_windows: Option<std::path::PathBuf>,
     keep: bool,
@@ -791,8 +804,15 @@ pub fn run_scenarios(
                 test: u.scenario.name.clone(),
                 group: None,
             });
-            let report =
-                run_one_scenario(pb, &u, bin_linux.clone(), bin_windows.clone(), keep, quiet);
+            let report = run_one_scenario(
+                pb,
+                &u,
+                backend,
+                bin_linux.clone(),
+                bin_windows.clone(),
+                keep,
+                quiet,
+            );
             sink(TestEvent::TestFinished {
                 package: report.package.clone(),
                 test: report.name.clone(),
@@ -808,6 +828,7 @@ pub fn run_scenarios(
 fn run_one_scenario(
     pb: &Rc<Playbook>,
     u: &ScenarioUnit<'_>,
+    backend: &VmlabBackend,
     bin_linux: Option<std::path::PathBuf>,
     bin_windows: Option<std::path::PathBuf>,
     keep: bool,
@@ -817,8 +838,8 @@ fn run_one_scenario(
     let mut report = TestReport {
         package: u.package.name.clone(),
         name: u.scenario.name.clone(),
-        backend: u.backend.name().to_string(),
-        image: "(scenario)".to_string(),
+        machine_kind: "vm",
+        source: "(scenario)".to_string(),
         outcome: TestOutcome::Passed,
         steps: Vec::new(),
         gathers: Vec::new(),
@@ -828,7 +849,7 @@ fn run_one_scenario(
         duration: Duration::default(),
     };
 
-    let lab = match u.backend.open_lab(&u.scenario.lab, keep) {
+    let lab = match backend.open_lab(&u.scenario.lab, keep) {
         Ok(l) => l,
         Err(d) => {
             report.outcome = TestOutcome::Error;

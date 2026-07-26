@@ -120,12 +120,14 @@ pub(crate) const PACKAGE: &str = r#"package "example" {
     }
   }
 
-  // Run with `config-weave test <playbook-dir>` (needs docker or
-  // podman). Steps default to expect = "converge": check reports
-  // not_configured, apply succeeds, and a second apply proves
-  // idempotence. Other expectations: already_configured, error, skip,
-  // reboot_required. The optional verify script runs inside the
-  // container for custom assertions.
+  // Run with `config-weave test <playbook-dir>` (needs vmlab). `image`
+  // runs the test in a container built from an OCI image; swap it for
+  // `template = "x86_64/ubuntu-24.04"` when the test needs a real init
+  // system, its own kernel, a reboot, or a windows guest. Steps default
+  // to expect = "converge": check reports not_configured, apply
+  // succeeds, and a second apply proves idempotence. Other expectations:
+  // already_configured, error, skip, reboot_required. The optional
+  // verify script runs inside the instance for custom assertions.
   test "greeting_converges" {
     description = "file_present creates the greeting file and is idempotent"
     image = "debian:12"

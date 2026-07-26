@@ -1,0 +1,21 @@
+entity container_instance {
+  name     = "container instance"
+  kind     = :test_instance
+  summary  = "A test that declares `image` — the OCI image booted in a vmlab micro-VM. Linux, ready in seconds."
+  related  = [testlab, vm_instance, testlab_backend_requirements, testlab_flags]
+  audience = :both
+  body {
+    p "A `test` block declaring `image` runs in a vmlab **container**: the OCI image you name, booted inside a micro-VM. It is Linux-only and ready in seconds, which makes it the default choice for anything that is really just a userland — file, package and config resources."
+    p "Unlike an unprivileged container runtime, it holds a full capability set and its own kernel, so resources that need `NET_ADMIN` or a real kernel (nftables, ufw, firewalld) work here too."
+    table {
+      header = ["Field", "Value"]
+      rows = [
+        ["declared with", "image = \"debian:12\""],
+        ["guest OS",      "Linux, always"],
+        ["requires",      "an image with a shell; no host container runtime"],
+        ["parallelism",   "--container-jobs N (default min(cpu, 8))"],
+      ]
+    }
+    p "Two measured gotchas: `dnf5` loads its repositories fine in a Fedora container but then wedges for minutes on the transaction itself (use a [VM](entity_vm_instance) for real dnf installs), and a test needing a live init system, a reboot or a Windows guest must use a VM."
+  }
+}

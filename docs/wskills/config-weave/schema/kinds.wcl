@@ -27,7 +27,7 @@ symbol_set EntityKind {
 
   // config-weave additions.
   host_module     // a wscript host-API module the engine registers (fs, shell, …)
-  test_backend    // a testlab instance backend (docker, vmlab)
+  test_instance   // a kind of disposable testlab instance (container, vm)
   value_type      // a registered wscript value type (ComObject, Lab, Machine, …)
 }
 

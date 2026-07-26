@@ -70,19 +70,22 @@ type WeaveParamDecl {
 }
 
 // An isolated convergence test for this package, run by `config-weave
-// test` inside a disposable backend instance: backend "docker" (linux
-// containers; image = a container image ref) or "vmlab" (linux or
-// windows VMs; image = a vmlab template ref like "x86_64/linux-modern").
+// test` inside a disposable vmlab instance. Declare exactly one of:
+//   image    — an OCI image ref ("debian:12"), run as a vmlab container;
+//              linux only, seconds to start, the default choice.
+//   template — a vmlab template ref ("x86_64/ubuntu-24.04"), run as a
+//              full VM; linux or windows, and the only option for
+//              anything needing a real init, kernel or reboot.
 @block("test")
 type WeaveTestDecl {
   @inline(0) name: utf8
   description: utf8
-  @default("docker") backend: utf8
-  image: utf8
+  image: utf8?
+  template: utf8?
   // Tests sharing a non-empty `group` (within a package) run sequentially
   // inside one shared instance instead of each provisioning its own —
-  // amortizing container start / VM boot. They must agree on `backend`
-  // and `image`, and they share the instance's OS state (no reset between
+  // amortizing container start / VM boot. They must agree on `image` /
+  // `template`, and they share the instance's OS state (no reset between
   // them), so only group tests that target distinct state.
   group: utf8?
   setup: utf8?

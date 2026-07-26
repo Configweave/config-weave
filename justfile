@@ -37,25 +37,25 @@ check:
 sample: build
 	cargo run -q -- validate testdata/sample
 
-# Docker-backed testlab suite: cross-builds the static binary the tests
-# copy into containers, then runs the #[ignore]-gated tests. Needs
-# docker (or podman) and `cross`.
-[group('test'), doc("Docker-backed testlab suite (#[ignore]-gated; needs docker + cross)")]
+# Testlab suite: cross-builds the static binary the tests copy into
+# instances, then runs the #[ignore]-gated tests. They provision vmlab
+# containers, so this needs vmlab and `cross`.
+[group('test'), doc("Testlab suite in vmlab containers (#[ignore]-gated; needs vmlab + cross)")]
 test-lab:
 	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-unknown-linux-musl
 	CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
 		cargo test --test testlab -- --ignored
 
-# vmlab-backed testlab smoke: cross-builds the static binary, then runs
-# every package test in disposable VMs cloned from the given template.
-# Needs vmlab, KVM, and a built template (see ../vmlab).
-[group('test'), doc("vmlab-backed testlab smoke in disposable VMs (needs vmlab + KVM + template)")]
+# Testlab smoke in full VMs: cross-builds the static binary, then runs
+# every VM package test against the given template. Needs vmlab, KVM, and
+# a built template (see ../vmlab).
+[group('test'), doc("Testlab smoke in disposable VMs (needs vmlab + KVM + template)")]
 test-lab-vm dir='../config-weave-pkgs' template='x86_64/ubuntu-24.04': build
 	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-unknown-linux-musl
-	CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
-		target/debug/config-weave test {{dir}} --backend vmlab --image {{template}}
+	target/debug/config-weave test {{dir}} --template {{template}} \
+		--binary target-cross/x86_64-unknown-linux-musl/release/config-weave
 
 # Run the windows_domain AD scenario (full DC lifecycle over real reboots).
 # Heavy: provisions several windows-server-2025 VMs. Needs `cross`, vmlab, KVM,
@@ -70,13 +70,13 @@ test-ad: build
 	target/debug/config-weave test ../config-weave-pkgs windows_domain:ad_matrix \
 		--binary target-cross/x86_64-unknown-linux-musl/release/config-weave \
 		--binary-windows target-cross/x86_64-pc-windows-gnu/release/config-weave.exe \
-		--vmlab-jobs 1
+		--vm-jobs 1
 
 # Build config-weave and run the sibling standard package library checks.
-# Each test runs on its own declared backend, so this needs ../config-weave-pkgs,
-# `cross`, docker (or podman) for the linux/docker tests, and vmlab + KVM + a
-# built windows template for the vmlab/windows tests.
-[group('test'), doc("Run the sibling standard package library checks on their declared backends")]
+# Every test provisions a vmlab instance — a container for `image` tests, a
+# VM for `template` ones — so this needs ../config-weave-pkgs, `cross`,
+# vmlab + KVM, and a built windows template for the windows tests.
+[group('test'), doc("Run the sibling standard package library checks in vmlab instances")]
 test-pkgs: build
 	test -d ../config-weave-pkgs
 	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \

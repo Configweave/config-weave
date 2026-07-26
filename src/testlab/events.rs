@@ -23,8 +23,10 @@ pub struct PlannedTest {
     /// Index into the run's group list; `None` for scenarios, which run
     /// sequentially after the groups.
     pub group: Option<usize>,
-    pub backend: String,
-    pub image: String,
+    /// "container" or "vm".
+    pub machine_kind: &'static str,
+    /// The OCI image or vmlab template it provisions from.
+    pub source: String,
 }
 
 /// The phase a test just entered. The three engine runs mirror the
@@ -67,17 +69,17 @@ pub enum TestEvent {
     GroupProvisioning {
         group: usize,
         label: String,
-        backend: String,
-        image: String,
+        machine_kind: &'static str,
+        source: String,
     },
     /// The instance is up and smoke-tested; `attach` carries what a
-    /// troubleshooting session (docker exec / VNC) or an external
-    /// cleanup after a kill needs.
+    /// troubleshooting session (`vmlab container exec` / `vmlab console`)
+    /// or an external cleanup after a kill needs.
     InstanceReady {
         group: usize,
         label: String,
-        backend: String,
-        image: String,
+        machine_kind: &'static str,
+        source: String,
         attach: AttachInfo,
     },
     TestStarted {
@@ -179,9 +181,14 @@ pub fn ndjson_sink() -> TestEventSink {
 pub fn human_sink() -> TestEventSink {
     Arc::new(|event| {
         let line = match &event {
-            TestEvent::GroupProvisioning { label, image, .. } => {
-                Some(format!("⟳ [{label}] provisioning ({image})"))
-            }
+            TestEvent::GroupProvisioning {
+                label,
+                machine_kind,
+                source,
+                ..
+            } => Some(format!(
+                "⟳ [{label}] provisioning ({machine_kind} {source})"
+            )),
             TestEvent::Phase {
                 package,
                 test,
@@ -232,18 +239,21 @@ mod tests {
         let ev = TestEvent::InstanceReady {
             group: 0,
             label: "core:basic".into(),
-            backend: "docker".into(),
-            image: "debian:12".into(),
-            attach: AttachInfo::Docker {
-                container_id: "a".repeat(64),
-                image: "debian:12".into(),
-                cli: "docker".into(),
+            machine_kind: "container",
+            source: "debian:12".into(),
+            attach: AttachInfo::Vmlab {
+                lab_dir: "/tmp/cw-test-ab12".into(),
+                lab: "cw-test-ab12".into(),
+                machine: "box".into(),
+                machine_kind: "container",
+                source: "debian:12".into(),
             },
         };
         let v = serde_json::to_value(&ev).unwrap();
         assert_eq!(v["event"], "instance_ready");
-        assert_eq!(v["attach"]["kind"], "docker");
-        assert_eq!(v["attach"]["container_id"].as_str().unwrap().len(), 64);
+        assert_eq!(v["attach"]["kind"], "vmlab");
+        assert_eq!(v["attach"]["machine_kind"], "container");
+        assert_eq!(v["attach"]["machine"], "box");
     }
 
     #[test]

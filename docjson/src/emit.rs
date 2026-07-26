@@ -215,8 +215,8 @@ fn sync_params(parent: &mut Block, docs: &[ParamDoc], diags: &mut Diags) {
 fn sync_test(b: &mut Block, doc: &TestDoc, diags: &mut Diags) {
     set_label(b, 0, string_literal_expr(&doc.name));
     set_or_insert_field(b, "description", string_literal_expr(&doc.description));
-    set_opt_string(b, "backend", doc.backend.as_deref());
-    set_or_insert_field(b, "image", string_literal_expr(&doc.image));
+    set_opt_string(b, "image", doc.image.as_deref());
+    set_opt_string(b, "template", doc.template.as_deref());
     set_opt_string(b, "group", doc.group.as_deref());
     set_opt_string(b, "setup", doc.setup.as_deref());
     set_opt_string(b, "verify", doc.verify.as_deref());

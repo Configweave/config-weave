@@ -1,14 +1,15 @@
 fact testlab_backend_requirements {
-  title    = "Testlab backend requirements"
-  related  = [docker_backend, vmlab_backend, scenarios]
+  title    = "Testlab instance requirements"
+  related  = [container_instance, vm_instance, scenarios]
   audience = :both
   body {
+    p "`config-weave test` shells out to the sibling `vmlab` CLI for every instance, so vmlab and KVM are the only host requirements — there is no container runtime to install."
     table {
-      header = ["Backend", "Requirement"]
+      header = ["Instance", "Requirement"]
       rows = [
-        ["docker", "images must contain `sleep` and `sh` (distroless unsupported — use vmlab)"],
-        ["vmlab", "templates must ship the QEMU guest agent; each group gets a throwaway one-VM lab"],
-        ["vmlab (Windows scenarios)", "guests must be Server 2019 / Windows 10 or newer"],
+        ["container (`image`)", "an OCI image with a shell; pulled by vmlab, run in a micro-VM"],
+        ["vm (`template`)", "the template must ship the vmlab guest agent; each group gets a throwaway one-VM lab"],
+        ["vm (Windows)", "guests must be Server 2019 / Windows 10 or newer"],
       ]
     }
   }

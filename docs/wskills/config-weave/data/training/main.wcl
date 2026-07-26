@@ -193,18 +193,18 @@ lesson prove_it_in_the_testlab {
   summary = "Declare a test block and let the three-run protocol prove convergence in a disposable instance."
   objectives = [
     "Declare a `test` block with an image and static steps",
-    "Run the three-run protocol in a docker instance",
+    "Run the three-run protocol in a disposable instance",
     "Debug a failing test with --keep",
   ]
   prerequisites = [write_a_package]
-  related = [testlab, three_run_protocol, test_package, test_block_fields, docker_backend, testlab_flags]
+  related = [testlab, three_run_protocol, test_package, test_block_fields, container_instance, testlab_flags]
   body {
-    p "A `test` block in `package.wcl` names an `image` and one or more static steps (no variable references). `config-weave test` boots a disposable instance — a docker container by default, a vmlab VM when the test needs a real machine — copies the binary and a synthesized playbook in, and runs the three-run protocol: **check** (must report not configured), **apply** (must converge), **apply again in a fresh process** (must change nothing)."
+    p "A `test` block in `package.wcl` names an `image` (an OCI image, run as a vmlab container) or a `template` (a vmlab template, run as a full VM) plus one or more static steps (no variable references). `config-weave test` boots a disposable instance, copies the binary and a synthesized playbook in, and runs the three-run protocol: **check** (must report not configured), **apply** (must converge), **apply again in a fresh process** (must change nothing)."
     p "Run 2 catches resources that don't converge; run 3 catches the subtler bug — state that only looks converged to the process that created it. Filter with `pkg` or `pkg:test`, and keep a failing instance alive with `--keep` to shell in and inspect."
   }
-  exercise converge_in_docker {
+  exercise converge_in_an_instance {
     title     = "Test your package end-to-end"
-    task      = "Add a test for your `dir_present` resource and run it in a docker instance."
+    task      = "Add a test for your `dir_present` resource and run it in a disposable instance."
     code_lang = "wcl"
     code      = <<'WCL'
 // in pkgs/mypkg/package.wcl
@@ -218,7 +218,7 @@ test "dir_present_converges" {
   }
 }
 WCL
-    expected = "`config-weave test ./my-playbook mypkg` (docker running, static linux binary via `--binary` if your dev build is dynamic) reports the test passed and exits 0."
+    expected = "`config-weave test ./my-playbook mypkg` (vmlab installed, static linux binary via `--binary` if your dev build is dynamic) reports the test passed and exits 0."
     hint     = "Unqualified `resource` refs in a test resolve to the declaring package — `dir_present`, not `mypkg.dir_present`."
   }
   exercise break_it {

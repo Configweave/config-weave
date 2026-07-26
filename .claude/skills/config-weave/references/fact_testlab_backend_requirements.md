@@ -1,16 +1,18 @@
-# Testlab backend requirements
+# Testlab instance requirements
 
-| Backend | Requirement |
+`config-weave test` shells out to the sibling `vmlab` CLI for every instance, so vmlab and KVM are the only host requirements — there is no container runtime to install.
+
+| Instance | Requirement |
 | --- | --- |
-| docker | images must contain `sleep` and `sh` (distroless unsupported — use vmlab) |
-| vmlab | templates must ship the QEMU guest agent; each group gets a throwaway one-VM lab |
-| vmlab (Windows scenarios) | guests must be Server 2019 / Windows 10 or newer |
+| container (`image`) | an OCI image with a shell; pulled by vmlab, run in a micro-VM |
+| vm (`template`) | the template must ship the vmlab guest agent; each group gets a throwaway one-VM lab |
+| vm (Windows) | guests must be Server 2019 / Windows 10 or newer |
 
 ## Related
 
-- [docker backend](../references/entity_docker_backend.md)
+- [container instance](../references/entity_container_instance.md)
 
-- [vmlab backend](../references/entity_vmlab_backend.md)
+- [VM instance](../references/entity_vm_instance.md)
 
 - [Scenarios](../references/concept_scenarios.md)
 

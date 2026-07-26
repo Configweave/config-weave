@@ -1,0 +1,22 @@
+entity vm_instance {
+  name     = "VM instance"
+  kind     = :test_instance
+  summary  = "A test that declares `template` — a full QEMU/KVM VM cloned from a vmlab template. Linux or Windows, real init, reboots."
+  related  = [testlab, container_instance, scenarios, testlab_module, testlab_backend_requirements]
+  audience = :both
+  body {
+    p "A `test` block declaring `template` runs in a full **VM** cloned from a vmlab template. It is the only kind with a real init system, its own kernel and the ability to reboot, and the only one that can run Windows guests. [Scenarios](concept_scenarios) always use VMs."
+    table {
+      header = ["Field", "Value"]
+      rows = [
+        ["declared with",  "template = \"x86_64/ubuntu-24.04\""],
+        ["guest OS",       "Linux or Windows, detected from the guest agent"],
+        ["requires",       "the template must ship the vmlab guest agent"],
+        ["instance",       "each group gets a throwaway one-VM lab"],
+        ["parallelism",    "--vm-jobs N (default 2 — VMs are heavy)"],
+        ["Windows guests", "Server 2019 / Windows 10 or newer"],
+      ]
+    }
+    p "Reach for a VM when the test needs systemd/OpenRC/runit to actually be running, a reboot, or Windows. A fresh Windows clone costs several minutes on its first boot, so group Windows tests together."
+  }
+}

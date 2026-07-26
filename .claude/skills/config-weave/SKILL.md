@@ -160,13 +160,13 @@ _Registered everywhere; runtime-error off Windows._
 
 ### Testing & the testlab
 
-_Proving package convergence in disposable docker containers or vmlab VMs._
+_Proving package convergence in disposable vmlab containers or VMs._
 - [Testlab](references/concept_testlab.md)
 - [Three-run protocol](references/concept_three_run_protocol.md)
 - [Grouping tests into one instance](references/concept_test_grouping.md)
 - [Scenarios](references/concept_scenarios.md)
-- [docker backend](references/entity_docker_backend.md)
-- [vmlab backend](references/entity_vmlab_backend.md)
+- [container instance](references/entity_container_instance.md)
+- [VM instance](references/entity_vm_instance.md)
 - [testlab](references/entity_testlab_module.md)
 
 #### Test reference
@@ -176,7 +176,7 @@ _The test block, the expectation table, flags, exit codes and backend requiremen
 - [Step expectation table](references/fact_step_expectation_table.md)
 - [config-weave test flags](references/fact_testlab_flags.md)
 - [config-weave test exit codes](references/fact_testlab_exit_codes.md)
-- [Testlab backend requirements](references/fact_testlab_backend_requirements.md)
+- [Testlab instance requirements](references/fact_testlab_backend_requirements.md)
 
 ### Task runbooks
 

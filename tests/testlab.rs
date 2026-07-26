@@ -1,7 +1,7 @@
 //! Testlab gate tests: `test` blocks in package.wcl validate (or fail
-//! with the right diagnostics), the in-container protocol subcommands
-//! work on the host, and — docker-gated, `--ignored` — the full
-//! `config-weave test` flow runs real containers.
+//! with the right diagnostics), the in-instance protocol subcommands
+//! work on the host, and — vmlab-gated, `--ignored` — the full
+//! `config-weave test` flow runs real instances.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -213,25 +213,35 @@ fn invalid_expect_fails() {
 }
 
 #[test]
-fn unknown_backend_fails() {
+fn a_test_with_neither_image_nor_template_fails() {
+    let dir = fixture_with(|s| s.replace("image = \"debian:12\"", ""));
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 2);
+    assert!(
+        stderr.contains("neither 'image' nor 'template'"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_test_with_both_image_and_template_fails() {
     let dir = fixture_with(|s| {
         s.replace(
             "image = \"debian:12\"",
-            "backend = \"chroot\"\n    image = \"debian:12\"",
+            "image = \"debian:12\"\n    template = \"x86_64/ubuntu-24.04\"",
         )
     });
     let (code, _, stderr) = validate(dir.path());
     assert_eq!(code, 2);
-    assert!(stderr.contains("unknown test backend 'chroot'"), "{stderr}");
-    assert!(stderr.contains("'docker', 'vmlab'"), "{stderr}");
+    assert!(stderr.contains("both 'image' and 'template'"), "{stderr}");
 }
 
 #[test]
-fn vmlab_backend_is_accepted_by_validation() {
+fn a_vm_template_is_accepted_by_validation() {
     let dir = fixture_with(|s| {
         s.replace(
             "image = \"debian:12\"",
-            "backend = \"vmlab\"\n    image = \"x86_64/linux-modern\"",
+            "template = \"x86_64/linux-modern\"",
         )
     });
     let (code, _, stderr) = validate(dir.path());
@@ -249,6 +259,32 @@ fn fixture_with_group_sibling(sibling: &str) -> tempfile::TempDir {
         )
         .replace("  test \"converges\" {", &inject)
     })
+}
+
+#[test]
+fn group_mixing_a_container_and_a_vm_fails() {
+    // One instance per group, so a container member and a VM member
+    // cannot share it.
+    let dir = fixture_with_group_sibling(
+        r#"  test "sibling" {
+    description = "Same group, but a VM"
+    template = "x86_64/ubuntu-24.04"
+    group = "g"
+
+    step "create" {
+      description = "Create a marker file"
+      resource = "file_present"
+      properties {
+        path = "/var/tmp/sib.txt"
+        content = "hi"
+      }
+    }
+  }"#,
+    );
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 2);
+    assert!(stderr.contains("group 'g'"), "{stderr}");
+    assert!(stderr.contains("must agree"), "{stderr}");
 }
 
 #[test]
@@ -278,7 +314,7 @@ fn group_with_mismatched_image_fails() {
 }
 
 #[test]
-fn group_with_matching_backend_and_image_validates() {
+fn group_with_matching_image_validates() {
     let dir = fixture_with_group_sibling(
         r#"  test "sibling" {
     description = "Same group, same image"
@@ -447,9 +483,9 @@ fn duplicate_test_name_fails() {
     assert!(stderr.contains("duplicate test 'converges'"), "{stderr}");
 }
 
-// ------------------------------------------------- in-container protocol
+// -------------------------------------------------- in-instance protocol
 // `__gather` and `__verify` are what the testlab runner execs inside the
-// container; both are host-runnable, so they test without docker.
+// instance; both are host-runnable, so they test without vmlab.
 
 #[test]
 fn gather_one_prints_value_json() {
@@ -610,24 +646,11 @@ fn test_with_bad_filter_lists_available() {
 }
 
 #[test]
-fn test_with_unknown_backend_override_exits_2() {
+fn without_a_vmlab_cli_the_run_exits_2() {
+    // Discovery is up front, so a missing vmlab fails fast with one clear
+    // diagnostic instead of erroring every test.
     let dir = tempfile::tempdir().unwrap();
     write_fixture(dir.path());
-    let (code, _, stderr) = run(&["test", dir.path().to_str().unwrap(), "--backend", "chroot"]);
-    assert_eq!(code, 2);
-    assert!(stderr.contains("unknown test backend 'chroot'"), "{stderr}");
-}
-
-#[test]
-fn vmlab_backend_without_a_cli_exits_2() {
-    // A vmlab test selects the vmlab backend; with discovery pointed at
-    // a nonexistent CLI, the run fails fast with one clear diagnostic.
-    let dir = fixture_with(|s| {
-        s.replace(
-            "image = \"debian:12\"",
-            "backend = \"vmlab\"\n    image = \"x86_64/linux-modern\"",
-        )
-    });
     let (code, _, stderr) = run_with_env(
         &["test", dir.path().to_str().unwrap()],
         &[("CONFIG_WEAVE_VMLAB_CMD", "/nonexistent/vmlabctl")],
@@ -637,14 +660,14 @@ fn vmlab_backend_without_a_cli_exits_2() {
     assert!(stderr.contains("vmlab"), "{stderr}");
 }
 
-// ------------------------------------------------------------ docker-gated
-// The real thing: containers, three engine runs, verify scripts. Run via
-// `just test-lab`, which cross-builds the musl artifact and points
-// CONFIG_WEAVE_TEST_BINARY at it. `#[ignore]` keeps `just test`
-// docker-free; each test also skips with a message when the binary or a
-// container CLI is missing.
+// ------------------------------------------------------------- vmlab-gated
+// The real thing: vmlab container instances, three engine runs, verify
+// scripts. Run via `just test-lab`, which cross-builds the musl artifact
+// and points CONFIG_WEAVE_TEST_BINARY at it. `#[ignore]` keeps `just
+// test` host-independent; each test also skips with a message when the
+// binary or vmlab is missing.
 
-/// The static binary for in-container runs, or a skip message.
+/// The static binary for in-instance runs, or a skip message.
 fn lab_binary() -> Option<String> {
     match std::env::var("CONFIG_WEAVE_TEST_BINARY") {
         Ok(p) if Path::new(&p).is_file() => Some(p),
@@ -659,18 +682,17 @@ fn lab_binary() -> Option<String> {
     }
 }
 
-fn docker_available() -> bool {
-    for cmd in ["docker", "podman"] {
-        if Command::new(cmd)
-            .arg("version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            return true;
-        }
+fn vmlab_available() -> bool {
+    let cmd = std::env::var("CONFIG_WEAVE_VMLAB_CMD").unwrap_or_else(|_| "vmlab".into());
+    if Command::new(&cmd)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return true;
     }
-    eprintln!("skipping: no working docker/podman");
+    eprintln!("skipping: no working vmlab CLI ({cmd})");
     false
 }
 
@@ -681,10 +703,10 @@ fn run_lab(dir: &Path, binary: &str, extra: &[&str]) -> (i32, String, String) {
 }
 
 #[test]
-#[ignore = "needs docker and a static binary (just test-lab)"]
+#[ignore = "needs vmlab and a static binary (just test-lab)"]
 fn lab_converge_test_passes() {
     let Some(binary) = lab_binary() else { return };
-    if !docker_available() {
+    if !vmlab_available() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -706,10 +728,10 @@ fn lab_converge_test_passes() {
 }
 
 #[test]
-#[ignore = "needs docker and a static binary (just test-lab)"]
+#[ignore = "needs vmlab and a static binary (just test-lab)"]
 fn lab_grouped_tests_share_one_instance() {
     let Some(binary) = lab_binary() else { return };
-    if !docker_available() {
+    if !vmlab_available() {
         return;
     }
     // Two tests in group "shared": the first creates /var/tmp/tlab.txt, the
@@ -811,10 +833,10 @@ fn verify(facts: Value) -> Result[bool, string] {
 }
 
 #[test]
-#[ignore = "needs docker and a static binary (just test-lab)"]
+#[ignore = "needs vmlab and a static binary (just test-lab)"]
 fn lab_expected_error_test_passes() {
     let Some(binary) = lab_binary() else { return };
-    if !docker_available() {
+    if !vmlab_available() {
         return;
     }
     // file_present errors on an empty path; expect = "error" makes that
@@ -849,10 +871,10 @@ fn lab_expected_error_test_passes() {
 }
 
 #[test]
-#[ignore = "needs docker and a static binary (just test-lab)"]
+#[ignore = "needs vmlab and a static binary (just test-lab)"]
 fn lab_non_idempotent_resource_fails_second_apply() {
     let Some(binary) = lab_binary() else { return };
-    if !docker_available() {
+    if !vmlab_available() {
         return;
     }
     // The signature regression test: apply works but check never
@@ -917,10 +939,10 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
 }
 
 #[test]
-#[ignore = "needs docker and a static binary (just test-lab)"]
+#[ignore = "needs vmlab and a static binary (just test-lab)"]
 fn lab_setup_preconfigures_state() {
     let Some(binary) = lab_binary() else { return };
-    if !docker_available() {
+    if !vmlab_available() {
         return;
     }
     // setup writes the file beforehand; expect = "already_configured"
@@ -956,10 +978,10 @@ fn lab_setup_preconfigures_state() {
 }
 
 #[test]
-#[ignore = "needs docker and a static binary (just test-lab)"]
-fn lab_keep_leaves_a_container() {
+#[ignore = "needs vmlab and a static binary (just test-lab)"]
+fn lab_keep_leaves_an_instance() {
     let Some(binary) = lab_binary() else { return };
-    if !docker_available() {
+    if !vmlab_available() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
@@ -970,14 +992,23 @@ fn lab_keep_leaves_a_container() {
         serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
     assert_eq!(code, 0, "{stdout}{stderr}");
     let kept = v["tests"][0]["kept"].as_str().expect(&stdout);
-    // "container <id> (image debian:12)"
-    let id = kept.split_whitespace().nth(1).unwrap();
-    let inspect = Command::new("docker")
-        .args(["inspect", id])
-        .output()
-        .unwrap();
-    assert!(inspect.status.success(), "kept container should exist");
-    let _ = Command::new("docker").args(["rm", "-f", id]).output();
+    // `container "box" in lab <name> at <lab dir> from debian:12`
+    let lab_dir = kept
+        .split(" at ")
+        .nth(1)
+        .and_then(|rest| rest.split(" from ").next())
+        .unwrap_or_else(|| panic!("unexpected kept handle: {kept}"));
+    assert!(
+        Path::new(lab_dir).join("vmlab.wcl").is_file(),
+        "kept instance should leave its lab behind at {lab_dir}"
+    );
+    // The point of --keep is that we clean up, not the runner.
+    let vmlab = std::env::var("CONFIG_WEAVE_VMLAB_CMD").unwrap_or_else(|_| "vmlab".into());
+    let _ = Command::new(vmlab)
+        .arg("destroy")
+        .current_dir(lab_dir)
+        .output();
+    let _ = std::fs::remove_dir_all(lab_dir);
 }
 
 #[test]

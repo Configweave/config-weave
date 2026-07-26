@@ -21,7 +21,7 @@ term step {
 
 term container {
   term = "Container"
-  definition = "A grouping block inside a play (nestable) for organisation/docs; a condition on a container applies to all its child steps. Not to be confused with a docker container."
+  definition = "A grouping block inside a play (nestable) for organisation/docs; a condition on a container applies to all its child steps. Not to be confused with an OCI container instance."
   audience = :both
 }
 
@@ -71,7 +71,7 @@ term convergence {
 
 term testlab {
   term = "Testlab"
-  definition = "config-weave test — runs package tests in disposable docker containers or vmlab VMs, proving convergence with the three-run protocol (src/testlab/)."
+  definition = "config-weave test — runs package tests in disposable vmlab instances (a container from an OCI image, or a VM from a template), proving convergence with the three-run protocol (src/testlab/)."
   audience = :both
 }
 

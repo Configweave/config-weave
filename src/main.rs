@@ -106,29 +106,31 @@ enum Command {
         playbook_dir: PathBuf,
         /// Only run matching tests: a package name or `package:test`.
         filter: Option<String>,
-        /// Override every test's backend ("docker" or "vmlab").
-        #[arg(long, value_name = "NAME")]
-        backend: Option<String>,
-        /// Run every test against this image instead of its own.
+        /// Run every container test against this OCI image instead of its
+        /// own. Does not apply to (or convert) tests declaring a template.
         #[arg(long, value_name = "IMAGE")]
         image: Option<String>,
+        /// Run every VM test against this vmlab template instead of its
+        /// own. Does not apply to (or convert) tests declaring an image.
+        #[arg(long, value_name = "REF")]
+        template: Option<String>,
         /// Leave instances running for post-mortem debugging.
         #[arg(long)]
         keep: bool,
         /// Static linux config-weave binary to copy into instances.
         #[arg(long, value_name = "PATH")]
         binary: Option<PathBuf>,
-        /// Windows config-weave binary for windows guests (vmlab).
+        /// Windows config-weave binary for windows guests.
         #[arg(long, value_name = "PATH")]
         binary_windows: Option<PathBuf>,
-        /// Max docker test groups (containers) to run at once
+        /// Max container test groups to run at once
         /// (default: min(cpu_count, 8)).
         #[arg(long, value_name = "N")]
-        docker_jobs: Option<usize>,
-        /// Max vmlab test groups (VMs) to run at once — kept small since
-        /// VMs are heavy (default: 2).
+        container_jobs: Option<usize>,
+        /// Max VM test groups to run at once — kept small since VMs are
+        /// heavy (default: 2).
         #[arg(long, value_name = "N")]
-        vmlab_jobs: Option<usize>,
+        vm_jobs: Option<usize>,
         /// Stream one machine-readable JSON event per line to stderr
         /// (lifecycle, per-phase progress, and raw instance attach info;
         /// stdout still carries the final report). A supervisor that
@@ -276,25 +278,25 @@ fn main() -> ExitCode {
         Command::Test {
             playbook_dir,
             filter,
-            backend,
             image,
+            template,
             keep,
             binary,
             binary_windows,
-            docker_jobs,
-            vmlab_jobs,
+            container_jobs,
+            vm_jobs,
             events_ndjson,
         } => cmd_test(
             &cli,
             playbook_dir,
             filter.as_deref(),
-            backend.as_deref(),
             image.as_deref(),
+            template.as_deref(),
             *keep,
             binary.as_deref(),
             binary_windows.as_deref(),
-            *docker_jobs,
-            *vmlab_jobs,
+            *container_jobs,
+            *vm_jobs,
             *events_ndjson,
         ),
         Command::Docs {
@@ -541,59 +543,28 @@ fn select_matching_scenarios<'a>(
         .collect()
 }
 
-/// Discovered backends, keyed by name (`docker` / `vmlab`).
-type Backends<'a> = Vec<(&'a str, Box<dyn testlab::backend::TestBackend>)>;
-
-/// Probe each named backend once, up front. On a discovery failure the
-/// error is printed and `Err(EXIT_VALIDATION)` returned so the caller can
-/// fail fast before any test runs.
-fn discover_backends(
-    needed: std::collections::BTreeSet<&str>,
-    quiet: bool,
-) -> Result<Backends<'_>, u8> {
-    let mut backends: Backends = Vec::new();
-    for name in needed {
-        let discovered: Result<Box<dyn testlab::backend::TestBackend>, diag::Diag> = match name {
-            "docker" => testlab::docker::DockerBackend::discover(quiet)
-                .map(|b| Box::new(b) as Box<dyn testlab::backend::TestBackend>),
-            "vmlab" => testlab::vmlab::VmlabBackend::discover(quiet)
-                .map(|b| Box::new(b) as Box<dyn testlab::backend::TestBackend>),
-            other => unreachable!("backend '{other}' survived validation"),
-        };
-        match discovered {
-            Ok(b) => backends.push((name, b)),
-            Err(d) => {
-                eprintln!("{}", d.rendered);
-                return Err(EXIT_VALIDATION);
-            }
-        }
-    }
-    Ok(backends)
-}
-
 /// Bucket selected tests into shared-instance groups: tests with a
 /// non-empty `group` share one instance (keyed per package, since a group
-/// provisions one instance from one image on one backend); ungrouped tests
-/// each get their own. Selection order is preserved via the carried index
-/// so output is stable despite parallel execution.
+/// provisions one instance); ungrouped tests each get their own. Selection
+/// order is preserved via the carried index so output is stable despite
+/// parallel execution.
+///
+/// An override replaces the reference only for tests of the matching kind:
+/// `--image` cannot turn a VM test into a container (or the reverse), since
+/// the two references name entirely different things.
 fn bucket_groups<'a>(
     selected: &[(&'a model::Package, &'a model::TestDecl)],
-    backends: &'a Backends<'_>,
-    backend_override: Option<&str>,
     image_override: Option<&str>,
+    template_override: Option<&str>,
 ) -> Vec<testlab::runner::GroupSpec<'a>> {
-    let backend_for = |t: &model::TestDecl| -> &'a dyn testlab::backend::TestBackend {
-        let name = backend_override.unwrap_or(t.backend.as_str());
-        backends
-            .iter()
-            .find(|(n, _)| *n == name)
-            .map(|(_, b)| b.as_ref())
-            .expect("backend discovered above")
-    };
-    let effective_image = |t: &model::TestDecl| -> String {
-        image_override
-            .map(str::to_string)
-            .unwrap_or_else(|| t.image.clone())
+    let effective_target = |t: &model::TestDecl| -> model::TestTarget {
+        match (&t.target, image_override, template_override) {
+            (model::TestTarget::Container(_), Some(i), _) => {
+                model::TestTarget::Container(i.to_string())
+            }
+            (model::TestTarget::Vm(_), _, Some(tpl)) => model::TestTarget::Vm(tpl.to_string()),
+            (target, _, _) => target.clone(),
+        }
     };
     let mut groups: Vec<testlab::runner::GroupSpec> = Vec::new();
     let mut group_index: std::collections::HashMap<(String, String), usize> =
@@ -608,16 +579,14 @@ fn bucket_groups<'a>(
                     None => {
                         group_index.insert(key, groups.len());
                         groups.push(testlab::runner::GroupSpec {
-                            backend: backend_for(t),
-                            image: effective_image(t),
+                            target: effective_target(t),
                             tests: vec![member],
                         });
                     }
                 }
             }
             None => groups.push(testlab::runner::GroupSpec {
-                backend: backend_for(t),
-                image: effective_image(t),
+                target: effective_target(t),
                 tests: vec![member],
             }),
         }
@@ -632,13 +601,13 @@ fn cmd_test(
     cli: &Cli,
     dir: &std::path::Path,
     filter: Option<&str>,
-    backend_override: Option<&str>,
     image_override: Option<&str>,
+    template_override: Option<&str>,
     keep: bool,
     binary: Option<&std::path::Path>,
     binary_windows: Option<&std::path::Path>,
-    docker_jobs: Option<usize>,
-    vmlab_jobs: Option<usize>,
+    container_jobs: Option<usize>,
+    vm_jobs: Option<usize>,
     events_ndjson: bool,
 ) -> u8 {
     let pb = std::rc::Rc::new(load_or_exit!(load_validated(dir)));
@@ -674,17 +643,9 @@ fn cmd_test(
         return EXIT_VALIDATION;
     }
 
-    if let Some(b) = backend_override
-        && b != "docker"
-        && b != "vmlab"
-    {
-        eprintln!("error: unknown test backend '{b}' (supported: 'docker', 'vmlab')");
-        return EXIT_VALIDATION;
-    }
-
     let mode_out = report::select_mode(cli.json, cli.no_color);
     // NDJSON claims stderr for events, so the human progress lines and
-    // the backends' raw prints go quiet exactly as in JSON output mode.
+    // the backend's raw prints go quiet exactly as in JSON output mode.
     let quiet = mode_out == report::OutputMode::Json || events_ndjson;
     let sink: testlab::events::TestEventSink = if events_ndjson {
         testlab::events::ndjson_sink()
@@ -694,21 +655,14 @@ fn cmd_test(
         testlab::events::human_sink()
     };
 
-    // Discover each backend the selected tests actually use, once, up
-    // front — a broken environment fails fast with exit 2 instead of
-    // erroring every test. Tests on other backends never probe.
-    let needed: std::collections::BTreeSet<&str> = selected
-        .iter()
-        .map(|(_, t)| backend_override.unwrap_or(t.backend.as_str()))
-        .chain(
-            scenarios_sel
-                .iter()
-                .map(|_| backend_override.unwrap_or("vmlab")),
-        )
-        .collect();
-    let backends = match discover_backends(needed, quiet) {
+    // Probe vmlab once, up front — a broken environment fails fast with
+    // exit 2 instead of erroring every test.
+    let backend = match testlab::vmlab::VmlabBackend::discover(quiet) {
         Ok(b) => b,
-        Err(code) => return code,
+        Err(d) => {
+            eprintln!("{}", d.rendered);
+            return EXIT_VALIDATION;
+        }
     };
 
     let opts = testlab::runner::RunnerOptions {
@@ -719,11 +673,13 @@ fn cmd_test(
         keep,
         jobs: cli.jobs,
         sink: sink.clone(),
-        docker_cap: docker_jobs.unwrap_or_else(engine::run::default_jobs).max(1),
-        vmlab_cap: vmlab_jobs.unwrap_or(2).max(1),
+        container_cap: container_jobs
+            .unwrap_or_else(engine::run::default_jobs)
+            .max(1),
+        vm_cap: vm_jobs.unwrap_or(2).max(1),
     };
 
-    let groups = bucket_groups(&selected, &backends, backend_override, image_override);
+    let groups = bucket_groups(&selected, image_override, template_override);
 
     // Announce the full plan up front so a consumer can size its progress
     // view; scenarios follow the groups with no group index.
@@ -737,8 +693,11 @@ fn cmd_test(
                     package: pkg.name.clone(),
                     test: t.name.clone(),
                     group: Some(gid),
-                    backend: g.backend.name().to_string(),
-                    image: g.image.clone(),
+                    machine_kind: match g.target {
+                        model::TestTarget::Container(_) => "container",
+                        model::TestTarget::Vm(_) => "vm",
+                    },
+                    source: g.target.reference().to_string(),
                 })
         })
         .collect();
@@ -749,8 +708,8 @@ fn cmd_test(
                 package: pkg.name.clone(),
                 test: s.name.clone(),
                 group: None,
-                backend: "vmlab".to_string(),
-                image: "(scenario)".to_string(),
+                machine_kind: "vm",
+                source: "(scenario)".to_string(),
             }),
     );
     sink(testlab::events::TestEvent::RunStarted {
@@ -760,30 +719,22 @@ fn cmd_test(
     });
 
     let start = std::time::Instant::now();
-    let mut tests = testlab::runner::run_groups(&pb, groups, &opts);
+    let mut tests = testlab::runner::run_groups(&pb, groups, &backend, &opts);
 
     // Scenarios run after the (parallel) test groups, sequentially — each
     // may bring up several machines. They reuse the test report shape.
     if !scenarios_sel.is_empty() {
-        let backend_for = |name: &str| -> &dyn testlab::backend::TestBackend {
-            let n = backend_override.unwrap_or(name);
-            backends
-                .iter()
-                .find(|(bn, _)| *bn == n)
-                .map(|(_, b)| b.as_ref())
-                .expect("backend discovered above")
-        };
         let units: Vec<testlab::runner::ScenarioUnit> = scenarios_sel
             .iter()
             .map(|(pkg, s)| testlab::runner::ScenarioUnit {
                 package: pkg,
                 scenario: s,
-                backend: backend_for("vmlab"),
             })
             .collect();
         let scenario_reports = testlab::runner::run_scenarios(
             &pb,
             units,
+            &backend,
             binary.map(std::path::Path::to_path_buf),
             binary_windows.map(std::path::Path::to_path_buf),
             keep,
@@ -1115,8 +1066,11 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
                         serde_json::json!({
                             "name": t.name,
                             "description": t.description,
-                            "backend": t.backend,
-                            "image": t.image,
+                            "machine_kind": match t.target {
+                                model::TestTarget::Container(_) => "container",
+                                model::TestTarget::Vm(_) => "vm",
+                            },
+                            "source": t.target.reference(),
                             "group": t.group,
                         })
                     })

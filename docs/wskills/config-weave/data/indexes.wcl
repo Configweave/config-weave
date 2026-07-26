@@ -62,8 +62,8 @@ index host_api_index {
 index testing {
   audience = :both
   name    = "Testing & the testlab"
-  summary = "Proving package convergence in disposable docker containers or vmlab VMs."
-  related = [testlab, three_run_protocol, test_grouping, scenarios, docker_backend, vmlab_backend, testlab_module]
+  summary = "Proving package convergence in disposable vmlab containers or VMs."
+  related = [testlab, three_run_protocol, test_grouping, scenarios, container_instance, vm_instance, testlab_module]
 
   index testing_reference {
     audience = :both

@@ -19,9 +19,10 @@ use wscript_std::DynValue;
 use crate::diag::Diag;
 use crate::model::Playbook;
 use crate::report::JsonRunReport;
-use crate::testlab::backend::{GuestOs, TestInstance, TestLab};
+use crate::testlab::backend::GuestOs;
 use crate::testlab::runner::GuestPaths;
 use crate::testlab::synth::{self, BinaryResolver};
+use crate::testlab::vmlab::{VmlabInstance, VmlabLab};
 
 // --------------------------------------------------------------- data types
 
@@ -75,7 +76,7 @@ pub struct Machine {
 // ------------------------------------------------------------------- state
 
 struct MachineState {
-    instance: Box<dyn TestInstance>,
+    instance: VmlabInstance,
     /// Binary copied in + smoke-tested.
     prepared: bool,
     /// Per-machine working-dir counter for synthesized applies.
@@ -84,7 +85,7 @@ struct MachineState {
 
 /// Everything a running scenario shares. Lives behind every handle's `Rc`.
 pub struct LabState {
-    lab: Box<dyn TestLab>,
+    lab: VmlabLab,
     playbook: Rc<Playbook>,
     /// The scenario package's directory, for resolving `apply(dir)` paths.
     pkg_dir: PathBuf,
@@ -95,7 +96,7 @@ pub struct LabState {
 
 impl LabState {
     pub fn new(
-        lab: Box<dyn TestLab>,
+        lab: VmlabLab,
         playbook: Rc<Playbook>,
         pkg_dir: PathBuf,
         binaries: BinaryResolver,
@@ -144,7 +145,7 @@ fn scenario_dir(os: GuestOs, name: &str, n: usize) -> (String, String) {
     (dir, playbook)
 }
 
-fn mkdir_guest(instance: &dyn TestInstance, os: GuestOs, dir: &str) -> Result<(), Diag> {
+fn mkdir_guest(instance: &VmlabInstance, os: GuestOs, dir: &str) -> Result<(), Diag> {
     let out = match os {
         GuestOs::Linux => instance.exec(&["mkdir", "-p", dir])?,
         GuestOs::Windows => {
@@ -212,7 +213,7 @@ fn step_result(js: Option<&crate::report::JsonRunStep>) -> StepResult {
 /// Run `config-weave {mode} <dir> <play> --json` in a machine and return
 /// the parsed report.
 fn run_in_guest(
-    instance: &dyn TestInstance,
+    instance: &VmlabInstance,
     bin: &str,
     mode: &str,
     playbook: &str,
@@ -259,9 +260,9 @@ fn apply_resource(
     };
     let (dir, pb_path) = scenario_dir(os, name, n);
     let ms = &state.machines[name];
-    mkdir_guest(ms.instance.as_ref(), os, &dir)?;
+    mkdir_guest(&ms.instance, os, &dir)?;
     ms.instance.copy_in(synthd.dir.path(), &pb_path)?;
-    let report = run_in_guest(ms.instance.as_ref(), bin, mode, &pb_path, Some(synth::PLAY))?;
+    let report = run_in_guest(&ms.instance, bin, mode, &pb_path, Some(synth::PLAY))?;
     Ok(step_result(
         report.steps.iter().find(|s| s.name == step_name),
     ))
@@ -290,7 +291,7 @@ fn gather_fact(
     };
     let (dir, pb_path) = scenario_dir(os, name, n);
     let ms = &state.machines[name];
-    mkdir_guest(ms.instance.as_ref(), os, &dir)?;
+    mkdir_guest(&ms.instance, os, &dir)?;
     ms.instance.copy_in(synthd.dir.path(), &pb_path)?;
 
     let mut argv = vec![bin, "__gather", pb_path.as_str(), key];
@@ -346,9 +347,9 @@ fn apply_playbook(
     };
     let (gdir, pb_path) = scenario_dir(os, name, n);
     let ms = &state.machines[name];
-    mkdir_guest(ms.instance.as_ref(), os, &gdir)?;
+    mkdir_guest(&ms.instance, os, &gdir)?;
     ms.instance.copy_in(&host_dir, &pb_path)?;
-    let report = run_in_guest(ms.instance.as_ref(), bin, mode, &pb_path, None)?;
+    let report = run_in_guest(&ms.instance, bin, mode, &pb_path, None)?;
     let steps = report
         .steps
         .iter()
@@ -511,9 +512,9 @@ fn into_exec(o: crate::testlab::backend::ExecOutput) -> ExecOut {
 }
 
 /// Borrow a provisioned machine's instance from shared state.
-fn machine_inst<'a>(st: &'a LabState, name: &str) -> Result<&'a dyn TestInstance, String> {
+fn machine_inst<'a>(st: &'a LabState, name: &str) -> Result<&'a VmlabInstance, String> {
     st.machines
         .get(name)
-        .map(|ms| ms.instance.as_ref())
+        .map(|ms| &ms.instance)
         .ok_or_else(|| format!("no machine '{name}'"))
 }

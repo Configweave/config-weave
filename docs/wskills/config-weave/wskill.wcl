@@ -34,8 +34,9 @@ runtime, no package installs. A **playbook** (`playbook.wcl`, a WCL document) ru
 check → apply → re-check contract. **Gatherers** collect facts into playbook
 variables. config-weave can **check** whether a machine matches the playbook (a
 report-only dry run) or **apply** it (converge the machine). The **testlab**
-(`config-weave test`) proves package convergence in disposable docker containers or
-vmlab VMs with a three-run idempotence protocol. Three languages divide the work:
+(`config-weave test`) proves package convergence in disposable vmlab instances —
+a container from an OCI image, or a VM from a template — with a three-run
+idempotence protocol. Three languages divide the work:
 WCL encodes playbooks and packages, wscript implements resources and gatherers, and
 the config-weave (Rust) engine mediates — validating everything before anything runs,
 then scheduling steps over a DAG with concurrency classes.

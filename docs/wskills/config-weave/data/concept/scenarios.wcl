@@ -1,7 +1,7 @@
 concept scenarios {
   name     = "Scenarios"
   summary  = "Scripted, multi-stage tests over a declared vmlab lab — for convergence the three-run protocol can't express."
-  related  = [testlab, three_run_protocol, vmlab_backend, testlab_module]
+  related  = [testlab, three_run_protocol, vm_instance, testlab_module]
   audience = :both
   body {
     p <<PROSE

@@ -1,5 +1,5 @@
 //! Shared helpers for distilling command output into a one-line tail for
-//! diagnostics. Used by both backends (`docker`, `vmlab`) and the runner.
+//! diagnostics. Used by the vmlab backend and the runner.
 
 use std::process::Output;
 
