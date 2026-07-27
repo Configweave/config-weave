@@ -237,6 +237,7 @@ All modules registered by Config Weave into the wscript `Context`. Conventions: 
 | `env` | get/set process env vars, PATH-style list helpers, hostname, current user, home dir, `is_elevated()` (root/admin). |
 | `sys` | OS name/version/family, architecture, CPU count, total/available memory. Gatherer fodder; gatherers are ordinary wscript scripts with no special powers. |
 | `data` | Parse/serialize JSON, TOML, INI ↔ `Value`. **Note:** check overlap with wscript-std before implementing — re-export rather than duplicate where wscript-std already covers it. |
+| `time` | `now_unix`, `now_millis` (wall clock), `instant`/`elapsed` (monotonic), `sleep`, `format_iso`. Re-exported from wscript-std. Registering it grants scripts clock access and the ability to block their thread; the motivating case is a resource that converges on an *age* — a package cache refreshed within the last N minutes — which needs "now" to compare a stamp file's mtime against. |
 
 ### Windows-only modules
 

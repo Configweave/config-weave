@@ -40,14 +40,21 @@ type WeaveGathererDecl {
   @children("returns") returns: list<WeaveReturnDecl>
 }
 
-// One key of the value a gatherer returns — documentation metadata (the
-// docs render a Returns table); the engine does not validate gathered
-// values against it.
+// One key of the value a gatherer returns. Mostly documentation metadata
+// (the docs render a Returns table): the engine does not check that a
+// gathered map carries these keys, or only these, because a gathered map
+// may legitimately hold dynamic ones.
+//
+// A key declared `type = "symbol"` is the exception — it is *typed*. Its
+// value binds into the variable space as a WCL symbol, so a playbook
+// compares it as `init.init == :systemd`, and enumerating `symbol` blocks
+// closes the set exactly as it does for a parameter.
 @block("returns")
 type WeaveReturnDecl {
   @inline(0) name: utf8
   description: utf8
   type: utf8
+  @children("symbol") symbols: list<WeaveSymbolDecl>
 }
 
 @block("resource")
@@ -70,10 +77,11 @@ type WeaveParamDecl {
   @children("symbol") symbols: list<WeaveSymbolDecl>
 }
 
-// One legal value of a `type = "symbol"` parameter. Declaring any narrows
-// the parameter to exactly this set — validation rejects anything else and
-// the generated docs list the values with their descriptions. Declaring
-// none leaves the parameter unconstrained (any token is accepted).
+// One legal value of a `type = "symbol"` parameter or returns key.
+// Declaring any narrows it to exactly this set — validation rejects
+// anything else and the generated docs list the values with their
+// descriptions. Declaring none leaves it unconstrained (any token is
+// accepted).
 //
 // Name the symbol in its WCL-spellable form (`"on_demand"`, not
 // `"on-demand"`): the lexer stops a `:symbol` at [A-Za-z0-9_].

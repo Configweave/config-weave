@@ -36,6 +36,11 @@ pub fn context() -> Context {
         // Re-exported wscript-std data formats (PRD `data` overlap note).
         .module(wscript_std::json())
         .module(wscript_std::toml())
+        // Clock access: resources that converge on an age (a package cache
+        // refreshed within the last N minutes) need "now" to compare a
+        // stamp file's mtime against, and shelling out to `date +%s` for it
+        // is both a subprocess and Unix-only.
+        .module(wscript_std::time())
         .module(log::module())
         .module(fs::module())
         .module(path::module())

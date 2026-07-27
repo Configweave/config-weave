@@ -71,6 +71,11 @@ fn write_lifecycle_playbook(root: &Path, plays: &str) {
       symbol "normal" { description = "The default behaviour" }
       symbol "strict" { description = "Reserved" }
     }
+    param "span" {
+      description = "A duration the script echoes back, to prove the units"
+      type = "duration"
+      default = 1h
+    }
   }
 }
 "#,
@@ -80,6 +85,7 @@ fn write_lifecycle_playbook(root: &Path, plays: &str) {
         pkg.join("resources/marker.ws"),
         r#"use value
 use fs
+use json
 
 fn p(params: Value, key: string) -> string {
     if let Some(v) = params.get(key) {
@@ -91,6 +97,11 @@ fn p(params: Value, key: string) -> string {
 fn check(params: Value) -> Result[CheckResult, string] {
     let mode = p(params, "check")
     if mode == "error" { return Err("check exploded") }
+    // Surface the raw `span` param so a test can assert its units.
+    if mode == "span" {
+        if let Some(v) = params.get("span") { return Err("span=" + json::to_string(v)) }
+        return Err("span is absent")
+    }
     if mode == "reboot" { return Ok(CheckResult::RebootRequired) }
     if mode == "already" { return Ok(CheckResult::AlreadyConfigured) }
     if fs::exists(p(params, "path")) {
@@ -151,6 +162,202 @@ fn full_lifecycle_and_idempotence() {
     let (code, stdout, _) = run_in(dir.path(), &["apply", ".", "p"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("already configured"), "{stdout}");
+}
+
+/// A `duration` param is authored as a bare WCL unit literal and reaches
+/// the script as base nanoseconds — `std.Duration`'s own base unit, so no
+/// resolution is lost on the way through.
+#[test]
+fn a_duration_property_reaches_the_script_as_nanoseconds() {
+    let dir = tempfile::tempdir().unwrap();
+    let plays = format!(
+        "  play \"p\" {{\n    description = \"probe\"\n{}  }}\n",
+        step(
+            "d",
+            "        path = \"/unused\"\n        check = \"span\"\n        span = 30min",
+            ""
+        )
+    );
+    write_lifecycle_playbook(dir.path(), &plays);
+
+    let (code, stdout, stderr) = run_in(dir.path(), &["check", ".", "p"]);
+    assert_eq!(code, 1, "{stdout}{stderr}");
+    assert!(
+        stdout.contains(&format!("span={}", 30u64 * 60 * 1_000_000_000)),
+        "{stdout}"
+    );
+}
+
+/// Every suffix resolves through the same `std.Duration` factors, and an
+/// omitted duration falls back to its declared unit-literal default.
+#[test]
+fn duration_suffixes_and_the_declared_default_resolve() {
+    let cases = [
+        ("span = 90s", 90u64 * 1_000_000_000),
+        ("span = 2min", 120 * 1_000_000_000),
+        ("span = 7d", 7 * 86_400 * 1_000_000_000),
+        // No `span` property at all: the param's `default = 1h` applies.
+        ("", 3_600 * 1_000_000_000),
+    ];
+    for (prop, want) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let props = format!("        path = \"/unused\"\n        check = \"span\"\n        {prop}");
+        let plays = format!(
+            "  play \"p\" {{\n    description = \"probe\"\n{}  }}\n",
+            step("d", &props, "")
+        );
+        write_lifecycle_playbook(dir.path(), &plays);
+
+        let (_, stdout, stderr) = run_in(dir.path(), &["check", ".", "p"]);
+        assert!(
+            stdout.contains(&format!("span={want}")),
+            "{prop:?} wanted span={want}\n{stdout}{stderr}"
+        );
+    }
+}
+
+/// A playbook whose `probe.facts` gatherer returns `kind` (declared
+/// `symbol`, enumerated) and `plain` (declared `string`), both holding the
+/// script-side text `emits`. `conditions` are spliced in as steps.
+fn write_symbol_fact_playbook(root: &Path, emits: &str, conditions: &[(&str, &str)]) {
+    let pkg = root.join("pkgs/probe");
+    std::fs::create_dir_all(pkg.join("gatherers")).unwrap();
+    std::fs::create_dir_all(pkg.join("resources")).unwrap();
+
+    let steps: String = conditions
+        .iter()
+        .map(|(name, cond)| {
+            format!(
+                "    step \"{name}\" {{\n      description = \"probe step {name}\"\n      \
+                 resource = \"probe.marker\"\n      condition = {cond}\n      \
+                 properties {{\n        path = \"/unused\"\n        check = \"already\"\n      \
+                 }}\n    }}\n"
+            )
+        })
+        .collect();
+    std::fs::write(
+        root.join("playbook.wcl"),
+        format!(
+            r#"playbook "Symbols" {{
+  description = "Symbol-typed gatherer facts"
+  version = "0.1.0"
+
+  gather "facts" {{
+    description = "Probe facts"
+    from = "probe.facts"
+  }}
+
+  play "p" {{
+    description = "probe"
+{steps}  }}
+}}
+"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("package.wcl"),
+        r#"package "probe" {
+  description = "Symbol-fact probe"
+
+  gatherer "facts" {
+    description = "Report a symbol-typed and a string-typed fact"
+    script = "gatherers/facts.ws"
+    returns "kind" {
+      description = "An enumerated kind"
+      type = "symbol"
+      symbol "alpha" { description = "The first kind" }
+      symbol "beta"  { description = "The second kind" }
+    }
+    returns "plain" { description = "The same text, untyped" type = "string" }
+  }
+
+  resource "marker" {
+    description = "Reports whatever its check parameter says"
+    script = "resources/marker.ws"
+    param "path"  { description = "Marker path" type = "string" required = true }
+    param "check" { description = "Check behaviour" type = "string" default = "already" }
+  }
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("gatherers/facts.ws"),
+        format!(
+            r#"use value
+
+fn gather(params: Value) -> Value {{
+    Value::Map(#{{
+        "kind": Value::String("{emits}"),
+        "plain": Value::String("{emits}")
+    }})
+}}
+"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("resources/marker.ws"),
+        r#"use value
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    Ok(CheckResult::AlreadyConfigured)
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    Ok(ApplyResult::Success)
+}
+"#,
+    )
+    .unwrap();
+}
+
+/// A `returns` key declared `symbol` binds as a real WCL symbol, so the
+/// playbook compares it the way the package declared it. The string
+/// spelling of the same token does *not* match — that asymmetry is the
+/// point of declaring the type, and is pinned here so it can't drift
+/// silently.
+#[test]
+fn a_symbol_fact_compares_as_a_symbol_not_a_string() {
+    let dir = tempfile::tempdir().unwrap();
+    write_symbol_fact_playbook(
+        dir.path(),
+        "alpha",
+        &[
+            ("sym", "facts.kind == :alpha"),
+            ("str", "facts.kind == \"alpha\""),
+            // The untyped sibling key keeps its string semantics.
+            ("plain", "facts.plain == \"alpha\""),
+        ],
+    );
+
+    let (code, stdout, stderr) = run_in(dir.path(), &["check", ".", "p"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let line = |name: &str| {
+        stdout
+            .lines()
+            .find(|l| l.contains(name))
+            .unwrap_or_else(|| panic!("no line for step {name}\n{stdout}"))
+            .to_string()
+    };
+    assert!(line("sym").contains("already configured"), "{stdout}");
+    assert!(line("str").contains("skipped"), "{stdout}");
+    assert!(line("plain").contains("already configured"), "{stdout}");
+}
+
+/// The declared set is enforced against what the script actually returned —
+/// an out-of-set fact is a bug in the gatherer, not a silent binding.
+#[test]
+fn a_symbol_fact_outside_its_declared_set_fails_the_run() {
+    let dir = tempfile::tempdir().unwrap();
+    write_symbol_fact_playbook(dir.path(), "gamma", &[("sym", "facts.kind == :alpha")]);
+
+    let (code, stdout, stderr) = run_in(dir.path(), &["check", ".", "p"]);
+    assert_ne!(code, 0, "{stdout}{stderr}");
+    let out = format!("{stdout}{stderr}");
+    assert!(out.contains("not a declared symbol"), "{out}");
+    assert!(out.contains(":alpha") && out.contains(":beta"), "{out}");
 }
 
 #[test]

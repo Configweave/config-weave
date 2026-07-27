@@ -178,10 +178,10 @@ fn flat(s: &str) -> String {
         .join(" ")
 }
 
-/// A copy of the sample whose `core.file_present` grows a symbol param,
-/// optionally with an enumerated set, and whose `make-a` step passes
-/// `ensure = <prop>`. Returns the temp dir (kept alive by the caller).
-fn sample_with_symbol_param(param_body: &str, prop: Option<&str>) -> tempfile::TempDir {
+/// A copy of the sample whose `core.file_present` grows `param_body`, and
+/// whose `make-a` step gains `prop_line` in its `properties` block.
+/// Returns the temp dir (kept alive by the caller).
+fn sample_with_param(param_body: &str, prop_line: Option<&str>) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     copy_sample(dir.path());
 
@@ -192,19 +192,24 @@ fn sample_with_symbol_param(param_body: &str, prop: Option<&str>) -> tempfile::T
     assert!(src.contains(anchor), "sample package.wcl drifted");
     std::fs::write(&pkg, src.replace(anchor, &format!("{anchor}{param_body}"))).unwrap();
 
-    if let Some(prop) = prop {
+    if let Some(prop) = prop_line {
         let pb = dir.path().join("playbook.wcl");
         let src = std::fs::read_to_string(&pb).unwrap();
         std::fs::write(
             &pb,
             src.replace(
                 "        content = \"alpha\"\n",
-                &format!("        content = \"alpha\"\n        ensure = {prop}\n"),
+                &format!("        content = \"alpha\"\n        {prop}\n"),
             ),
         )
         .unwrap();
     }
     dir
+}
+
+/// `sample_with_param` for the symbol tests, which all set `ensure`.
+fn sample_with_symbol_param(param_body: &str, prop: Option<&str>) -> tempfile::TempDir {
+    sample_with_param(param_body, prop.map(|p| format!("ensure = {p}")).as_deref())
 }
 
 const ENSURE_PARAM: &str = r#"    param "ensure" {
@@ -327,4 +332,199 @@ fn string_spelling_of_a_symbol_default_fails_validation() {
         flat(&stderr).contains("default for parameter 'ensure' is a symbol"),
         "{stderr}"
     );
+}
+
+// ------------------------------------------------- symbol-typed `returns`
+
+/// A copy of the sample whose `core.os_info` gatherer declares `returns`
+/// blocks, and whose `file_present_converges` test expects `family =
+/// <expect>` (the sample's own expectation, rewritten).
+fn sample_with_returns(returns_body: &str, expect: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    copy_sample(dir.path());
+
+    let pkg = dir.path().join("pkgs/core/package.wcl");
+    let src = std::fs::read_to_string(&pkg).unwrap();
+    let anchor = "    script = \"gatherers/os_info.ws\"\n";
+    assert!(src.contains(anchor), "sample package.wcl drifted");
+    let src = src.replace(anchor, &format!("{anchor}{returns_body}"));
+
+    let expect_anchor = "        family = \"linux\"\n";
+    assert!(src.contains(expect_anchor), "sample expect block drifted");
+    std::fs::write(
+        &pkg,
+        src.replace(expect_anchor, &format!("        family = {expect}\n")),
+    )
+    .unwrap();
+    dir
+}
+
+const FAMILY_RETURNS: &str = r#"    returns "family" {
+      description = "OS family"
+      type = "symbol"
+      symbol "linux"   { description = "Any Linux" }
+      symbol "windows" { description = "Any Windows" }
+    }
+"#;
+
+#[test]
+fn a_symbol_returns_key_accepts_the_symbol_spelling() {
+    let dir = sample_with_returns(FAMILY_RETURNS, ":linux");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+}
+
+/// A symbol-typed fact binds as a WCL symbol, so an expectation written as
+/// a string would compare against a spelling the variable space never
+/// holds — the same rule symbol params already enforce.
+#[test]
+fn a_string_expectation_of_a_symbol_returns_key_fails_validation() {
+    let dir = sample_with_returns(FAMILY_RETURNS, "\"linux\"");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("is a symbol: write :linux, not \"linux\""),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_expectation_outside_a_returns_symbol_set_fails_validation() {
+    let dir = sample_with_returns(FAMILY_RETURNS, ":plan9");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    let out = flat(&stderr);
+    assert!(out.contains("is not a declared symbol"), "{stderr}");
+    assert!(
+        out.contains(":linux") && out.contains(":windows"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn symbol_blocks_on_a_non_symbol_returns_key_fail_validation() {
+    let returns = FAMILY_RETURNS.replace("type = \"symbol\"", "type = \"string\"");
+    let dir = sample_with_returns(&returns, "\"linux\"");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("returns key 'family' declares symbol values"),
+        "{stderr}"
+    );
+}
+
+/// Enumeration stays opt-in on the returns side too, and an undeclared
+/// expectation key is still fine — a gathered map may carry dynamic keys.
+#[test]
+fn an_open_symbol_returns_key_accepts_any_token() {
+    let returns = "    returns \"family\" { description = \"OS family\" type = \"symbol\" }\n";
+    let dir = sample_with_returns(returns, ":anything_at_all");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+}
+
+#[test]
+fn duplicate_symbol_on_a_returns_key_fails_validation() {
+    let returns = FAMILY_RETURNS.replace(
+        "symbol \"windows\" { description = \"Any Windows\" }",
+        "symbol \"linux\" { description = \"Again\" }",
+    );
+    let dir = sample_with_returns(&returns, ":linux");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("duplicate symbol ':linux' for returns key 'family'"),
+        "{stderr}"
+    );
+}
+
+// ------------------------------------------------------- duration params
+
+const MAX_AGE_PARAM: &str = r#"    param "max_age" {
+      description = "Refresh when the last update is older than this"
+      type = "duration"
+      default = 24h
+    }
+"#;
+
+/// A `duration` param is authored as a bare WCL unit literal. The
+/// `properties` block is `@schemaless`, so the loader has to resolve the
+/// literal against `std.Duration` itself — see `convert::field_value_dyn`.
+#[test]
+fn a_duration_unit_literal_is_accepted() {
+    let dir = sample_with_param(MAX_AGE_PARAM, Some("max_age = 30min"));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+}
+
+/// The quoted spelling is not a duration — that would reintroduce the
+/// hand-rolled `"30m"` parsing the unit type exists to remove.
+#[test]
+fn a_quoted_duration_fails_validation() {
+    let dir = sample_with_param(MAX_AGE_PARAM, Some("max_age = \"30min\""));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("expects duration, got string"),
+        "{stderr}"
+    );
+}
+
+/// A literal from another unit family reports the *unit* problem, not a
+/// coarse type mismatch — the retry against `std.Duration` must not
+/// swallow the original diagnostic.
+#[test]
+fn a_unit_from_another_family_reports_the_unit_error() {
+    let dir = sample_with_param(MAX_AGE_PARAM, Some("max_age = 4GiB"));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    let out = flat(&stderr);
+    assert!(out.contains("GiB"), "{stderr}");
+    assert!(!out.contains("expects duration, got"), "{stderr}");
+}
+
+/// Nanoseconds are `std.Duration`'s base unit, so a bare integer is what a
+/// script receives — but authoring one bypasses the units entirely and is
+/// indistinguishable from a mistake, so `int` is not a duration.
+#[test]
+fn a_bare_integer_is_not_a_duration() {
+    let dir = sample_with_param(MAX_AGE_PARAM, Some("max_age = 1800"));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+}
+
+#[test]
+fn symbol_blocks_on_a_duration_param_fail_validation() {
+    let param = MAX_AGE_PARAM.replace(
+        "      default = 24h\n",
+        "      default = 24h\n      symbol \"fast\" { description = \"Nope\" }\n",
+    );
+    let dir = sample_with_param(&param, None);
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("declares symbol values but its type is duration"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_quoted_duration_default_fails_validation() {
+    let param = MAX_AGE_PARAM.replace("default = 24h", "default = \"24h\"");
+    let dir = sample_with_param(&param, None);
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("default for parameter 'max_age' does not match"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_unknown_param_type_names_duration_in_its_diagnostic() {
+    let param = MAX_AGE_PARAM.replace("type = \"duration\"", "type = \"timespan\"");
+    let dir = sample_with_param(&param, None);
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(flat(&stderr).contains("or duration"), "{stderr}");
 }

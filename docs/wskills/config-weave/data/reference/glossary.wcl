@@ -95,6 +95,6 @@ term wscript {
 
 term host_api {
   term = "Host API"
-  definition = "The wscript module surface config-weave registers for scripts (log, fs, path, shell, http, hash, archive, env, sys, data, template, and Windows registry/service/com). Exactly what config-weave wscripti emits."
+  definition = "The wscript module surface config-weave registers for scripts (log, fs, path, shell, http, hash, archive, env, sys, data, template, time, and Windows registry/service/com). Exactly what config-weave wscripti emits."
   audience = :both
 }

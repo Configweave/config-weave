@@ -22,7 +22,7 @@ use wcl_lang::{Block, Value};
 use wscript::{Context, Vm};
 use wscript_std::DynValue;
 
-use crate::convert::wcl_to_dyn;
+use crate::convert::{FieldValueError, field_value_dyn};
 use crate::diag::Diag;
 use crate::hostapi::{ApplyResult, CheckResult, log};
 use crate::model::{Concurrency, Play, Playbook, Step};
@@ -169,14 +169,16 @@ fn plan_step(
     let mut params: HashMap<String, DynValue> = HashMap::new();
     if let Some(props) = block.blocks().find(|b| b.kind() == "properties") {
         for f in props.fields() {
-            match f.value() {
-                Ok(v) => match wcl_to_dyn(v) {
-                    Ok(dv) => {
-                        params.insert(f.name().to_string(), dv);
-                    }
-                    Err(e) => return Plan::Fail(format!("property '{}': {e}", f.name())),
-                },
-                Err(e) => return Plan::Fail(format!("property '{}': {e}", f.name())),
+            match field_value_dyn(&f) {
+                Ok(fv) => {
+                    params.insert(f.name().to_string(), fv.value);
+                }
+                Err(FieldValueError::Convert(e)) => {
+                    return Plan::Fail(format!("property '{}': {e}", f.name()));
+                }
+                Err(FieldValueError::Unresolved(e) | FieldValueError::Eval(e)) => {
+                    return Plan::Fail(format!("property '{}': {e}", f.name()));
+                }
             }
         }
     }

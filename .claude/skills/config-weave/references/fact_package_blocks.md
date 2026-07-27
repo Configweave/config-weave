@@ -5,10 +5,22 @@
 | `package "name"` | `description` (required), `gatherer*`, `resource*`, `test*` | name qualifies playbook refs: `core.file_present` |
 | `gatherer "name"` | `description`, `script`, `param*`, `returns*` | script exports `gather(params: Value) -> Value` |
 | `resource "name"` | `description`, `script`, `concurrency` (default `"parallel"`), `param*` | script exports `check()` + `apply()` |
-| `param "name"` | `description`, `type`, `required` (default `false`), `default?`, `symbol*` | types: `string\|int\|float\|bool\|list\|map\|symbol` |
-| `symbol "name"` | `description` | one legal value of a `symbol` param; declaring any closes the set (validated, and listed in the docs), declaring none leaves it open |
-| `returns "key"` | `description`, `type` | documents one key of the gathered value; docs metadata only — the engine does not validate against it |
+| `param "name"` | `description`, `type`, `required` (default `false`), `default?`, `symbol*` | types: `string\|int\|float\|bool\|list\|map\|symbol\|duration` |
+| `symbol "name"` | `description` | one legal value of a `symbol` param or returns key; declaring any closes the set (validated, and listed in the docs), declaring none leaves it open |
+| `returns "key"` | `description`, `type`, `symbol*` | documents one key of the gathered value. Mostly docs metadata — the engine never requires the key to be present. A `type = "symbol"` key is the exception, and is genuinely typed: it binds as a WCL symbol (`init.init == :systemd`) and its declared set is enforced |
 | `test "name"` | see the Test block reference | run by `config-weave test` in disposable instances |
+
+A `symbol` value must be written as `:name` wherever it appears — a step property, a gather param, a `default`, a test `expect`. The string spelling is an error telling you to drop the quotes, because both spellings reach scripts as the same text and one way to say a thing is enough.
+
+A `duration` value is written as a bare WCL unit literal — `max_age = 30min`, not `"30min"`. Suffixes are `ns`, `us`, `ms`, `s`, `min`, `h`, `d`; note that minutes are `min`, since a bare `m` is metres. Scripts receive a plain `Int` of nanoseconds (`std.Duration`'s base unit), so a script comparing against whole seconds divides by `1000000000`.
+
+```wcl
+param "max_age" {
+  description = "Refresh when the last update is older than this span"
+  type = "duration"
+  default = 24h
+}
+```
 
 ## Related
 

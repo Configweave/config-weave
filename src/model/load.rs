@@ -10,10 +10,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use wcl_lang::{Block, Document, Environment, EvalError, Field, Value};
+use wcl_lang::{Block, Document, Environment, Field, Value};
 use wscript_std::DynValue;
 
-use crate::convert::wcl_to_dyn;
+use crate::convert::{FieldValueError, field_value_dyn, is_symbol_literal, wcl_to_dyn};
 use crate::diag::{Diag, wcl_span};
 use crate::vocab;
 
@@ -403,30 +403,28 @@ impl PlaybookLoader<'_> {
             let Some(decl) = lookup_param(&declared, f.name(), what, span, &mut self.ctx) else {
                 continue;
             };
-            match f.value() {
-                Ok(v) => match wcl_to_dyn(v) {
-                    Ok(dv) => {
-                        check_symbol_spelling(
-                            decl,
-                            is_symbol_literal(v),
-                            &dv,
-                            what,
-                            span,
-                            &mut self.ctx,
-                        );
-                        check_param_type(decl, &dv, what, span, &mut self.ctx)
-                    }
-                    Err(e) => {
-                        self.ctx
-                            .err(format!("parameter '{}' of {what}: {e}", f.name()), span);
-                    }
-                },
+            match field_value_dyn(&f) {
+                Ok(fv) => {
+                    check_symbol_spelling(
+                        decl,
+                        fv.symbol_literal,
+                        &fv.value,
+                        what,
+                        span,
+                        &mut self.ctx,
+                    );
+                    check_param_type(decl, &fv.value, what, span, &mut self.ctx)
+                }
+                Err(FieldValueError::Convert(e)) => {
+                    self.ctx
+                        .err(format!("parameter '{}' of {what}: {e}", f.name()), span);
+                }
                 // Variable references resolve at run time; checked then.
-                Err(EvalError::UnresolvedReference { .. }) => {}
-                Err(e) => {
+                Err(FieldValueError::Unresolved(_)) => {}
+                Err(FieldValueError::Eval(e)) => {
                     self.ctx
                         .diags
-                        .push(Diag::from_eval(e.clone(), self.ctx.file, self.ctx.source));
+                        .push(Diag::from_eval(e, self.ctx.file, self.ctx.source));
                 }
             }
         }
@@ -526,6 +524,10 @@ struct PendingGatherCheck {
     package: String,
     gatherer: String,
     params: Option<Vec<StaticPair>>,
+    /// Kept as pairs (not name/value) so the symbol spelling of each
+    /// expectation survives to the second pass, where the gatherer's
+    /// `returns` declarations are finally in reach.
+    expect: Vec<StaticPair>,
     span: (usize, usize),
 }
 
@@ -579,13 +581,51 @@ fn validate_tests(packages: &BTreeMap<String, Package>, p: &PendingTests, diags:
             );
             continue;
         };
-        check_params_static(
-            &mut ctx,
-            g.params.as_deref(),
-            &decl.params,
-            &format!("gatherer '{}.{}' in {}", g.package, g.gatherer, g.what),
-            g.span,
-        );
+        let what = format!("gatherer '{}.{}' in {}", g.package, g.gatherer, g.what);
+        check_params_static(&mut ctx, g.params.as_deref(), &decl.params, &what, g.span);
+        check_expect_static(&mut ctx, &g.expect, &decl.returns, &what);
+    }
+}
+
+/// Check a test `expect` block against the gatherer's `returns`
+/// declarations. Only symbol-typed keys are constrained: an undeclared key
+/// is fine (a gathered map may hold dynamic keys), but a key declared
+/// `symbol` binds as a WCL symbol, so an expectation written `"systemd"`
+/// would be comparing against a spelling the variable space never holds.
+fn check_expect_static(
+    ctx: &mut Ctx<'_>,
+    expect: &[StaticPair],
+    returns: &[ReturnDecl],
+    what: &str,
+) {
+    for pair in expect {
+        let Some(decl) = returns.iter().find(|r| r.name == pair.name) else {
+            continue;
+        };
+        if decl.ty != CoarseType::Symbol {
+            continue;
+        }
+        if !pair.symbol_literal
+            && let DynValue::String(s) = &pair.value
+        {
+            ctx.err(
+                format!(
+                    "expectation '{}' of {what} is a symbol: write :{s}, not \"{s}\"",
+                    pair.name
+                ),
+                pair.span,
+            );
+            continue;
+        }
+        if let Some(why) = decl.symbol_violation(&pair.value) {
+            ctx.err(
+                format!(
+                    "expectation '{}' of {what} is not a declared symbol: {why}",
+                    pair.name
+                ),
+                pair.span,
+            );
+        }
     }
 }
 
@@ -611,13 +651,6 @@ fn lookup_param<'a>(
             None
         }
     }
-}
-
-/// Whether a WCL value was written as a `:symbol` (or a bare identifier,
-/// which lexes the same way). Both spellings convert to `DynValue::String`,
-/// so this is the only place the distinction survives.
-fn is_symbol_literal(v: &Value) -> bool {
-    matches!(v, Value::Symbol(_) | Value::Identifier(_))
 }
 
 /// A symbol param must be *written* as `:name`. The string spelling reaches
@@ -1141,10 +1174,7 @@ fn load_test(
                     .blocks()
                     .find(|x| x.kind() == "expect")
                     .map(|p| static_pairs(&p, "expectation", &what, ctx))
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|p| (p.name, p.value))
-                    .collect();
+                    .unwrap_or_default();
                 if !seen_gathers.insert(gname.clone()) {
                     ctx.err(
                         format!("duplicate gather name '{gname}' in test '{name}'"),
@@ -1156,6 +1186,7 @@ fn load_test(
                     package: gpkg.clone(),
                     gatherer: ggath.clone(),
                     params: params.clone(),
+                    expect: expect.clone(),
                     span: gspan,
                 });
                 gathers.push(TestGather {
@@ -1168,7 +1199,7 @@ fn load_test(
                         .into_iter()
                         .map(|p| (p.name, p.value))
                         .collect(),
-                    expect,
+                    expect: expect.into_iter().map(|p| (p.name, p.value)).collect(),
                 });
             }
             _ => {}
@@ -1254,17 +1285,17 @@ fn static_pairs(block: &Block<'_>, noun: &str, what: &str, ctx: &mut Ctx<'_>) ->
     let mut out = Vec::new();
     for f in block.fields() {
         let fspan = wcl_span(f.span());
-        match f.value() {
-            Ok(v) => match wcl_to_dyn(v) {
-                Ok(dv) => out.push(StaticPair {
-                    name: f.name().to_string(),
-                    value: dv,
-                    span: fspan,
-                    symbol_literal: is_symbol_literal(v),
-                }),
-                Err(e) => ctx.err(format!("{noun} '{}' of {what}: {e}", f.name()), fspan),
-            },
-            Err(EvalError::UnresolvedReference { .. }) => {
+        match field_value_dyn(&f) {
+            Ok(fv) => out.push(StaticPair {
+                name: f.name().to_string(),
+                value: fv.value,
+                span: fspan,
+                symbol_literal: fv.symbol_literal,
+            }),
+            Err(FieldValueError::Convert(e)) => {
+                ctx.err(format!("{noun} '{}' of {what}: {e}", f.name()), fspan)
+            }
+            Err(FieldValueError::Unresolved(_)) => {
                 ctx.err(
                     format!(
                         "{noun} '{}' of {what} references a variable; tests run against \
@@ -1274,9 +1305,8 @@ fn static_pairs(block: &Block<'_>, noun: &str, what: &str, ctx: &mut Ctx<'_>) ->
                     fspan,
                 );
             }
-            Err(e) => {
-                ctx.diags
-                    .push(Diag::from_eval(e.clone(), ctx.file, ctx.source));
+            Err(FieldValueError::Eval(e)) => {
+                ctx.diags.push(Diag::from_eval(e, ctx.file, ctx.source));
             }
         }
     }
@@ -1312,27 +1342,30 @@ fn load_returns(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ReturnDecl> {
             ctx.err(
                 format!(
                     "returns key '{name}' has invalid type '{ty_str}' (expected string, int, \
-                     float, bool, list, map or symbol)"
+                     float, bool, list, map, symbol or duration)"
                 ),
                 wcl_span(b.span()),
             );
             continue;
         };
+        let symbols = load_symbols(&b, &format!("returns key '{name}'"), ty, ctx);
         returns.push(ReturnDecl {
             name,
             description,
             ty,
+            symbols,
         });
     }
     returns
 }
 
-/// The `symbol` child blocks of one `param`, in declaration order. Only
-/// meaningful on a symbol-typed param; declaring none leaves the param
-/// unconstrained.
+/// The `symbol` child blocks of one `param` or `returns` block, in
+/// declaration order. Only meaningful on a symbol-typed declaration;
+/// declaring none leaves it unconstrained. `what` names the owner for
+/// diagnostics ("parameter 'ensure'", "returns key 'init'").
 fn load_symbols(
     block: &Block<'_>,
-    param: &str,
+    what: &str,
     ty: CoarseType,
     ctx: &mut Ctx<'_>,
 ) -> Vec<SymbolDecl> {
@@ -1342,8 +1375,8 @@ fn load_symbols(
         if ty != CoarseType::Symbol {
             ctx.err(
                 format!(
-                    "parameter '{param}' declares symbol values but its type is {} \
-                     (only 'symbol' params can enumerate values)",
+                    "{what} declares symbol values but its type is {} \
+                     (only 'symbol' declarations can enumerate values)",
                     ty.as_str()
                 ),
                 wcl_span(b.span()),
@@ -1355,7 +1388,7 @@ fn load_symbols(
         };
         if !seen.insert(name.clone()) {
             ctx.err(
-                format!("duplicate symbol ':{name}' for parameter '{param}'"),
+                format!("duplicate symbol ':{name}' for {what}"),
                 wcl_span(b.span()),
             );
             continue;
@@ -1383,57 +1416,68 @@ fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
             ctx.err(
                 format!(
                     "parameter '{name}' has invalid type '{ty_str}' (expected string, int, \
-                     float, bool, list, map or symbol)"
+                     float, bool, list, map, symbol or duration)"
                 ),
                 wcl_span(b.span()),
             );
             continue;
         };
-        let symbols = load_symbols(&b, &name, ty, ctx);
+        let symbols = load_symbols(&b, &format!("parameter '{name}'"), ty, ctx);
         let required = bool_field(&b, "required", ctx).unwrap_or(false);
         let default_field = b.fields().find(|f| f.name() == "default");
         let default_span = default_field.as_ref().map(|f| wcl_span(f.span()));
-        let default = default_field.and_then(|f| match f.value() {
-            Ok(v) => match wcl_to_dyn(v) {
-                Ok(dv) => {
-                    if ty == CoarseType::Symbol
-                        && !is_symbol_literal(v)
-                        && let DynValue::String(s) = &dv
-                    {
-                        ctx.err(
-                            format!(
-                                "default for parameter '{name}' is a symbol: \
+        let default = default_field.and_then(|f| {
+            // The vocab declares `default` as `utf8?`, so a duration
+            // literal would be coerced against that and fail before the
+            // unresolved-unit retry in `field_value` could fire. The
+            // declared coarse type is known right here, so resolve
+            // against `std.Duration` directly instead.
+            let evaluated = if ty == CoarseType::Duration {
+                f.value_typed(DURATION_TYPE)
+            } else {
+                f.value().cloned().map_err(|e| e.clone())
+            };
+            match evaluated {
+                Ok(v) => match wcl_to_dyn(&v) {
+                    Ok(dv) => {
+                        if ty == CoarseType::Symbol
+                            && !is_symbol_literal(&v)
+                            && let DynValue::String(s) = &dv
+                        {
+                            ctx.err(
+                                format!(
+                                    "default for parameter '{name}' is a symbol: \
                                  write :{s}, not \"{s}\""
-                            ),
-                            wcl_span(f.span()),
-                        );
-                    }
-                    if !ty.matches(&dv) {
-                        ctx.err(
-                            format!(
-                                "default for parameter '{name}' does not match its \
+                                ),
+                                wcl_span(f.span()),
+                            );
+                        }
+                        if !ty.matches(&dv) {
+                            ctx.err(
+                                format!(
+                                    "default for parameter '{name}' does not match its \
                                  declared type {}",
-                                ty.as_str()
-                            ),
+                                    ty.as_str()
+                                ),
+                                wcl_span(f.span()),
+                            );
+                            None
+                        } else {
+                            Some(dv)
+                        }
+                    }
+                    Err(e) => {
+                        ctx.err(
+                            format!("default for parameter '{name}': {e}"),
                             wcl_span(f.span()),
                         );
                         None
-                    } else {
-                        Some(dv)
                     }
-                }
+                },
                 Err(e) => {
-                    ctx.err(
-                        format!("default for parameter '{name}': {e}"),
-                        wcl_span(f.span()),
-                    );
+                    ctx.diags.push(Diag::from_eval(e, ctx.file, ctx.source));
                     None
                 }
-            },
-            Err(e) => {
-                ctx.diags
-                    .push(Diag::from_eval(e.clone(), ctx.file, ctx.source));
-                None
             }
         });
         let decl = ParamDecl {

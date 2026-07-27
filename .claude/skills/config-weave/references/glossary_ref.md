@@ -17,4 +17,4 @@
 | Three-run protocol | The test sequence check, apply, apply (all --json --continue-on-error). Run 2 proves in-process convergence; run 3 proves cross-process idempotence. |  |
 | Scenario | A scripted, multi-stage test over a declared vmlab lab — a wscript driver brings VMs up by name, applies config-weave, reboots, and asserts. For convergence the three-run protocol can't express (e.g. a Windows DC promotion). |  |
 | wscript | The statically typed, Rust-flavored scripting language resources, gatherers and verify scripts are written in. Single-file in v1, compiled against the config-weave host API. |  |
-| Host API | The wscript module surface config-weave registers for scripts (log, fs, path, shell, http, hash, archive, env, sys, data, template, and Windows registry/service/com). Exactly what config-weave wscripti emits. |  |
+| Host API | The wscript module surface config-weave registers for scripts (log, fs, path, shell, http, hash, archive, env, sys, data, template, time, and Windows registry/service/com). Exactly what config-weave wscripti emits. |  |

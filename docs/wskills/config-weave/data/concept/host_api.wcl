@@ -18,6 +18,6 @@ string]` and compose with `?`. The authoritative surface is whatever
 [`config-weave wscripti`](entity_weave_wscripti) emits, generated from
 `src/hostapi/*.rs`.
 PROSE
-    p "Cross-platform modules: [log](entity_log_module), [fs](entity_fs_module), [path](entity_path_module), [shell](entity_shell_module), [http](entity_http_module), [hash](entity_hash_module), [archive](entity_archive_module), [env](entity_env_module), [sys](entity_sys_module), [data](entity_data_module), [template](entity_template_module). Windows-only modules: [registry](entity_registry_module), [service](entity_service_module), [com](entity_com_module)."
+    p "Cross-platform modules: [log](entity_log_module), [fs](entity_fs_module), [path](entity_path_module), [shell](entity_shell_module), [http](entity_http_module), [hash](entity_hash_module), [archive](entity_archive_module), [env](entity_env_module), [sys](entity_sys_module), [data](entity_data_module), [template](entity_template_module), [time](entity_time_module). Windows-only modules: [registry](entity_registry_module), [service](entity_service_module), [com](entity_com_module)."
   }
 }

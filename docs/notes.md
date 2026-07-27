@@ -39,7 +39,7 @@ windows 0.6x.
 - `var x = expr` (PRD sketch) became a `vars { x = expr }` block.
 - `params schema { version: string { … } }` (PRD sketch) became
   `param "version" { type = "string" … }` blocks; coarse types are
-  `string|int|float|bool|list|map|symbol`. §8 validation behaviour is
+  `string|int|float|bool|list|map|symbol|duration`. §8 validation behaviour is
   engine-side and unchanged from the PRD contract. `symbol` is for
   enumerated tokens (the `ensure = :present|:absent` idiom): WCL symbols
   and strings both convert to the same script-side string, so scripts see
@@ -67,10 +67,50 @@ windows 0.6x.
 - Step `properties = { … }` became a `properties { … }` child block;
   gather `params = { … }` likewise a `params { … }` block.
 - Gatherers document their gathered value with `returns "key" {
-  description type }` child blocks (same coarse types as params).
-  Documentation metadata only: the docs render a Returns table, the
-  engine does not validate gathered values against the declarations
-  (gathered maps may legitimately carry dynamic keys).
+  description type }` child blocks (same coarse types as params). Mostly
+  documentation metadata: the docs render a Returns table, and the engine
+  does not check that a gathered map carries these keys, or only these
+  (gathered maps may legitimately carry dynamic ones).
+  A key declared `type = "symbol"` is the exception, and is *typed*: its
+  value binds into the variable space as a real `Value::Symbol` (via
+  `convert::dyn_to_wcl_returns`, which the gather phase uses in place of
+  `dyn_to_wcl`), and its declared set is enforced against what the script
+  actually returned. So `init_system` declares `returns "init" { type =
+  "symbol" symbol "systemd" { … } … }`, the script keeps emitting the bare
+  token `"systemd"` (the leading `:` is a WCL-source spelling, not a script
+  one), and a playbook writes `condition = init.init == :systemd`.
+  The asymmetry this buys is deliberate but sharp-edged: WCL's `values_eq`
+  says `Symbol("systemd") != Utf8("systemd")`, so comparing a symbol fact
+  against `"systemd"` is silently *false* rather than an error, and
+  interpolation renders `:systemd` rather than `systemd`. Test `expect`
+  blocks are checked for the `:symbol` spelling and for set membership
+  (`check_expect_static`) precisely so the string form can't be copied into
+  a test and quietly stop matching. Only top-level keys are typed —
+  `returns` documents one level, so nested maps stay plain data.
+- A `duration` param is written as a bare WCL unit literal (`max_age =
+  30min`, suffixes `ns|us|ms|s|min|h|d` — note WCL spells minutes `min`,
+  since `m` is metres in `std.Distance`) and reaches scripts as a plain
+  `Int` of **nanoseconds**, `std.Duration`'s own base unit. The quoted
+  spelling is a type error: hand-rolled `"30m"` parsing inside scripts is
+  exactly what the unit type exists to delete.
+  Getting there needed one addition to WCL. A unit literal resolves against
+  a *declared* type, and `properties` / `params` are `@schemaless`, so
+  plain `Field::value()` can only report `UnitWithoutType` for them.
+  `@schemaless` turns out to suppress only WCL's *membership* check, not
+  type resolution — but with no declared field there is no type to resolve
+  against either, and no public API hands back the unresolved
+  `Value::PendingUnit`. So WCL gained `Field::value_typed(type_fqn)`, a
+  thin public wrapper over the existing `coerce_value_to_type` that
+  resolves against a caller-supplied type and ignores the schema's.
+  `convert::field_value_dyn` is the single choke point that uses it: it
+  retries an `UnitWithoutType` failure against `std.Duration` and reports
+  the *original* error if that fails too, so `max_age = 4GiB` complains
+  about the unit rather than about a coarse type. Every site that reads a
+  property or param field goes through it. The one exception is a param's
+  own `default`, which the vocab declares `utf8?` — a duration literal
+  there is coerced against `utf8` and fails before the retry could fire, so
+  `load_params` consults the already-parsed coarse type and calls
+  `value_typed` directly.
 - Variables (gatherer results, declared vars, `--var`/`--var-file`
   overrides) bind by generating an in-memory system import
   `<weave/vars.wcl>` containing `let` declarations. Gatherer results are

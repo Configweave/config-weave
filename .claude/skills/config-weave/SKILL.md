@@ -150,6 +150,7 @@ _Registered on every platform._
 - [sys](references/entity_sys_module.md)
 - [data](references/entity_data_module.md)
 - [template](references/entity_template_module.md)
+- [time](references/entity_time_module.md)
 
 #### Windows modules
 

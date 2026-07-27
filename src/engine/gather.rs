@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use wscript::Vm;
 use wscript_std::DynValue;
 
-use crate::convert::{canonicalise, dyn_to_wcl, wcl_to_dyn};
+use crate::convert::{
+    FieldValueError, canonicalise, dyn_to_wcl_returns, field_value_dyn, returns_symbol_violations,
+};
 use crate::diag::{Diag, wcl_span};
 use crate::model::{ParamDecl, Playbook};
 
@@ -55,22 +57,20 @@ pub fn run(
         let mut params: HashMap<String, DynValue> = HashMap::new();
         if let Some(pblock) = block.blocks().find(|b| b.kind() == "params") {
             for f in pblock.fields() {
-                match f.value() {
-                    Ok(v) => match wcl_to_dyn(v) {
-                        Ok(dv) => {
-                            params.insert(f.name().to_string(), dv);
-                        }
-                        Err(e) => diags.push(Diag::spanned(
-                            format!("gather '{}' param '{}': {e}", inv.name, f.name()),
-                            "here",
-                            &pb.root.join("playbook.wcl"),
-                            &pb.source,
-                            wcl_span(f.span()),
-                        )),
-                    },
-                    Err(e) => {
+                match field_value_dyn(&f) {
+                    Ok(fv) => {
+                        params.insert(f.name().to_string(), fv.value);
+                    }
+                    Err(FieldValueError::Convert(e)) => diags.push(Diag::spanned(
+                        format!("gather '{}' param '{}': {e}", inv.name, f.name()),
+                        "here",
+                        &pb.root.join("playbook.wcl"),
+                        &pb.source,
+                        wcl_span(f.span()),
+                    )),
+                    Err(FieldValueError::Unresolved(e) | FieldValueError::Eval(e)) => {
                         diags.push(Diag::from_eval(
-                            e.clone(),
+                            e,
                             &pb.root.join("playbook.wcl"),
                             &pb.source,
                         ));
@@ -137,7 +137,14 @@ pub fn run(
     for (name, key, _, dedup) in &invocations {
         match by_dedup.get(dedup.as_str()) {
             Some(Ok(value)) => {
-                store.insert(name, Origin::Gatherer, dyn_to_wcl(value));
+                // A `returns` key declared `symbol` binds as a real WCL
+                // symbol, and its declared set is enforced here — an
+                // out-of-set value is a bug in the gatherer script.
+                let returns = returns_for(pb, key);
+                for why in returns_symbol_violations(value, &returns) {
+                    diags.push(Diag::bare(format!("gatherer '{key}': {why}")));
+                }
+                store.insert(name, Origin::Gatherer, dyn_to_wcl_returns(value, &returns));
             }
             Some(Err(e)) => {
                 diags.push(Diag::bare(format!(
@@ -149,6 +156,20 @@ pub fn run(
     }
 
     if diags.is_empty() { Ok(()) } else { Err(diags) }
+}
+
+/// The `returns` declarations of the gatherer a `"package.gatherer"` key
+/// names; empty when either half doesn't resolve (the loader has already
+/// reported that).
+fn returns_for(pb: &Playbook, key: &str) -> Vec<crate::model::ReturnDecl> {
+    let Some((pkg, gatherer)) = key.split_once('.') else {
+        return Vec::new();
+    };
+    pb.packages
+        .get(pkg)
+        .and_then(|p| p.gatherers.get(gatherer))
+        .map(|g| g.returns.clone())
+        .unwrap_or_default()
 }
 
 /// Run one gatherer on a fresh VM: the per-execution body of the gather

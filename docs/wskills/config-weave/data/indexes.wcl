@@ -48,7 +48,7 @@ index host_api_index {
     audience = :both
     name    = "Cross-platform modules"
     summary = "Registered on every platform."
-    related = [log_module, fs_module, path_module, shell_module, http_module, hash_module, archive_module, env_module, sys_module, data_module, template_module]
+    related = [log_module, fs_module, path_module, shell_module, http_module, hash_module, archive_module, env_module, sys_module, data_module, template_module, time_module]
   }
 
   index host_api_windows {

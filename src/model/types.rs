@@ -165,8 +165,10 @@ pub struct GathererDecl {
     pub description: String,
     pub script: PathBuf,
     pub params: Vec<ParamDecl>,
-    /// Documented keys of the gathered value (docs metadata; the engine
-    /// does not validate gathered values against them).
+    /// Documented keys of the gathered value. Mostly docs metadata — the
+    /// engine does not check that a gathered map has these keys, or that
+    /// only these — but a key declared `symbol` *is* typed: its value
+    /// binds as a WCL symbol and is checked against any declared set.
     pub returns: Vec<ReturnDecl>,
 }
 
@@ -176,13 +178,51 @@ pub struct ReturnDecl {
     pub name: String,
     pub description: String,
     pub ty: CoarseType,
+    /// The legal symbols for a `symbol`-typed key, in declaration order.
+    /// Empty means unconstrained, matching the parameter rule.
+    pub symbols: Vec<SymbolDecl>,
 }
 
-/// One declared legal value of a symbol-typed parameter.
+impl ReturnDecl {
+    pub fn symbol_violation(&self, v: &DynValue) -> Option<String> {
+        symbol_violation(&self.symbols, v)
+    }
+}
+
+/// One declared legal value of a symbol-typed parameter or returns key.
 #[derive(Debug, Clone)]
 pub struct SymbolDecl {
     pub name: String,
     pub description: String,
+}
+
+/// A declared symbol set rendered as `:symbol` literals, comma-joined —
+/// the tail of every "expected one of" diagnostic.
+pub fn symbol_list(symbols: &[SymbolDecl]) -> String {
+    symbols
+        .iter()
+        .map(|s| format!(":{}", s.name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `None` when `v` is an allowed symbol, or when the set is empty (an
+/// unconstrained symbol accepts any token, as it always has); otherwise the
+/// diagnostic body naming what was got and what was expected.
+pub fn symbol_violation(symbols: &[SymbolDecl], v: &DynValue) -> Option<String> {
+    if symbols.is_empty() {
+        return None;
+    }
+    let DynValue::String(s) = v else {
+        return None; // the coarse type check already rejected this
+    };
+    if symbols.iter().any(|d| &d.name == s) {
+        return None;
+    }
+    Some(format!(
+        "got :{s}, expected one of: {}",
+        symbol_list(symbols)
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -199,30 +239,8 @@ pub struct ParamDecl {
 }
 
 impl ParamDecl {
-    /// The declared symbols rendered as `:symbol` literals, comma-joined —
-    /// the tail of every "expected one of" diagnostic.
-    pub fn symbol_list(&self) -> String {
-        self.symbols
-            .iter()
-            .map(|s| format!(":{}", s.name))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    /// `None` when `v` is an allowed symbol, or when this param declares no
-    /// symbol set; otherwise the diagnostic body naming what was got and
-    /// what was expected.
     pub fn symbol_violation(&self, v: &DynValue) -> Option<String> {
-        if self.symbols.is_empty() {
-            return None;
-        }
-        let DynValue::String(s) = v else {
-            return None; // the coarse type check already rejected this
-        };
-        if self.symbols.iter().any(|d| &d.name == s) {
-            return None;
-        }
-        Some(format!("got :{s}, expected one of: {}", self.symbol_list()))
+        symbol_violation(&self.symbols, v)
     }
 }
 
@@ -378,7 +396,16 @@ pub enum CoarseType {
     /// documents the symbol spelling, and docs render the values as
     /// `:symbol` literals.
     Symbol,
+    /// A time span written as a WCL unit literal (`30min`, `24h`, `90s`)
+    /// and resolved against WCL's `std.Duration`, whose base unit is the
+    /// nanosecond — so scripts receive a plain `Int` of nanoseconds and
+    /// divide to whatever resolution they work in.
+    Duration,
 }
+
+/// The WCL type a `duration` param's unit literal resolves against; its
+/// `@unit` decorators supply the suffixes (`ns`/`us`/`ms`/`s`/`min`/`h`/`d`).
+pub const DURATION_TYPE: &str = "std.Duration";
 
 impl CoarseType {
     pub fn parse(s: &str) -> Option<CoarseType> {
@@ -390,6 +417,7 @@ impl CoarseType {
             "list" => Some(CoarseType::List),
             "map" => Some(CoarseType::Map),
             "symbol" => Some(CoarseType::Symbol),
+            "duration" => Some(CoarseType::Duration),
             _ => None,
         }
     }
@@ -403,6 +431,7 @@ impl CoarseType {
             CoarseType::List => "list",
             CoarseType::Map => "map",
             CoarseType::Symbol => "symbol",
+            CoarseType::Duration => "duration",
         }
     }
 
@@ -419,6 +448,8 @@ impl CoarseType {
                 | (CoarseType::List, DynValue::List(_))
                 | (CoarseType::Map, DynValue::Map(_))
                 | (CoarseType::Symbol, DynValue::String(_))
+                // Resolved to base nanoseconds before it ever gets here.
+                | (CoarseType::Duration, DynValue::Int(_))
         )
     }
 

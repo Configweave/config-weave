@@ -491,7 +491,7 @@ fn emit_resource(w: &mut String, pkg: &str, res: &crate::model::ResourceDecl) {
     let _ = writeln!(w, "  p \"{}\"", esc(&res.description));
     let _ = writeln!(w, "  p \"Concurrency class: {}\"", res.concurrency.as_str());
     emit_param_table(w, &res.params);
-    emit_symbol_values(w, &res.params);
+    emit_symbol_values(w, &res.params, &[]);
 
     // A generated `step` example: required params with type placeholders,
     // optional params commented out with their defaults.
@@ -524,8 +524,8 @@ fn emit_gatherer(w: &mut String, pkg: &str, g: &crate::model::GathererDecl) {
     let _ = writeln!(w, "  h1 \"Gatherer: {}\"", esc(&g.name));
     let _ = writeln!(w, "  p \"{}\"", esc(&g.description));
     emit_param_table(w, &g.params);
-    emit_symbol_values(w, &g.params);
     emit_returns_table(w, &g.returns);
+    emit_symbol_values(w, &g.params, &g.returns);
 
     // A generated `gather` example — the label is the variable the
     // gathered value lands in.
@@ -558,16 +558,16 @@ fn emit_example(w: &mut String, body: &str) {
     let _ = writeln!(w, "  }}");
 }
 
-/// A parameter's default rendered as a WCL literal — symbol-typed
-/// params show the `:symbol` spelling their docs advertise.
+/// A parameter's default rendered as a WCL literal — symbol-typed params
+/// show the `:symbol` spelling their docs advertise, and duration-typed
+/// ones the unit literal rather than their nanosecond expansion.
 fn default_literal(p: &ParamDecl) -> Option<String> {
     let d = p.default.as_ref()?;
-    if p.ty == CoarseType::Symbol
-        && let wscript_std::DynValue::String(s) = d
-    {
-        return Some(format!(":{s}"));
+    match (p.ty, d) {
+        (CoarseType::Symbol, wscript_std::DynValue::String(s)) => Some(format!(":{s}")),
+        (CoarseType::Duration, wscript_std::DynValue::Int(ns)) => Some(duration_literal(*ns)),
+        _ => Some(crate::convert::canonicalise(d)),
     }
-    Some(crate::convert::canonicalise(d))
 }
 
 /// The property lines of a generated example: required params get a
@@ -645,23 +645,59 @@ fn placeholder(ty: CoarseType) -> &'static str {
         CoarseType::List => "[]",
         CoarseType::Map => "{}",
         CoarseType::Symbol => ":...",
+        CoarseType::Duration => "30min",
     }
 }
 
-/// The legal values of every parameter that enumerates a symbol set, as a
-/// nested bullet list under the parameter table. Params that declare no
-/// symbols (and pages with none at all) emit nothing — the section only
+/// Base nanoseconds rendered back as a WCL unit literal: the largest suffix
+/// that divides exactly, so `86_400_000_000_000` reads `1d` rather than a
+/// wall of digits. The source spelling isn't retained (the value is
+/// nanoseconds by the time it reaches the model), so a declared `24h`
+/// normalises to the equivalent `1d` here.
+fn duration_literal(ns: i64) -> String {
+    const UNITS: [(i64, &str); 7] = [
+        (86_400_000_000_000, "d"),
+        (3_600_000_000_000, "h"),
+        (60_000_000_000, "min"),
+        (1_000_000_000, "s"),
+        (1_000_000, "ms"),
+        (1_000, "us"),
+        (1, "ns"),
+    ];
+    if ns == 0 {
+        return "0s".into();
+    }
+    for (factor, suffix) in UNITS {
+        if ns % factor == 0 {
+            return format!("{}{suffix}", ns / factor);
+        }
+    }
+    format!("{ns}ns")
+}
+
+/// The legal values of every parameter and returns key that enumerates a
+/// symbol set, as a nested bullet list under the tables. Declarations with
+/// no symbols (and pages with none at all) emit nothing — the section only
 /// appears where there is something closed to say.
-fn emit_symbol_values(w: &mut String, params: &[ParamDecl]) {
-    let enumerated: Vec<&ParamDecl> = params.iter().filter(|p| !p.symbols.is_empty()).collect();
+fn emit_symbol_values(w: &mut String, params: &[ParamDecl], returns: &[crate::model::ReturnDecl]) {
+    let enumerated: Vec<(&str, &[crate::model::SymbolDecl])> = params
+        .iter()
+        .map(|p| (p.name.as_str(), p.symbols.as_slice()))
+        .chain(
+            returns
+                .iter()
+                .map(|r| (r.name.as_str(), r.symbols.as_slice())),
+        )
+        .filter(|(_, symbols)| !symbols.is_empty())
+        .collect();
     if enumerated.is_empty() {
         return;
     }
     let _ = writeln!(w, "  h2 \"Symbol values\"");
     let _ = writeln!(w, "  list {{");
-    for p in enumerated {
-        let _ = writeln!(w, "    li \"{}\" {{", esc(&code(&p.name)));
-        for s in &p.symbols {
+    for (name, symbols) in enumerated {
+        let _ = writeln!(w, "    li \"{}\" {{", esc(&code(name)));
+        for s in symbols {
             let label = code(&format!(":{}", s.name));
             let text = if s.description.is_empty() {
                 label

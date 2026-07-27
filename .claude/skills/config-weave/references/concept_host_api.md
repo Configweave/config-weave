@@ -16,7 +16,7 @@ string\]` and compose with `?\`. The authoritative surface is whatever
 `src/hostapi/*.rs`.
 
 
-Cross-platform modules: [log](../references/entity_log_module.md), [fs](../references/entity_fs_module.md), [path](../references/entity_path_module.md), [shell](../references/entity_shell_module.md), [http](../references/entity_http_module.md), [hash](../references/entity_hash_module.md), [archive](../references/entity_archive_module.md), [env](../references/entity_env_module.md), [sys](../references/entity_sys_module.md), [data](../references/entity_data_module.md), [template](../references/entity_template_module.md). Windows-only modules: [registry](../references/entity_registry_module.md), [service](../references/entity_service_module.md), [com](../references/entity_com_module.md).
+Cross-platform modules: [log](../references/entity_log_module.md), [fs](../references/entity_fs_module.md), [path](../references/entity_path_module.md), [shell](../references/entity_shell_module.md), [http](../references/entity_http_module.md), [hash](../references/entity_hash_module.md), [archive](../references/entity_archive_module.md), [env](../references/entity_env_module.md), [sys](../references/entity_sys_module.md), [data](../references/entity_data_module.md), [template](../references/entity_template_module.md), [time](../references/entity_time_module.md). Windows-only modules: [registry](../references/entity_registry_module.md), [service](../references/entity_service_module.md), [com](../references/entity_com_module.md).
 
 ## Related
 

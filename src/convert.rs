@@ -5,8 +5,69 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use wcl_lang::Value as WclValue;
+use wcl_lang::{EvalError, Field, Value as WclValue};
 use wscript_std::DynValue;
+
+use crate::model::DURATION_TYPE;
+
+/// Whether a WCL value was written as a `:symbol` (or a bare identifier,
+/// which lexes the same way). Both spellings convert to `DynValue::String`,
+/// so this is the only place the distinction survives.
+pub fn is_symbol_literal(v: &WclValue) -> bool {
+    matches!(v, WclValue::Symbol(_) | WclValue::Identifier(_))
+}
+
+/// One property / param field, evaluated and converted for scripts.
+pub struct FieldValue {
+    pub value: DynValue,
+    /// Whether the source spelling was `:symbol` — see [`is_symbol_literal`].
+    pub symbol_literal: bool,
+}
+
+/// Why a field's value isn't available.
+pub enum FieldValueError {
+    /// The value references a variable, which only binds after the gather
+    /// phase. Validation defers these to run time; at run time an
+    /// unresolved reference is a real failure, so the error is carried.
+    Unresolved(EvalError),
+    /// WCL evaluation failed.
+    Eval(EvalError),
+    /// The value evaluated but has no script representation.
+    Convert(String),
+}
+
+/// A property / param field's value as a `DynValue`.
+///
+/// Config Weave's `properties` / `params` blocks are `@schemaless`, so a
+/// bare unit literal (`max_age = 30min`) has no declared type to resolve
+/// against and plain `value()` can only report `UnitWithoutType`. Retry
+/// those against `std.Duration`, yielding base nanoseconds. A literal from
+/// another unit family (`4GiB`) fails that retry, and reports the original
+/// error rather than a confusing duration one.
+pub fn field_value_dyn(f: &Field<'_>) -> Result<FieldValue, FieldValueError> {
+    let convert = |v: &WclValue| {
+        wcl_to_dyn(v)
+            .map(|dv| FieldValue {
+                value: dv,
+                symbol_literal: is_symbol_literal(v),
+            })
+            .map_err(FieldValueError::Convert)
+    };
+    match f.value() {
+        Ok(v) => convert(v),
+        Err(e @ EvalError::UnresolvedReference { .. }) => {
+            Err(FieldValueError::Unresolved(e.clone()))
+        }
+        Err(original) => {
+            if matches!(original, EvalError::UnitWithoutType { .. })
+                && let Ok(v) = f.value_typed(DURATION_TYPE)
+            {
+                return convert(&v);
+            }
+            Err(FieldValueError::Eval(original.clone()))
+        }
+    }
+}
 
 /// WCL → wscript. Fails on values that have no dynamic representation
 /// (functions, tensors, variants, data paths).
@@ -79,6 +140,56 @@ pub fn dyn_to_wcl(v: &DynValue) -> WclValue {
             ),
         },
     }
+}
+
+/// `dyn_to_wcl` for a gatherer's result, honouring its `returns`
+/// declarations: a top-level key declared `type = "symbol"` binds as a real
+/// `Value::Symbol`, so a playbook compares it the way it was declared
+/// (`init.init == :systemd`) and interpolates it as `:systemd`.
+///
+/// Only top-level keys are typed — nested maps stay plain data, matching
+/// the fact that `returns` documents exactly one level.
+pub fn dyn_to_wcl_returns(v: &DynValue, returns: &[crate::model::ReturnDecl]) -> WclValue {
+    let DynValue::Map(m) = v else {
+        return dyn_to_wcl(v);
+    };
+    WclValue::Record {
+        ty: Vec::new(),
+        fields: Arc::new(
+            m.iter()
+                .map(|(k, val)| {
+                    let symbol = returns
+                        .iter()
+                        .any(|r| &r.name == k && r.ty == crate::model::CoarseType::Symbol);
+                    match (symbol, val) {
+                        (true, DynValue::String(s)) => (k.clone(), WclValue::Symbol(s.clone())),
+                        _ => (k.clone(), dyn_to_wcl(val)),
+                    }
+                })
+                .collect::<BTreeMap<_, _>>(),
+        ),
+    }
+}
+
+/// Every declared symbol set a gatherer's result violates, as ready-made
+/// diagnostic bodies. A key the gatherer didn't return isn't a violation —
+/// `returns` doesn't require its keys to be present.
+pub fn returns_symbol_violations(
+    v: &DynValue,
+    returns: &[crate::model::ReturnDecl],
+) -> Vec<String> {
+    let DynValue::Map(m) = v else {
+        return Vec::new();
+    };
+    returns
+        .iter()
+        .filter(|r| r.ty == crate::model::CoarseType::Symbol)
+        .filter_map(|r| {
+            let got = m.get(&r.name)?;
+            let why = r.symbol_violation(got)?;
+            Some(format!("key '{}' is not a declared symbol: {why}", r.name))
+        })
+        .collect()
 }
 
 /// wscript → JSON, for the in-container test protocol (`__gather` output,
