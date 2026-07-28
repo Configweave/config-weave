@@ -92,7 +92,13 @@ jobs:
 
           # Next version = bump from the last v* tag, scanning conventional
           # commits since that tag for the bump level (0.x: major -> minor).
-          LAST_TAG=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo "")
+          # Highest version among the tags reachable from HEAD, NOT the
+          # nearest one. `git describe --abbrev=0` returns the closest tag
+          # by commit distance, so a tag added to a recent commit while an
+          # older commit carried a higher version made the next release
+          # count up from the lower one — v0.2.0-alpha was followed by
+          # v0.1.2-alpha. Version order is the only order that matters here.
+          LAST_TAG=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | head -1)
           if [[ -z "$LAST_TAG" ]]; then
             PREV_MAJOR=0; PREV_MINOR=0; PREV_PATCH=0; RANGE="HEAD"
           else
