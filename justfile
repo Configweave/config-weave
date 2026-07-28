@@ -29,7 +29,9 @@ test:
 # Lint and format checks
 [group('test')]
 check:
-	cargo clippy -- -D warnings
+	# --all-targets so tests and benches are linted too — CI lints them,
+	# and without it a lint in test code only surfaces after a push.
+	cargo clippy --all-targets -- -D warnings
 	cargo fmt --check
 
 # Validate the sample playbook with the debug binary

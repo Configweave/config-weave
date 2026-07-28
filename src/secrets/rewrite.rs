@@ -141,9 +141,9 @@ mod tests {
     #[test]
     fn round_trips_a_multiline_value_through_the_quoted_form() {
         let secret = "line one\nline\ttwo\\end \"quoted\"";
-        let source = format!("playbook \"p\" {{ vars {{ a = secret(\"x\") }} }}");
-        let edits = vec![(span_of(&source, "secret(\"x\")"), render_call(secret))];
-        let out = splice(&source, &edits, "t.wcl").unwrap();
+        let source = r#"playbook "p" { vars { a = secret("x") } }"#;
+        let edits = vec![(span_of(source, "secret(\"x\")"), render_call(secret))];
+        let out = splice(source, &edits, "t.wcl").unwrap();
         let calls = scan::scan_source(&out, "t.wcl").unwrap();
         assert_eq!(calls[0].state, scan::State::Plaintext(secret.to_string()));
     }
