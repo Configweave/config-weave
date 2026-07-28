@@ -44,6 +44,20 @@ author writes `secret("plaintext")` anywhere an expression is legal,
 check/apply/test decrypt with a password from `$CONFIG_WEAVE_PASSWORD` /
 `--password-stdin` / `--password-file`. An un-encrypted `secret()` fails
 validation; decrypted values are scrubbed from all output.
+A **composite** is a named, parameterised block of steps declared in a
+package or a playbook and invoked from a step like a resource. Its `arg`
+declarations bind into the body bare and as `args.name`; the loader
+expands an invocation statically into a synthetic container of real steps,
+so the DAG, planner and every report shape see ordinary steps
+(`container/…/invocation/inner`). A body sees only its own arguments.
+The **built-in `weave` package** ships inside the binary (`src/builtin/`,
+reserved name): `weave.execute` pairs a guard script (exit 0 = already
+converged) with an action, and the re-check enforces convergence;
+`weave.execute_once` runs a script once per host and records it under
+`/var/lib/config-weave/once/` (Windows: `HKLM\Software\config-weave\Once`,
+override with `$CONFIG_WEAVE_STATE_DIR`) — the only persistent state
+config-weave owns, a deliberate PRD §17 exception scoped as a migration
+aid. `docs/notes.md` records the bindings for both.
 `config-weave pkg` (`src/pkgrepo/`) installs packages from git repos:
 `pkgs/repo.wcl` records registered repos + installed packages with
 their source commit; add/remove/update/search plus `pkg repo

@@ -727,6 +727,111 @@ fn lab_converge_test_passes() {
     assert_eq!(t["verify"]["passed"], true, "{stdout}");
 }
 
+/// The built-in `weave` package inside a real instance. Both resources are
+/// convergent under the three-run protocol for different reasons —
+/// `execute`'s guard starts returning 0, `execute_once` finds its own
+/// record — and neither is installed, so this also proves the embedded
+/// scripts reach an instance that has no `pkgs/weave` to copy.
+#[test]
+#[ignore = "needs vmlab and a static binary (just test-lab)"]
+fn lab_builtin_execute_converges() {
+    let Some(binary) = lab_binary() else { return };
+    if !vmlab_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    write_fixture(dir.path());
+    let pkg = dir.path().join("pkgs/tlab");
+    std::fs::write(
+        pkg.join("tests/execute_verify.ws"),
+        r#"use value
+use fs
+
+// The point of both built-ins is that runs two and three do nothing, so
+// the evidence is a side effect that happened exactly once.
+fn verify(facts: Value) -> Result[bool, string] {
+    if !fs::exists("/var/tmp/guarded") {
+        return Err("weave.execute never ran its action")
+    }
+    let count = fs::read("/var/tmp/once-count")?
+    if count != "ran\n" {
+        return Err("weave.execute_once ran more than once: " + count)
+    }
+    Ok(fs::exists("/var/lib/config-weave/once/lab_bootstrap"))
+}
+"#,
+    )
+    .unwrap();
+    let manifest = pkg.join("package.wcl");
+    let src = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        src.replace(
+            "  test \"converges\" {",
+            r#"  test "builtins_converge" {
+    description = "The built-in execute resources converge"
+    image = "debian:12"
+    verify = "tests/execute_verify.ws"
+
+    step "guarded" {
+      description = "Run an action only while its guard is unsatisfied"
+      resource = "weave.execute"
+      properties {
+        check = "test -f /var/tmp/guarded"
+        run = "date > /var/tmp/guarded"
+      }
+    }
+
+    step "once" {
+      description = "Run a script exactly once per host"
+      resource = "weave.execute_once"
+      requires = ["guarded"]
+      properties {
+        id = "lab_bootstrap"
+        run = "echo ran >> /var/tmp/once-count"
+      }
+    }
+  }
+
+  test "unguarded_action_errors" {
+    description = "An action that never satisfies its guard is not convergence"
+    image = "debian:12"
+
+    step "unguarded" {
+      description = "The re-check disagrees, so the step errors"
+      resource = "weave.execute"
+      expect = "error"
+      properties {
+        check = "false"
+        run = "true"
+      }
+    }
+  }
+
+  test "converges" {"#,
+        ),
+    )
+    .unwrap();
+
+    let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:builtins_converge"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let t = &v["tests"][0];
+    assert_eq!(t["outcome"], "passed", "{stdout}");
+    assert_eq!(t["verify"]["passed"], true, "{stdout}");
+    for s in t["steps"].as_array().unwrap() {
+        assert_eq!(s["apply"], "configured", "{stdout}");
+        assert_eq!(s["second_apply"], "already_configured", "{stdout}");
+    }
+
+    let (code, stdout, stderr) = run_lab(dir.path(), &binary, &["tlab:unguarded_action_errors"]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}{stderr}"));
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert_eq!(v["tests"][0]["outcome"], "passed", "{stdout}");
+}
+
 #[test]
 #[ignore = "needs vmlab and a static binary (just test-lab)"]
 fn lab_grouped_tests_share_one_instance() {

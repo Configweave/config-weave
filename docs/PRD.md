@@ -448,3 +448,12 @@ Each lands with tests and an example playbook exercising the new surface.
 - Cross-platform `service` abstraction (systemd backend).
 - Parallel-safe cancellation of in-flight applies.
 - Mid-play checkpointing/state files (current design is deliberately stateless).
+
+> **One exception, added post-v1.** The built-in `weave.execute_once`
+> resource records, per host, that a script has run — under
+> `/var/lib/config-weave/once/` on Linux/macOS and
+> `HKLM\Software\config-weave\Once` on Windows. It is a migration aid: it
+> lets a playbook adopt existing shell automation before that automation
+> has been rewritten as convergent resources. Nothing else reads or writes
+> that state, reboot resume remains stateless, and the rest of the design
+> is unchanged. See `docs/notes.md` for the bindings.

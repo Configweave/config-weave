@@ -586,6 +586,39 @@ fn a_composite_step_may_not_declare_expect() {
     );
 }
 
+/// A `test` asserts one status per declared step, matched by name in the
+/// run report — which a composite cannot satisfy, since it reports under
+/// the names of the steps it expands into.
+#[test]
+fn a_test_step_may_not_target_a_composite() {
+    validate_fails_with(
+        r#"  composite "c" {
+    description = "A composite"
+    step "inner" {
+      description = "step"
+      resource = "marker"
+      properties { path = "/tmp/x" }
+    }
+  }
+
+  test "t" {
+    description = "Tries to test a composite"
+    image = "debian:12"
+    step "s" {
+      description = "invoke"
+      resource = "c"
+    }
+  }
+"#,
+        r#"  play "p" {
+    description = "unused"
+    step "t" { description = "invoke" resource = "probe.c" }
+  }
+"#,
+        "targets the composite 'probe.c'",
+    );
+}
+
 #[test]
 fn a_resource_and_a_composite_may_not_share_a_name() {
     validate_fails_with(

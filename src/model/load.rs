@@ -918,6 +918,22 @@ fn validate_pending(
             );
             continue;
         };
+        // A test asserts a status per declared step, matched by name in the
+        // run report — but a composite reports one row per step it expands
+        // into, under names the test never declared. Rather than let that
+        // fail as "missing from the report", say so here.
+        if pkg.composites.contains_key(&s.resource) {
+            ctx.err(
+                format!(
+                    "{} targets the composite '{}.{}'; a test asserts a status per \
+                     step, and a composite expands into steps of its own. Test the \
+                     resources it invokes instead.",
+                    s.what, s.package, s.resource
+                ),
+                s.span,
+            );
+            continue;
+        }
         let Some(decl) = pkg.resources.get(&s.resource) else {
             ctx.err(
                 format!(

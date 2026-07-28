@@ -198,6 +198,116 @@ by a CLI command. Bindings fixed here:
   Values under 4 bytes are not registered — masking them would corrupt
   unrelated output more than it protects.
 
+## Composites (post-v1 extension)
+
+A `composite` is a named, parameterised block of steps declared in a
+package or a playbook and invoked from a step's ordinary `resource` field
+— the unit of reuse between "one resource" and "copy-paste five steps".
+Bindings fixed here:
+
+- **Expansion is static, and happens in the loader.** The body declares
+  its steps, so nothing about the set of steps depends on the host. The
+  loader turns an invocation into a synthetic `PlayItem::Container` of
+  real `Step`s, which is why the DAG, the planner, the scheduler, every
+  report shape and the NDJSON feed needed no new concept: they only ever
+  see ordinary steps in ordinary containers. An expanded step's
+  `container_path` gains one segment per enclosing invocation, so a report
+  path reads `container/…/invocation/inner`.
+  `Step::frames` records the invocation chain, and — the trick that keeps
+  it cheap — every scope the resolver and planner need derives from
+  `container_path` and `frames.len()` together, because the last
+  `frames.len()` segments of the path *are* the invocation names.
+- **Declarations are `arg` blocks, not `param` blocks**, and the whole
+  argument map binds as `args`. Both halves of that are forced. WCL puts
+  a block's own kinds *and* its schema's field names in scope, and either
+  shadows a `let` of the same name: with the declarations spelled `param`,
+  `param.path` inside the body resolved against the declarations and came
+  back `UnresolvedReference`, and the same happened with the schema field
+  named `args`. Singular kind + plural map + a schema field called
+  `declared_args` is the combination that leaves the binding readable.
+  `SHADOWED_ARG_NAMES` in `model/load.rs` turns away argument names that
+  would hit the same wall.
+- **Arguments bind twice**: bare (`body`) and under the map
+  (`args.body`). Prefer `args.` and say so in the docs — a property field
+  shadows a bare outer variable of the same name, so the pass-through
+  `properties { path = path }` is a self-reference cycle (the same edge
+  recorded under "Host API decisions" below), while `args.path` always
+  works.
+- **A body sees only its own arguments.** Not gatherer results, not
+  declared vars, not `--var` overrides. `VarStore::open_composite` starts
+  from an empty store rather than `self` deliberately: a composite is a
+  function, not a macro, and a fact it needs is passed in as a property.
+  That is exactly what lets the same block be moved from a playbook into
+  a package unchanged.
+- **`requires` is scoped to match.** Inside a body a name reaches only a
+  sibling of the same invocation, checked where the body is declared; from
+  the playbook a name reaches only playbook-declared steps, so an inner
+  step is not addressable from outside. Naming an invocation depends on
+  *every* step it expanded into — "after the whole block". Playbook scope
+  stays flat across containers, as it always was. `dag::resolve` is the
+  one place these rules live.
+- **The planner walks the chain, reopening documents.** A composite's
+  properties live in the document that declared it, so `plan_step` walks
+  the frames outward-in: frame 0's arguments come from the invoking step's
+  block in the playbook document, then each composite's document is
+  reopened with those arguments bound and the next frame's block read from
+  it. Argument maps are memoized per invocation path, so a body of *n*
+  steps reopens the declaring document *n* times but evaluates each
+  invocation once. Nesting is capped at 8 and a cycle is rejected by name.
+- **Composites and resources share one namespace.** A package may not
+  declare both under one name; a step's `resource` field names either. An
+  unqualified reference means a playbook-local composite from a playbook,
+  and the *declaring package's own* namespace from inside a package body
+  (matching what an unqualified test-step reference already meant).
+- `step` is one schema shared with `test`, because WCL allows one type per
+  block kind per namespace. The loader rejects the fields that belong only
+  to the other: `expect` in a composite, `concurrency` in a test.
+
+## Built-in resources (the `weave` package)
+
+`weave` is a package config-weave carries in its own binary — reserved, so
+a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
+
+- **It loads through the ordinary package path.** `ScriptSource` lets a
+  resource's script come from memory instead of a file, and `Package.dir`
+  is empty (`Package::is_builtin`). That was the whole cost: `validate`,
+  `list`, `docs` and the run path work unchanged, and only the testlab's
+  package-copying had to learn to skip a package with no directory. A
+  `WeaveResolver::embedded` serves the shared `lib.ws` to the built-ins
+  and to nothing else.
+- **`weave.execute` is the guarded escape hatch** the `command_run`
+  question in `config-weave-pkgs-proposals.md` left open. Two scripts: a
+  guard whose **exit status 0 means already converged**, and an action.
+  The convergence contract then enforces itself for free — `run_lifecycle`
+  re-runs the guard after the action, and a guard still unsatisfied fails
+  the step with "apply claimed success but the re-check disagrees". That
+  is the feature, not a side effect: it is what stops a fire-and-forget
+  command passing as converged.
+- Its concurrency class is `parallel` **deliberately**. A step may only
+  tighten, never loosen, so defaulting to `exclusive` would permanently
+  forbid running two unrelated scripts at once; a step that touches a
+  shared lock declares `concurrency = "exclusive"` itself.
+- Only `:bash` and `:powershell` (plus `:auto`) are offered, because those
+  are the only script-body entry points the `shell` host module has. Unix
+  truncates an exit status to 0–255, so `reboot_on` can only see the
+  four-digit installer codes on Windows.
+- **`weave.execute_once` owns the project's only persistent state**, and
+  is a documented exception to PRD §17's "deliberately stateless". It
+  exists to let a playbook adopt a pile of existing shell scripts without
+  rewriting them all first; every script converted to a real resource, or
+  to `weave.execute` with a genuine guard, is one less that needs it.
+  - The record lives at `/var/lib/config-weave/once/<id>` on Linux/macOS
+    and in `HKLM\Software\config-weave\Once` on Windows.
+    `$CONFIG_WEAVE_STATE_DIR` overrides the root on either platform and
+    selects the file form on Windows too, which is what makes the resource
+    testable without touching the real machine.
+  - It is keyed by `id` **alone**, never by the script's text: editing
+    `run` does not run it again. That is the point of the resource rather
+    than an oversight, so the record also stores a sha256 of what actually
+    ran — forensics only, gating nothing.
+  - `apply` writes the record *before* reporting `RebootRequired`, so the
+    reboot cannot cause a second run.
+
 ## Execution semantics (PRD §9 interpretations)
 
 - Steps left undispatched when a run halts get the report status

@@ -126,7 +126,7 @@ raw heredocs (`<<'TMPL'`) and pass dynamic data through the `vars` map.
 
 | Ansible module(s) | Why not | config-weave equivalent |
 |---|---|---|
-| `command`, `shell`, `raw`, `script`, `expect` | config-weave models desired **state**, not ad-hoc execution | resources; (optional, contentious: a guarded `command_run` with `creates`/`unless` — flag for discussion) |
+| `command`, `shell`, `raw`, `script`, `expect` | config-weave models desired **state**, not ad-hoc execution | **resolved:** the built-in `weave.execute` (guard script + action script) and `weave.execute_once` (migration crutch). Shipped in the binary, not in this repo. |
 | `copy`, `fetch`, `slurp` | No controller→node copy model; reading is a gatherer concern | `file` (content), `download`, `path_stat` |
 | `iptables` | Superseded by modern backend already shipped | `linux_network.nftables_ruleset`, `firewalld_service` |
 | `apt_key` | Deprecated upstream | proposed `apt_signing_key` (keyrings) |
@@ -153,12 +153,12 @@ raw heredocs (`<<'TMPL'`) and pass dynamic data through the `vars` map.
 
 **Tier 3 — nice to have / decide later**
 - `package_held`/`debconf_selection`, `subversion_checkout`, `getent`/`mounts`/`paths_matching` gatherers.
-- Decision needed: a guarded `command_run` escape hatch — yes/no?
+- ~~Decision needed: a guarded `command_run` escape hatch — yes/no?~~ **Resolved:** yes, but built into config-weave as `weave.execute` rather than added here.
 
 **Open decisions to confirm before building**
 1. New packages `linux_scm` and `linux_python` vs folding into existing ones?
 2. Removal model confirmed as separate `*_absent` resources (vs a `state` param)? (current norm says separate.)
-3. Any appetite for a guarded `command_run`?
+3. ~~Any appetite for a guarded `command_run`?~~ **Answered:** shipped as the built-in `weave.execute`; the guard is a script whose exit status 0 means "already converged", and the engine re-runs it after the action so a fire-and-forget command cannot pass as converged.
 
 ---
 
