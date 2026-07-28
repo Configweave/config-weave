@@ -481,14 +481,7 @@ fn schedule(
             StepStatus::RebootRequired if opts.mode == Mode::Apply => halted = true,
             _ => {}
         }
-        let report = StepReport {
-            name: steps[done.idx].name.clone(),
-            container_path: steps[done.idx].container_path.clone(),
-            resource: format!("{}.{}", steps[done.idx].package, steps[done.idx].resource),
-            status: done.status,
-            message: done.message,
-            duration: done.duration,
-        };
+        let report = step_report(steps[done.idx], done.status, done.message, done.duration);
         (opts.events)(Event::StepFinished {
             idx: done.idx,
             report: report.clone(),
@@ -519,13 +512,30 @@ fn schedule(
 }
 
 fn quick_report(step: &Step, status: StepStatus, message: Option<String>) -> StepReport {
+    step_report(step, status, message, Duration::ZERO)
+}
+
+/// The one place a `StepReport` is built, so a step message — which comes
+/// straight from a resource script and may quote a parameter it was given
+/// — is scrubbed of decrypted secrets before it reaches the event stream,
+/// the report or the log.
+fn step_report(
+    step: &Step,
+    status: StepStatus,
+    message: Option<String>,
+    duration: Duration,
+) -> StepReport {
+    let message = match message {
+        Some(m) if crate::secrets::redact::active() => Some(crate::secrets::redact::scrub(&m)),
+        other => other,
+    };
     StepReport {
         name: step.name.clone(),
         container_path: step.container_path.clone(),
         resource: format!("{}.{}", step.package, step.resource),
         status,
         message,
-        duration: Duration::ZERO,
+        duration,
     }
 }
 

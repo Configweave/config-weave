@@ -37,6 +37,13 @@ AST-preserving round-tripping) lives in the `docjson/` crate
 A web GUI (`weave-server`) and CI/CD daemon (`config-weave-pipeline`)
 were built and later removed to refocus on the CLI — see git history
 before 2026-07 for that code.
+`config-weave secrets` (`src/secrets/`) encrypts values in place: an
+author writes `secret("plaintext")` anywhere an expression is legal,
+`secrets encrypt|decrypt|rekey` rewrites the call's byte span in
+`playbook.wcl` (Argon2id + XChaCha20-Poly1305, `CWENC1` blobs), and
+check/apply/test decrypt with a password from `$CONFIG_WEAVE_PASSWORD` /
+`--password-stdin` / `--password-file`. An un-encrypted `secret()` fails
+validation; decrypted values are scrubbed from all output.
 `config-weave pkg` (`src/pkgrepo/`) installs packages from git repos:
 `pkgs/repo.wcl` records registered repos + installed packages with
 their source commit; add/remove/update/search plus `pkg repo

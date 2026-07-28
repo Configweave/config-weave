@@ -95,6 +95,26 @@ fn esc(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Collapse `secret("CWENC1.…")` to `secret(…)` in rendered expression
+/// source. The blob is ciphertext, so publishing it leaks nothing — but a
+/// 150-character base64 run in a variables table is unreadable, and the
+/// only thing a reader needs is that the value is a secret.
+fn elide_secrets(expr_src: &str) -> String {
+    let mut out = String::with_capacity(expr_src.len());
+    let mut rest = expr_src;
+    while let Some(at) = rest.find("secret(\"") {
+        let after = &rest[at + "secret(\"".len()..];
+        let Some(close) = after.find("\")") else {
+            break;
+        };
+        out.push_str(&rest[..at]);
+        out.push_str("secret(…)");
+        rest = &after[close + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Page ids must be identifiers.
 fn ident(s: &str) -> String {
     let mut out = String::new();
@@ -269,7 +289,7 @@ fn emit_index(w: &mut String, pb: &Playbook, pkg_only: bool) {
                 w,
                 "      | \"{}\" | \"{}\" |",
                 esc(&code(&v.name)),
-                esc(&code(&v.expr_src))
+                esc(&code(&elide_secrets(&v.expr_src)))
             );
         }
         let _ = writeln!(w, "  }}");

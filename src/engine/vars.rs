@@ -30,11 +30,21 @@ pub enum Origin {
 #[derive(Default, Clone)]
 pub struct VarStore {
     vals: HashMap<String, (Origin, Value)>,
+    /// Present once a password has been resolved; makes `secret("…")`
+    /// decrypt rather than evaluate to the locked placeholder.
+    secrets: Option<Arc<crate::secrets::SecretCtx>>,
 }
 
 impl VarStore {
     pub fn new() -> VarStore {
         VarStore::default()
+    }
+
+    /// Bind a decryption context, so `secret()` resolves for real in
+    /// every document this store opens.
+    pub fn with_secrets(mut self, ctx: Arc<crate::secrets::SecretCtx>) -> VarStore {
+        self.secrets = Some(ctx);
+        self
     }
 
     /// Insert respecting precedence: an existing higher-priority value
@@ -71,7 +81,9 @@ impl VarStore {
         out
     }
 
-    /// Environment with the `__weave_var` builtin serving stored values.
+    /// Environment with the `__weave_var` builtin serving stored values,
+    /// plus `secret()` — decrypting when a password has been bound,
+    /// otherwise the locked placeholder.
     pub fn environment(&self) -> Environment {
         let store: Arc<HashMap<String, Value>> = Arc::new(
             self.vals
@@ -89,6 +101,7 @@ impl VarStore {
                     .ok_or_else(|| format!("no stored variable '{name}'"))
             }),
         );
+        crate::secrets::env::register(&mut env, self.secrets.clone());
         env
     }
 

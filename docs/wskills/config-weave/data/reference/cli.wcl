@@ -19,6 +19,8 @@ cli config_weave_cli {
   cli_switch sw_logfile  { long = "--log-file"  value_name = "PATH"   description = "Enable NDJSON file logging (independent of terminal mode)." }
   cli_switch sw_loglevel { long = "--log-level" value_name = "LEVEL"  description = "File log level (independent of terminal verbosity), default info." }
   cli_switch sw_verbose  { long = "--verbose"   short = "-v"  description = "Increase terminal verbosity (repeatable: -v, -vv, -vvv)." }
+  cli_switch sw_pw_stdin { long = "--password-stdin"  description = "Read the secrets password from stdin. Alternative to $CONFIG_WEAVE_PASSWORD; exactly one source may be given, and there is no prompt." }
+  cli_switch sw_pw_file  { long = "--password-file"  value_name = "PATH"  description = "Read the secrets password from a file (one trailing newline is stripped)." }
 
   subcommand cmd_validate {
     name = "validate"
@@ -91,6 +93,37 @@ cli config_weave_cli {
     description = "Scaffold a skeleton playbook with an example package, resource and gatherer."
     cli_arg arg_dir { name = "dir"  description = "Destination directory for the new playbook." }
     code_example { lang = "console"  code = "config-weave init ./my-playbook" }
+  }
+
+  subcommand cmd_secrets {
+    name = "secrets"
+    audience = :both
+    description = "Encrypt, decrypt or re-key the `secret(\"…\")` values in playbook.wcl. Works on the raw source, so it is never blocked by the very validation error it clears."
+
+    subcommand cmd_secrets_encrypt {
+      name = "encrypt"
+      audience = :both
+      description = "Encrypt every plaintext secret() in place. The password must match the values already encrypted in the file, so a new secret can only be added by someone who can read the existing ones."
+      cli_arg arg_dir { name = "playbook-dir"  required = false  description = "The playbook directory (default `.`)." }
+      code_example { lang = "console"  code = "CONFIG_WEAVE_PASSWORD='…' config-weave secrets encrypt ./my-playbook" }
+    }
+
+    subcommand cmd_secrets_decrypt {
+      name = "decrypt"
+      audience = :both
+      description = "Rewrite encrypted values back to plaintext so they can be edited. Leaves the real values on disk in the clear — re-encrypt before committing."
+      cli_arg arg_dir { name = "playbook-dir"  required = false  description = "The playbook directory (default `.`)." }
+      code_example { lang = "console"  code = "CONFIG_WEAVE_PASSWORD='…' config-weave secrets decrypt ./my-playbook" }
+    }
+
+    subcommand cmd_secrets_rekey {
+      name = "rekey"
+      audience = :both
+      description = "Change the password: decrypt with the old one, then re-encrypt every value under a fresh salt — sweeping up any still-plaintext calls in the same pass."
+      cli_arg arg_dir { name = "playbook-dir"  required = false  description = "The playbook directory (default `.`)." }
+      cli_switch sw_new_pw_file { long = "--new-password-file"  value_name = "PATH"  description = "Read the new password from a file. Alternative to $CONFIG_WEAVE_NEW_PASSWORD." }
+      code_example { lang = "console"  code = "CONFIG_WEAVE_PASSWORD='old' CONFIG_WEAVE_NEW_PASSWORD='new' config-weave secrets rekey ./my-playbook" }
+    }
   }
 
   subcommand cmd_version {

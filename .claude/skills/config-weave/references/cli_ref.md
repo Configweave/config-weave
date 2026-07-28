@@ -15,6 +15,8 @@ Single-binary configuration management — validate, check, and apply WCL playbo
 | --log-file | PATH | Enable NDJSON file logging (independent of terminal mode). |
 | --log-level | LEVEL | File log level (independent of terminal verbosity), default info. |
 | -v, --verbose | — | Increase terminal verbosity (repeatable: -v, -vv, -vvv). |
+| --password-stdin | — | Read the secrets password from stdin. Alternative to $CONFIG_WEAVE_PASSWORD; exactly one source may be given, and there is no prompt. |
+| --password-file | PATH | Read the secrets password from a file (one trailing newline is stripped). |
 
 ## config-weave validate
 
@@ -123,6 +125,10 @@ Scaffold a skeleton playbook with an example package, resource and gatherer.
 ```console
 config-weave init ./my-playbook
 ```
+
+## config-weave secrets
+
+Encrypt, decrypt or re-key the `secret("…")` values in playbook.wcl. Works on the raw source, so it is never blocked by the very validation error it clears.
 
 ## config-weave version
 

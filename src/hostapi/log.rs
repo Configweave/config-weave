@@ -43,7 +43,18 @@ pub fn clear_sink() {
 }
 
 /// Emit a script log line through the current thread's sink.
+///
+/// This is the single choke point for both `log::*` and the redirected
+/// `print`/`println`, so it is where a script that echoes a decrypted
+/// parameter gets scrubbed.
 pub fn emit(level: Level, msg: &str) {
+    let scrubbed;
+    let msg = if crate::secrets::redact::active() {
+        scrubbed = crate::secrets::redact::scrub(msg);
+        scrubbed.as_str()
+    } else {
+        msg
+    };
     SINK.with(|s| match &*s.borrow() {
         Some(sink) => sink(level, msg),
         None => eprintln!("[{}] {msg}", level.as_str()),

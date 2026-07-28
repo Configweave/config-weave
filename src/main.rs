@@ -9,6 +9,7 @@ mod model;
 mod pkgrepo;
 mod report;
 mod scaffold;
+mod secrets;
 mod testlab;
 mod vocab;
 
@@ -45,6 +46,14 @@ struct Cli {
     /// Merge a WCL file's top-level variables into scope.
     #[arg(long = "var-file", global = true, value_name = "PATH")]
     var_file: Option<PathBuf>,
+
+    /// Read the secrets password from stdin (one line).
+    #[arg(long, global = true)]
+    password_stdin: bool,
+
+    /// Read the secrets password from a file.
+    #[arg(long, global = true, value_name = "PATH")]
+    password_file: Option<PathBuf>,
 
     /// Worker pool size (default: min(cpu_count, 8)).
     #[arg(long, global = true, value_name = "N")]
@@ -168,6 +177,11 @@ enum Command {
         #[command(subcommand)]
         action: PkgCommand,
     },
+    /// Encrypt, decrypt or re-key the `secret("…")` values in playbook.wcl.
+    Secrets {
+        #[command(subcommand)]
+        action: SecretsCommand,
+    },
     /// Print version information.
     Version,
     /// (internal) Run one gatherer and print its value as JSON.
@@ -246,6 +260,37 @@ enum PkgRepoCommand {
     List,
 }
 
+/// The password comes from `$CONFIG_WEAVE_PASSWORD`, `--password-stdin`
+/// or `--password-file`; there is no prompt, so an automated run fails
+/// with exit code 2 rather than blocking on a terminal.
+#[derive(Subcommand)]
+enum SecretsCommand {
+    /// Encrypt every plaintext `secret("…")` in place. The password must
+    /// match the values already encrypted in the file.
+    Encrypt {
+        /// Playbook directory.
+        #[arg(default_value = ".")]
+        playbook_dir: PathBuf,
+    },
+    /// Rewrite encrypted values back to plaintext so they can be edited.
+    Decrypt {
+        /// Playbook directory.
+        #[arg(default_value = ".")]
+        playbook_dir: PathBuf,
+    },
+    /// Change the password: re-encrypt every value under a new one.
+    /// The new password comes from `--new-password-file` or
+    /// `$CONFIG_WEAVE_NEW_PASSWORD`.
+    Rekey {
+        /// Playbook directory.
+        #[arg(default_value = ".")]
+        playbook_dir: PathBuf,
+        /// Read the new password from a file.
+        #[arg(long, value_name = "PATH")]
+        new_password_file: Option<PathBuf>,
+    },
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     logging::set_verbosity(cli.verbose);
@@ -261,6 +306,7 @@ fn main() -> ExitCode {
         Command::Validate { playbook_dir } => cmd_validate(&cli, playbook_dir),
         Command::List { playbook_dir } => cmd_list(&cli, playbook_dir),
         Command::Pkg { dir, action } => pkgrepo::cmd_pkg(dir, action),
+        Command::Secrets { action } => cmd_secrets(&cli, action),
         Command::Version => {
             println!("config-weave {}", env!("CARGO_PKG_VERSION"));
             EXIT_OK
@@ -467,9 +513,62 @@ fn override_store(cli: &Cli) -> Result<VarStore, Vec<Diag>> {
     Ok(store)
 }
 
+/// The password inputs as given on the command line.
+fn password_args(cli: &Cli) -> secrets::PasswordArgs {
+    secrets::PasswordArgs {
+        stdin: cli.password_stdin,
+        file: cli.password_file.clone(),
+    }
+}
+
+/// Attach a decryption context to the store when the playbook has
+/// `secret()` values. A playbook without any never asks for a password.
+fn unlock(cli: &Cli, pb: &model::Playbook, store: VarStore) -> Result<VarStore, Vec<Diag>> {
+    let calls = secrets::scan::scan_source(&pb.source, "playbook.wcl")
+        .map_err(|e| vec![Diag::from_parse(e)])?;
+    if !secrets::needs_password(&calls) {
+        return Ok(store);
+    }
+    let password = password_args(cli).resolve().map_err(|d| vec![d])?;
+    let ctx = secrets::SecretCtx::new(password);
+    // Verify the password now rather than when (or whether) the evaluator
+    // reaches a secret — see `secrets::unlock_all`.
+    secrets::unlock_all(
+        &pb.source,
+        &pb.root.join("playbook.wcl"),
+        &calls,
+        &ctx,
+        "wrong password",
+    )?;
+    Ok(store.with_secrets(ctx))
+}
+
+fn cmd_secrets(cli: &Cli, action: &SecretsCommand) -> u8 {
+    let args = password_args(cli);
+    let result = match action {
+        SecretsCommand::Encrypt { playbook_dir } => secrets::encrypt(playbook_dir, &args),
+        SecretsCommand::Decrypt { playbook_dir } => secrets::decrypt(playbook_dir, &args),
+        SecretsCommand::Rekey {
+            playbook_dir,
+            new_password_file,
+        } => secrets::rekey(playbook_dir, &args, new_password_file.as_deref()),
+    };
+    match result {
+        Ok(msg) => {
+            println!("{msg}");
+            EXIT_OK
+        }
+        Err(diags) => {
+            print_diags(&diags);
+            EXIT_VALIDATION
+        }
+    }
+}
+
 fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode, events_ndjson: bool) -> u8 {
     let pb = load_or_exit!(load_validated(dir));
     let store = load_or_exit!(override_store(cli));
+    let store = load_or_exit!(unlock(cli, &pb, store));
     let mode_out = report::select_mode(cli.json, cli.no_color);
     // NDJSON and the rich progress line both write stderr; the event
     // stream wins (same exclusivity as `test --events-ndjson`).

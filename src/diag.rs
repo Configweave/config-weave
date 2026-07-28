@@ -17,12 +17,26 @@ pub struct Diag {
     pub rendered: String,
 }
 
+/// Every `Diag` is built here, so scrubbing decrypted secrets out of both
+/// strings in one place covers the lot. `rendered` matters most: it
+/// attaches the surrounding source, and a WCL evaluation error can quote
+/// the value that caused it.
+fn finish(message: String, rendered: String) -> Diag {
+    if crate::secrets::redact::active() {
+        return Diag {
+            message: crate::secrets::redact::scrub(&message),
+            rendered: crate::secrets::redact::scrub(&rendered),
+        };
+    }
+    Diag { message, rendered }
+}
+
 impl Diag {
     /// A diagnostic with no source context.
     pub fn bare(message: impl Into<String>) -> Diag {
         let message = message.into();
         let rendered = format!("error: {message}");
-        Diag { message, rendered }
+        finish(message, rendered)
     }
 
     /// A diagnostic pointing at a span in a named source.
@@ -41,14 +55,14 @@ impl Diag {
             source.to_string(),
         ));
         let rendered = format!("{report:?}");
-        Diag { message, rendered }
+        finish(message, rendered)
     }
 
     /// Wrap a WCL parse error (it already carries its source).
     pub fn from_parse(err: wcl_lang::ParseError) -> Diag {
         let message = err.to_string();
         let rendered = render_report(err);
-        Diag { message, rendered }
+        finish(message, rendered)
     }
 
     /// Wrap a WCL evaluation/schema error, attaching the source it points
@@ -60,7 +74,7 @@ impl Diag {
             source.to_string(),
         ));
         let rendered = format!("{report:?}");
-        Diag { message, rendered }
+        finish(message, rendered)
     }
 
     /// Wrap wscript compile diagnostics for one script file.
@@ -89,10 +103,7 @@ impl Diag {
                     file.display().to_string(),
                     source.to_string(),
                 ));
-                Diag {
-                    message: format!("[{}] {}", d.code, d.message),
-                    rendered: format!("{report:?}"),
-                }
+                finish(format!("[{}] {}", d.code, d.message), format!("{report:?}"))
             })
             .collect()
     }

@@ -14,7 +14,7 @@ index authoring {
   audience = :both
   name    = "Authoring playbooks & packages"
   summary = "The WCL building blocks: plays of steps, packages of resources and gatherers."
-  related = [playbook, play, step, container, package, resource, gatherer, variables, dag_scheduling, playbook_wcl, package_wcl]
+  related = [playbook, play, step, container, package, resource, gatherer, variables, encrypted_values, dag_scheduling, playbook_wcl, package_wcl]
 
   index authoring_reference {
     audience = :both

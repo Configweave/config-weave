@@ -86,6 +86,7 @@ _The WCL building blocks: plays of steps, packages of resources and gatherers._
 - [Resource](references/concept_resource.md)
 - [Gatherer](references/concept_gatherer.md)
 - [Variables](references/concept_variables.md)
+- [Encrypted values](references/concept_encrypted_values.md)
 - [DAG scheduling](references/concept_dag_scheduling.md)
 - [playbook.wcl](references/entity_playbook_wcl.md)
 - [package.wcl](references/entity_package_wcl.md)

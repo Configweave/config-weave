@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use wcl_lang::{Block, Document, Environment, Field, Value};
+use wcl_lang::{Block, Document, Field, Value};
 use wscript_std::DynValue;
 
 use crate::convert::{FieldValueError, field_value_dyn, is_symbol_literal, wcl_to_dyn};
@@ -47,7 +47,10 @@ pub fn load(dir: &Path) -> Loaded {
     let packages = load_packages(dir, &mut diags);
 
     let with_import = vocab::with_import(&source, vocab::PLAYBOOK_IMPORT, false);
-    let env = Environment::new();
+    // `secret()` must resolve to *something* for property type-checking to
+    // proceed without a password; whether a call is actually encrypted is
+    // decided by the syntactic scan in `engine::validate`.
+    let env = crate::secrets::env::locked();
     let doc = match Document::open_at_with_loader(
         &with_import,
         "playbook.wcl",
@@ -785,8 +788,21 @@ fn load_package(
             return None;
         }
     };
+    // `secret()` is playbook-only, but the builtin is registered here too
+    // so a misplaced call reports the explicit rejection below rather than
+    // a bare "unknown identifier".
+    if let Ok(calls) = crate::secrets::scan::scan_source(&source, &wcl_path.display().to_string()) {
+        diags.extend(crate::secrets::reject_calls(
+            &source,
+            wcl_path,
+            &calls,
+            "packages are shared and distributed via git, so a package \
+             cannot hold a value encrypted under one playbook's password",
+        ));
+    }
+
     let with_import = vocab::with_import(&source, vocab::PACKAGE_IMPORT, false);
-    let env = Environment::new();
+    let env = crate::secrets::env::locked();
     let doc = match Document::open_at_with_loader(
         &with_import,
         &wcl_path.display().to_string(),

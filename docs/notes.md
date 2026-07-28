@@ -121,6 +121,83 @@ windows 0.6x.
   loader enforces required fields (including the PRD's mandatory
   `description`s) from each block schema's `effective_fields()`.
 
+## Encrypted values (`secret("…")` — post-v1 extension)
+
+Password-encrypted values live **in** `playbook.wcl`, encrypted in place
+by a CLI command. Bindings fixed here:
+
+- **A builtin, not a block.** `secret("…")` is a WCL `Environment`
+  builtin registered next to `__weave_var`, so it works anywhere an
+  expression does — a `vars` entry, step `properties`, gather `params`, a
+  `condition` — with **no vocabulary change**. That also means DocJson
+  round-trips it for free: `inspect_ast` classifies a call as
+  `Val::Expr(source)` and `emit` re-parses it, so `docjson/` needed no
+  managed-kind entry. A dedicated `secret "name" { … }` block was the
+  alternative and would have been simpler to validate, but it would have
+  confined secrets to named variables.
+- **Two resolver modes.** `model::load` registers a *locked* builtin
+  returning an empty `utf8`; the run path registers an *unlocked* one that
+  decrypts. The placeholder exists so `check_params` can type-check a
+  secret as the string it always is without a password — which is what
+  keeps `validate` and `docs` password-free. Whether a value is actually
+  encrypted is never decided by evaluation: that is a separate syntactic
+  scan (`secrets::scan`) over the `parse_for_edit` AST, so the
+  "not encrypted yet" error needs no key. Every `match` in that walker is
+  exhaustive with no `_` arm — a new `wcl_lang` AST variant must break the
+  build rather than silently hide a call site, which would be committed in
+  the clear.
+- **Blob format.** `CWENC1.<b64url salt>.<b64url nonce>.<b64url ct||tag>`,
+  Argon2id (m=19456 KiB, t=2, p=1 — OWASP's minimum, deliberately light
+  because derivation also runs in testlab containers) into
+  XChaCha20-Poly1305. The version tag pins both primitives *and* their
+  parameters; changing either means `CWENC2`. The AAD is the constant
+  `config-weave/secret/v1`, **not** the variable's name: binding a blob to
+  its name would turn "you renamed a variable" into an indistinguishable
+  "wrong password", and an AEAD failure carries no detail to tell them
+  apart. The salt is carried per blob but *reused across a file*, so one
+  playbook derives one key however many secrets it has.
+- **"Same password" is the AEAD, not a stored verifier.**
+  `secrets encrypt` decrypts every already-encrypted value before writing
+  anything; any failure aborts and points at `secrets rekey`. So a new
+  secret can only be added by someone who can already read the ones in the
+  file, and no separate salt/verifier header is needed. `rekey` decrypts
+  with the old password, mints a fresh salt, and re-encrypts everything —
+  sweeping up any still-plaintext calls in the same pass.
+- **Splice, don't reformat.** The rewrite replaces the byte span of the
+  whole `Expr::Call` (`Expr::Utf8` carries no span of its own, so the call
+  is the smallest re-writable unit) and re-parses before writing.
+  Deliberately *not* the `format::to_source` round-trip `docjson` uses:
+  `wcl_lang` has no CST, so re-printing canonicalises the file (`//` → `#`,
+  indentation, one-liners) and `encrypt` would reformat a hand-authored
+  playbook as a side effect of changing one string. Safety rails are
+  `wcl set`'s: re-parse, then temp-file + rename.
+- **Passwords: `$CONFIG_WEAVE_PASSWORD`, `--password-stdin`,
+  `--password-file`** — exactly one, never a prompt. A missing password is
+  always exit 2 so an automated run fails loudly instead of blocking on a
+  terminal that isn't there. One trailing newline is stripped. A playbook
+  with no `secret()` calls never asks. `rekey`'s new password comes from
+  `--new-password-file` or `$CONFIG_WEAVE_NEW_PASSWORD`.
+- **Verified up front.** A run decrypts every value before executing
+  rather than leaving it to the evaluator. WCL is lazy, so a secret no step
+  references is never evaluated — a wrong password would otherwise produce
+  a clean, successful run and only bite later, when some other step began
+  using the value. Doing it eagerly also warms the key cache and registers
+  every plaintext with the redactor.
+- **Playbook-only.** `secret()` in a `package.wcl` is a validation error:
+  packages are shared and distributed via git, so a package cannot hold a
+  value encrypted under one playbook's password. That also covers `test`
+  and `scenario` blocks, which live in packages and run in disposable
+  instances with no password.
+- **Redaction.** Decrypted plaintexts land in a process-global registry
+  and are scrubbed to `***` at four choke points: `Diag` construction
+  (`diag::finish` — the pre-existing leak vector, since a spanned
+  diagnostic attaches the surrounding source), `hostapi::log::emit` (the
+  single path for both `log::*` and redirected `print`), `StepReport`
+  construction in `engine/run.rs` (step messages come straight from
+  scripts), and the docs generator, which elides a blob to `secret(…)`.
+  Values under 4 bytes are not registered — masking them would corrupt
+  unrelated output more than it protects.
+
 ## Execution semantics (PRD §9 interpretations)
 
 - Steps left undispatched when a run halts get the report status

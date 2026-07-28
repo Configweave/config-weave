@@ -75,6 +75,7 @@ pub fn execute(
 /// wscript script against the host context.
 pub fn validate(pb: &Playbook) -> Vec<Diag> {
     let mut diags = Vec::new();
+    diags.extend(validate_secrets(pb));
     for play in &pb.plays {
         if let Err(ds) = dag::build(play) {
             diags.extend(ds);
@@ -85,4 +86,16 @@ pub fn validate(pb: &Playbook) -> Vec<Diag> {
         diags.extend(ds);
     }
     diags
+}
+
+/// A `secret()` still holding a plaintext, or one this feature cannot
+/// rewrite, fails validation — so a run can never silently use (or a
+/// commit ship) an un-encrypted secret.
+fn validate_secrets(pb: &Playbook) -> Vec<Diag> {
+    let path = pb.root.join("playbook.wcl");
+    match crate::secrets::scan::scan_source(&pb.source, &path.display().to_string()) {
+        // A parse error here is already reported by `model::load`.
+        Err(_) => Vec::new(),
+        Ok(calls) => crate::secrets::validate_calls(&pb.source, &path, &calls),
+    }
 }
