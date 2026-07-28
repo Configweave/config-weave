@@ -218,7 +218,11 @@ pub fn synthesize(pb: &Playbook, pkg: &Package, test: &TestDecl) -> Result<Synth
             .packages
             .get(name)
             .ok_or_else(|| Diag::bare(format!("test references unknown package '{name}'")))?;
-        copy_dir(&p.dir, &dir.path().join("pkgs").join(name))?;
+        // The built-in package travels inside the config-weave binary the
+        // instance already runs, so there is nothing to copy.
+        if !p.is_builtin() {
+            copy_dir(&p.dir, &dir.path().join("pkgs").join(name))?;
+        }
     }
     copy_playbook_lib(pb, dir.path())?;
 
@@ -279,7 +283,9 @@ pub fn synthesize_resource(
         .packages
         .get(package)
         .ok_or_else(|| Diag::bare(format!("scenario references unknown package '{package}'")))?;
-    copy_dir(&p.dir, &dir.path().join("pkgs").join(package))?;
+    if !p.is_builtin() {
+        copy_dir(&p.dir, &dir.path().join("pkgs").join(package))?;
+    }
     copy_playbook_lib(pb, dir.path())?;
 
     let step = "step";
@@ -314,7 +320,9 @@ pub fn synthesize_gather(pb: &Playbook, package: &str) -> Result<SynthesizedTest
         .packages
         .get(package)
         .ok_or_else(|| Diag::bare(format!("scenario references unknown package '{package}'")))?;
-    copy_dir(&p.dir, &dir.path().join("pkgs").join(package))?;
+    if !p.is_builtin() {
+        copy_dir(&p.dir, &dir.path().join("pkgs").join(package))?;
+    }
     copy_playbook_lib(pb, dir.path())?;
     let out = format!(
         "playbook \"weave-scenario\" {{\n  description = {}\n  version = \"0.0.0\"\n\n  \

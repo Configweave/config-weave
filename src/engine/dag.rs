@@ -79,7 +79,11 @@ pub fn build(play: &Play) -> Result<StepDag, Vec<Diag>> {
         // The step's own `requires`, in its own scope, plus the `requires`
         // of every invocation that produced it — each resolved in the scope
         // of whoever wrote it.
-        let own = (step.container_path.as_slice(), step.frames.len(), &step.requires);
+        let own = (
+            step.container_path.as_slice(),
+            step.frames.len(),
+            &step.requires,
+        );
         let inherited = step.frames.iter().enumerate().map(|(d, f)| {
             let cut = step.container_path.len() - (step.frames.len() - d);
             (&step.container_path[..cut], d, &f.requires)

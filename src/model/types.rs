@@ -209,7 +209,9 @@ impl Concurrency {
 pub struct Package {
     pub name: String,
     pub description: String,
-    /// Package directory; script paths are relative to it.
+    /// Package directory; script paths are relative to it. Empty for the
+    /// built-in `weave` package, which has no directory at all — see
+    /// [`Package::is_builtin`].
     pub dir: PathBuf,
     /// Raw `package.wcl` source. Kept so the planner can reopen the
     /// document with a composite invocation's arguments bound.
@@ -224,21 +226,63 @@ pub struct Package {
     pub scenarios: Vec<ScenarioDecl>,
 }
 
+impl Package {
+    /// Whether this is the package config-weave carries in its own binary.
+    /// It has no directory, so anything that walks or copies a package
+    /// folder has to skip it — the instance running config-weave already
+    /// has these scripts.
+    pub fn is_builtin(&self) -> bool {
+        self.dir.as_os_str().is_empty()
+    }
+}
+
 #[derive(Debug)]
 pub struct ResourceDecl {
     pub name: String,
     pub description: String,
-    /// Absolute path to the resource script.
-    pub script: PathBuf,
+    pub script: ScriptSource,
     pub concurrency: Concurrency,
     pub params: Vec<ParamDecl>,
+}
+
+/// Where a script's text comes from. Everything in a package on disk is a
+/// `File`; the built-in `weave` package carries its scripts in the binary.
+#[derive(Debug, Clone)]
+pub enum ScriptSource {
+    /// Absolute path to a `.ws` file.
+    File(PathBuf),
+    /// A script compiled into config-weave, under the name it is declared
+    /// and imported by.
+    Embedded(&'static str),
+}
+
+impl ScriptSource {
+    /// Read the script. Embedded sources cannot fail.
+    pub fn read(&self) -> Result<String, String> {
+        match self {
+            ScriptSource::File(p) => {
+                std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {e}", p.display()))
+            }
+            ScriptSource::Embedded(name) => crate::builtin::script(name)
+                .map(str::to_string)
+                .ok_or_else(|| format!("no built-in script '{name}'")),
+        }
+    }
+
+    /// What diagnostics and the wscript source map call this script.
+    pub fn display_path(&self) -> PathBuf {
+        match self {
+            ScriptSource::File(p) => p.clone(),
+            ScriptSource::Embedded(name) => PathBuf::from(format!("<weave>/{name}")),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct GathererDecl {
     pub name: String,
     pub description: String,
-    pub script: PathBuf,
+    pub script: ScriptSource,
     pub params: Vec<ParamDecl>,
     /// Documented keys of the gathered value. Mostly docs metadata — the
     /// engine does not check that a gathered map has these keys, or that

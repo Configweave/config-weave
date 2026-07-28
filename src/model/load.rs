@@ -233,12 +233,7 @@ impl PlaybookLoader<'_> {
                 );
             }
         }
-        validate_pending(
-            self.packages,
-            &self.composites,
-            &pending,
-            self.ctx.diags,
-        );
+        validate_pending(self.packages, &self.composites, &pending, self.ctx.diags);
 
         for block in pb.blocks() {
             match block.kind() {
@@ -418,13 +413,8 @@ impl PlaybookLoader<'_> {
                             span: inv.span,
                         });
                         let mut chain = Vec::new();
-                        let container = self.expand_composite(
-                            inv,
-                            containers,
-                            frames,
-                            composites,
-                            &mut chain,
-                        );
+                        let container =
+                            self.expand_composite(inv, containers, frames, composites, &mut chain);
                         out.push(PlayItem::Container(container));
                     }
                     None => {}
@@ -476,10 +466,8 @@ impl PlaybookLoader<'_> {
         if let Some(at) = chain.iter().position(|k| k == &key) {
             let mut cycle: Vec<&str> = chain[at..].iter().map(String::as_str).collect();
             cycle.push(&key);
-            self.ctx.err(
-                format!("composite cycle: {}", cycle.join(" -> ")),
-                inv.span,
-            );
+            self.ctx
+                .err(format!("composite cycle: {}", cycle.join(" -> ")), inv.span);
             return container;
         }
         if chain.len() >= MAX_COMPOSITE_DEPTH {
@@ -514,13 +502,8 @@ impl PlaybookLoader<'_> {
         // and each instance carries its own path and provenance.
         let templates: Vec<Step> = decl.steps.clone();
         for tmpl in templates {
-            let nested = lookup_composite(
-                self.packages,
-                composites,
-                &tmpl.package,
-                &tmpl.resource,
-            )
-            .is_some();
+            let nested = lookup_composite(self.packages, composites, &tmpl.package, &tmpl.resource)
+                .is_some();
             if nested {
                 let inner = CompositeInvocation {
                     name: tmpl.name.clone(),
@@ -752,9 +735,30 @@ impl PlaybookLoader<'_> {
 
 fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package> {
     let mut packages = BTreeMap::new();
+    // Test references can point at packages that load later, so their
+    // resolution is a second pass once the full map exists.
+    let mut pending = Vec::new();
+
+    // The built-in package first: it is always available, with or without
+    // a `pkgs/` folder.
+    if let Some((pkg, pend)) = load_package_source(
+        crate::builtin::PACKAGE_WCL,
+        Path::new(crate::builtin::PACKAGE_PATH),
+        Path::new(""),
+        Scripts::Embedded,
+        diags,
+    ) {
+        packages.insert(pkg.name.clone(), pkg);
+        pending.push(pend);
+    }
+
     let pkgs_dir = dir.join("pkgs");
     let Ok(entries) = std::fs::read_dir(&pkgs_dir) else {
-        return packages; // no pkgs/ folder is legal (steps then can't resolve)
+        // No `pkgs/` folder is legal; the built-in package is still there.
+        for p in &pending {
+            validate_pending(&packages, &BTreeMap::new(), p, diags);
+        }
+        return packages;
     };
     let mut paths: Vec<PathBuf> = entries
         .filter_map(|e| e.ok())
@@ -762,14 +766,20 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
         .filter(|p| p.is_dir())
         .collect();
     paths.sort();
-    // Test references can point at packages that load later, so their
-    // resolution is a second pass once the full map exists.
-    let mut pending = Vec::new();
     for pkg_dir in paths {
         let folder = pkg_dir
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
+        if folder == crate::builtin::PACKAGE {
+            diags.push(Diag::bare(format!(
+                "package folder '{}' uses the reserved name '{}'; that package is \
+                 built into config-weave, and a local one would shadow it",
+                pkg_dir.display(),
+                crate::builtin::PACKAGE
+            )));
+            continue;
+        }
         let wcl_path = pkg_dir.join("package.wcl");
         if !wcl_path.is_file() {
             diags.push(Diag::bare(format!(
@@ -1277,12 +1287,27 @@ fn load_package(
             return None;
         }
     };
+    load_package_source(&source, wcl_path, pkg_dir, Scripts::Dir(pkg_dir), diags)
+}
+
+/// Load one package manifest. `dir` becomes [`Package::dir`] and is where
+/// WCL resolves any file imports; `scripts` decides what a `script = "…"`
+/// field names. The built-in package passes an empty `dir` and embedded
+/// scripts, and is otherwise loaded exactly like a package on disk.
+fn load_package_source(
+    source: &str,
+    wcl_path: &Path,
+    dir: &Path,
+    scripts: Scripts<'_>,
+    diags: &mut Vec<Diag>,
+) -> Option<(Package, Pending)> {
+    let pkg_dir = dir;
     // `secret()` is playbook-only, but the builtin is registered here too
     // so a misplaced call reports the explicit rejection below rather than
     // a bare "unknown identifier".
-    if let Ok(calls) = crate::secrets::scan::scan_source(&source, &wcl_path.display().to_string()) {
+    if let Ok(calls) = crate::secrets::scan::scan_source(source, &wcl_path.display().to_string()) {
         diags.extend(crate::secrets::reject_calls(
-            &source,
+            source,
             wcl_path,
             &calls,
             "packages are shared and distributed via git, so a package \
@@ -1290,7 +1315,7 @@ fn load_package(
         ));
     }
 
-    let with_import = vocab::with_import(&source, vocab::PACKAGE_IMPORT, false);
+    let with_import = vocab::with_import(source, vocab::PACKAGE_IMPORT, false);
     let env = crate::secrets::env::locked();
     let doc = match Document::open_at_with_loader(
         &with_import,
@@ -1306,14 +1331,14 @@ fn load_package(
         }
     };
     for err in doc.schema_errors() {
-        diags.push(Diag::from_eval(err, wcl_path, &source));
+        diags.push(Diag::from_eval(err, wcl_path, source));
     }
-    check_required_fields(&doc, wcl_path, &source, diags);
+    check_required_fields(&doc, wcl_path, source, diags);
 
     let pkg_block = doc.block("package")?;
     let mut ctx = Ctx {
         file: wcl_path,
-        source: &source,
+        source,
         diags,
     };
 
@@ -1325,7 +1350,7 @@ fn load_package(
     let mut test_blocks = Vec::new();
     let mut scenarios = Vec::new();
     let mut seen_scenarios = HashSet::new();
-    let mut pending = Pending::new(wcl_path, &source);
+    let mut pending = Pending::new(wcl_path, source);
 
     for block in pkg_block.blocks() {
         match block.kind() {
@@ -1333,12 +1358,15 @@ fn load_package(
             // references resolve regardless of declaration order.
             "test" => test_blocks.push(block),
             "composite" => {
-                let Some(c) = load_composite(&block, &name, &source, &mut ctx, &mut pending) else {
+                let Some(c) = load_composite(&block, &name, source, &mut ctx, &mut pending) else {
                     continue;
                 };
                 if composites.insert(c.name.clone(), c).is_some() {
                     ctx.err(
-                        format!("duplicate composite '{}'", label_string(&block).unwrap_or_default()),
+                        format!(
+                            "duplicate composite '{}'",
+                            label_string(&block).unwrap_or_default()
+                        ),
                         wcl_span(block.span()),
                     );
                 }
@@ -1348,7 +1376,7 @@ fn load_package(
                     continue;
                 };
                 let sdesc = string_field(&block, "description", &mut ctx).unwrap_or_default();
-                let Some(script) = script_field(&block, pkg_dir, &mut ctx) else {
+                let Some(script) = script_path_field(&block, pkg_dir, &mut ctx) else {
                     continue;
                 };
                 // `lab` is a directory holding a vmlab.wcl.
@@ -1385,7 +1413,7 @@ fn load_package(
                     continue;
                 };
                 let gdesc = string_field(&block, "description", &mut ctx).unwrap_or_default();
-                let Some(script) = script_field(&block, pkg_dir, &mut ctx) else {
+                let Some(script) = script_field(&block, scripts, &mut ctx) else {
                     continue;
                 };
                 let params = load_params(&block, &mut ctx);
@@ -1414,7 +1442,7 @@ fn load_package(
                     continue;
                 };
                 let rdesc = string_field(&block, "description", &mut ctx).unwrap_or_default();
-                let Some(script) = script_field(&block, pkg_dir, &mut ctx) else {
+                let Some(script) = script_field(&block, scripts, &mut ctx) else {
                     continue;
                 };
                 let concurrency = match string_field_optional(&block, "concurrency", &mut ctx) {
@@ -1475,7 +1503,7 @@ fn load_package(
     let mut tests = Vec::new();
     let mut seen_tests = HashSet::new();
     for block in &test_blocks {
-        if let Some(t) = load_test(block, pkg_dir, &name, &source, &mut ctx, &mut pending) {
+        if let Some(t) = load_test(block, pkg_dir, &name, source, &mut ctx, &mut pending) {
             if !seen_tests.insert(t.name.clone()) {
                 ctx.err(format!("duplicate test '{}'", t.name), t.span);
             }
@@ -1529,8 +1557,8 @@ fn load_package(
         Package {
             name,
             description,
-            dir: pkg_dir.to_path_buf(),
-            source: source.clone(),
+            dir: dir.to_path_buf(),
+            source: source.to_string(),
             gatherers,
             resources,
             composites,
@@ -2366,20 +2394,55 @@ fn string_list_field(block: &Block<'_>, name: &str, ctx: &mut Ctx<'_>) -> Option
     }
 }
 
-fn script_field(block: &Block<'_>, pkg_dir: &Path, ctx: &mut Ctx<'_>) -> Option<PathBuf> {
-    let rel = string_field(block, "script", ctx)?;
-    let path = pkg_dir.join(&rel);
-    if !path.is_file() {
-        ctx.err(
-            format!(
-                "script file '{rel}' does not exist in {}",
-                pkg_dir.display()
-            ),
-            wcl_span(block.span()),
-        );
-        return None;
+/// Where a package's `script = "…"` fields resolve to: a directory on
+/// disk, or the sources compiled into the binary for the built-in package.
+#[derive(Clone, Copy)]
+enum Scripts<'a> {
+    Dir(&'a Path),
+    Embedded,
+}
+
+/// A `script = "…"` field that must name a real file: scenario drivers are
+/// handed to the testlab as paths, so they have no embedded form.
+fn script_path_field(block: &Block<'_>, pkg_dir: &Path, ctx: &mut Ctx<'_>) -> Option<PathBuf> {
+    match script_field(block, Scripts::Dir(pkg_dir), ctx)? {
+        ScriptSource::File(p) => Some(p),
+        ScriptSource::Embedded(_) => None,
     }
-    Some(path)
+}
+
+fn script_field(
+    block: &Block<'_>,
+    scripts: Scripts<'_>,
+    ctx: &mut Ctx<'_>,
+) -> Option<ScriptSource> {
+    let rel = string_field(block, "script", ctx)?;
+    match scripts {
+        Scripts::Dir(pkg_dir) => {
+            let path = pkg_dir.join(&rel);
+            if !path.is_file() {
+                ctx.err(
+                    format!(
+                        "script file '{rel}' does not exist in {}",
+                        pkg_dir.display()
+                    ),
+                    wcl_span(block.span()),
+                );
+                return None;
+            }
+            Some(ScriptSource::File(path))
+        }
+        Scripts::Embedded => match crate::builtin::SCRIPTS.iter().find(|(n, _)| *n == rel) {
+            Some((name, _)) => Some(ScriptSource::Embedded(name)),
+            None => {
+                ctx.err(
+                    format!("no built-in script '{rel}'"),
+                    wcl_span(block.span()),
+                );
+                None
+            }
+        },
+    }
 }
 
 /// Extract the raw expression text of `name = expr` from the source the

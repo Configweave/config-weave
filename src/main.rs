@@ -1,3 +1,4 @@
+mod builtin;
 mod comdispatch;
 mod convert;
 mod diag;
@@ -1136,6 +1137,39 @@ fn cmd_wcl_render() -> u8 {
     }
 }
 
+/// A composite's inventory entry: its arguments, and what it expands into.
+/// Shared by the playbook-local map and each package's.
+fn composites_json(
+    composites: &std::collections::BTreeMap<String, model::CompositeDecl>,
+) -> Vec<serde_json::Value> {
+    composites
+        .values()
+        .map(|c| {
+            serde_json::json!({
+                "name": c.name,
+                "description": c.description,
+                "args": c.params.iter().map(|p| serde_json::json!({
+                    "name": p.name,
+                    "description": p.description,
+                    "type": p.ty.as_str(),
+                    "required": p.required,
+                    "default": p.default.as_ref().map(convert::dyn_to_json),
+                })).collect::<Vec<_>>(),
+                "steps": c.steps.iter().map(|s| serde_json::json!({
+                    "name": s.name,
+                    "description": s.description,
+                    "resource": if s.package.is_empty() {
+                        s.resource.clone()
+                    } else {
+                        format!("{}.{}", s.package, s.resource)
+                    },
+                    "requires": s.requires,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
 fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
     let loaded = model::load(dir);
     let Some(pb) = loaded.playbook else {
@@ -1230,7 +1264,9 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
                 serde_json::json!({
                     "name": pkg.name,
                     "description": pkg.description,
+                    "builtin": pkg.is_builtin(),
                     "resources": resources,
+                    "composites": composites_json(&pkg.composites),
                     "gatherers": gatherers,
                     "tests": tests,
                     "scenarios": scenarios,
@@ -1244,6 +1280,7 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
                 "version": pb.version,
                 "description": pb.description,
                 "plays": plays,
+                "composites": composites_json(&pb.composites),
                 "packages": packages,
             })
         );
@@ -1258,6 +1295,20 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
             if play.steps().len() == 1 { "" } else { "s" },
             play.description
         );
+    }
+    // Playbook-local composites are invocable from any play here, so they
+    // belong in the same overview as the plays themselves.
+    if !pb.composites.is_empty() {
+        println!("composites:");
+        for c in pb.composites.values() {
+            println!(
+                "  {}  ({} step{}) — {}",
+                c.name,
+                c.steps.len(),
+                if c.steps.len() == 1 { "" } else { "s" },
+                c.description
+            );
+        }
     }
     EXIT_OK
 }

@@ -124,6 +124,8 @@ pub struct PackageDoc {
     #[serde(default)]
     pub resources: Vec<ResourceDoc>,
     #[serde(default)]
+    pub composites: Vec<CompositeDoc>,
+    #[serde(default)]
     pub tests: Vec<TestDoc>,
     #[serde(default)]
     pub scenarios: Vec<ScenarioDoc>,
@@ -152,6 +154,40 @@ pub struct ResourceDoc {
     pub concurrency: Option<String>,
     #[serde(default)]
     pub params: Vec<ParamDoc>,
+}
+
+/// A composite: a named, parameterised block of steps invoked like a
+/// resource. Its declarations are `arg` blocks rather than `param` ones,
+/// and its body is a list of steps, so it round-trips separately.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompositeDoc {
+    pub name: String,
+    #[serde(default, rename = "_orig", skip_serializing_if = "is_none")]
+    pub orig: Option<String>,
+    pub description: String,
+    #[serde(default)]
+    pub args: Vec<ParamDoc>,
+    #[serde(default)]
+    pub steps: Vec<CompositeStepDoc>,
+}
+
+/// One step of a composite body. Shares the playbook step's shape minus
+/// the things only a play has (containers, and a test's `expect`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompositeStepDoc {
+    pub name: String,
+    #[serde(default, rename = "_orig", skip_serializing_if = "is_none")]
+    pub orig: Option<String>,
+    pub description: String,
+    pub resource: String,
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub condition: Option<String>,
+    #[serde(default)]
+    pub requires: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub concurrency: Option<String>,
+    #[serde(default)]
+    pub properties: Vec<Kv>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

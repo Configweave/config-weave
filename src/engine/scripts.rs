@@ -21,7 +21,7 @@ use wscript_std::DynValue;
 
 use crate::diag::Diag;
 use crate::hostapi::{ApplyResult, CheckResult};
-use crate::model::Playbook;
+use crate::model::{Playbook, ScriptSource};
 
 /// Resolves `use` imports for a script: the importing file's own
 /// directory first, then each root — the declaring package's `lib/`, then
@@ -36,11 +36,26 @@ use crate::model::Playbook;
 /// to the importing file.
 pub struct WeaveResolver {
     roots: Vec<PathBuf>,
+    /// Sources compiled into the binary, consulted before the filesystem.
+    /// Only the built-in package sets this, so its shared helper resolves
+    /// for its own scripts and for nothing else.
+    embedded: &'static [(&'static str, &'static str)],
 }
 
 impl WeaveResolver {
     pub fn new(roots: Vec<PathBuf>) -> WeaveResolver {
-        WeaveResolver { roots }
+        WeaveResolver {
+            roots,
+            embedded: &[],
+        }
+    }
+
+    /// A resolver serving the built-in package's embedded scripts.
+    pub fn embedded() -> WeaveResolver {
+        WeaveResolver {
+            roots: Vec::new(),
+            embedded: crate::builtin::SCRIPTS,
+        }
     }
 
     /// Rediscover a script's roots from its path, for the two places that
@@ -59,7 +74,10 @@ impl WeaveResolver {
             }
             dir = d.parent();
         }
-        WeaveResolver { roots }
+        WeaveResolver {
+            roots,
+            embedded: &[],
+        }
     }
 }
 
@@ -69,6 +87,16 @@ impl SourceResolver for WeaveResolver {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
+        if let ImportSpec::Name(n) = &spec {
+            let file = format!("{n}.ws");
+            if let Some((name, src)) = self.embedded.iter().find(|(k, _)| *k == file) {
+                return Ok(ResolvedSource {
+                    key: format!("<weave>/{name}"),
+                    path: format!("<weave>/{name}"),
+                    src: src.to_string(),
+                });
+            }
+        }
         let candidates: Vec<PathBuf> = match &spec {
             ImportSpec::Path(p) => vec![from_dir.join(p)],
             ImportSpec::Name(n) => {
@@ -149,15 +177,19 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
 
     for pkg in pb.packages.values() {
         // Every script of this package resolves imports against its own
-        // `lib/` first, then the playbook's.
-        let resolver = WeaveResolver::new(vec![pkg.dir.join("lib"), pb.root.join("lib")]);
+        // `lib/` first, then the playbook's. The built-in package has no
+        // directory: its helpers come from the binary.
+        let resolver = if pkg.is_builtin() {
+            WeaveResolver::embedded()
+        } else {
+            WeaveResolver::new(vec![pkg.dir.join("lib"), pb.root.join("lib")])
+        };
 
         for res in pkg.resources.values() {
-            if let Some((unit, source)) = compile_one(ctx, &resolver, &res.script, &mut diags) {
-                let check =
-                    entry_kind::<CheckResult>(&unit, "check", &res.script, &source, &mut diags);
-                let apply =
-                    entry_kind::<ApplyResult>(&unit, "apply", &res.script, &source, &mut diags);
+            let path = res.script.display_path();
+            if let Some((unit, source)) = compile_script(ctx, &resolver, &res.script, &mut diags) {
+                let check = entry_kind::<CheckResult>(&unit, "check", &path, &source, &mut diags);
+                let apply = entry_kind::<ApplyResult>(&unit, "apply", &path, &source, &mut diags);
                 if let (Some(check), Some(apply)) = (check, apply) {
                     resources.insert(
                         format!("{}.{}", pkg.name, res.name),
@@ -167,9 +199,9 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
             }
         }
         for g in pkg.gatherers.values() {
-            if let Some((unit, source)) = compile_one(ctx, &resolver, &g.script, &mut diags) {
-                let gather =
-                    entry_kind::<DynValue>(&unit, "gather", &g.script, &source, &mut diags);
+            let path = g.script.display_path();
+            if let Some((unit, source)) = compile_script(ctx, &resolver, &g.script, &mut diags) {
+                let gather = entry_kind::<DynValue>(&unit, "gather", &path, &source, &mut diags);
                 if let Some(gather) = gather {
                     gatherers.insert(
                         format!("{}.{}", pkg.name, g.name),
@@ -192,7 +224,9 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
                 check_run_contract(&unit, &s.script, &source, &mut diags);
             }
         }
-        compile_lib(ctx, &resolver, &pkg.dir.join("lib"), &mut diags);
+        if !pkg.is_builtin() {
+            compile_lib(ctx, &resolver, &pkg.dir.join("lib"), &mut diags);
+        }
     }
     // Playbook-level helpers see only each other.
     let root_resolver = WeaveResolver::new(vec![pb.root.join("lib")]);
@@ -219,10 +253,28 @@ fn compile_one(
     path: &Path,
     diags: &mut Vec<Diag>,
 ) -> Option<(CompiledUnit, String)> {
-    let source = match std::fs::read_to_string(path) {
+    compile_script(
+        ctx,
+        resolver,
+        &ScriptSource::File(path.to_path_buf()),
+        diags,
+    )
+}
+
+/// `compile_one` over either kind of source. Embedded scripts compile from
+/// memory under a `<weave>/…` name, which is what diagnostics and the
+/// wscript source map then show.
+fn compile_script(
+    ctx: &Context,
+    resolver: &WeaveResolver,
+    script: &ScriptSource,
+    diags: &mut Vec<Diag>,
+) -> Option<(CompiledUnit, String)> {
+    let path = script.display_path();
+    let source = match script.read() {
         Ok(s) => s,
         Err(e) => {
-            diags.push(Diag::bare(format!("cannot read {}: {e}", path.display())));
+            diags.push(Diag::bare(e));
             return None;
         }
     };

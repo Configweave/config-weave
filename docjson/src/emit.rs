@@ -145,7 +145,7 @@ pub fn sync_package(src: &mut Source, doc: &PackageDoc) -> Result<(), Diags> {
     let mut ordered: Vec<Block> = Vec::new();
     let mut pool = extract_managed(
         &mut block.items,
-        &["gatherer", "resource", "test", "scenario"],
+        &["gatherer", "resource", "composite", "test", "scenario"],
     );
 
     for g in &doc.gatherers {
@@ -156,6 +156,11 @@ pub fn sync_package(src: &mut Source, doc: &PackageDoc) -> Result<(), Diags> {
     for r in &doc.resources {
         let mut b = take_or_new(&mut pool, "resource", r.orig.as_ref().unwrap_or(&r.name));
         sync_resource(&mut b, r, &mut diags);
+        ordered.push(b);
+    }
+    for c in &doc.composites {
+        let mut b = take_or_new(&mut pool, "composite", c.orig.as_ref().unwrap_or(&c.name));
+        sync_composite(&mut b, c, &mut diags);
         ordered.push(b);
     }
     for t in &doc.tests {
@@ -188,11 +193,42 @@ fn sync_resource(b: &mut Block, doc: &ResourceDoc, diags: &mut Diags) {
     sync_params(b, &doc.params, diags);
 }
 
-fn sync_params(parent: &mut Block, docs: &[ParamDoc], diags: &mut Diags) {
+fn sync_composite(b: &mut Block, doc: &CompositeDoc, diags: &mut Diags) {
+    set_label(b, 0, string_literal_expr(&doc.name));
+    set_or_insert_field(b, "description", string_literal_expr(&doc.description));
+    sync_params_of(b, "arg", &doc.args, diags);
+
     let mut ordered: Vec<Block> = Vec::new();
-    let mut pool = extract_managed(&mut parent.items, &["param"]);
+    let mut pool = extract_managed(&mut b.items, &["step"]);
+    for s in &doc.steps {
+        let mut c = take_or_new(&mut pool, "step", s.orig.as_ref().unwrap_or(&s.name));
+        sync_composite_step(&mut c, s, diags);
+        ordered.push(c);
+    }
+    splice(&mut b.items, pool.insert_at, ordered);
+}
+
+fn sync_composite_step(b: &mut Block, doc: &CompositeStepDoc, diags: &mut Diags) {
+    set_label(b, 0, string_literal_expr(&doc.name));
+    set_or_insert_field(b, "description", string_literal_expr(&doc.description));
+    set_or_insert_field(b, "resource", string_literal_expr(&doc.resource));
+    set_opt_expr(b, "condition", doc.condition.as_deref(), diags);
+    set_string_list(b, "requires", &doc.requires);
+    set_opt_string(b, "concurrency", doc.concurrency.as_deref());
+    sync_kv_child(b, "properties", &doc.properties, diags);
+}
+
+fn sync_params(parent: &mut Block, docs: &[ParamDoc], diags: &mut Diags) {
+    sync_params_of(parent, "param", docs, diags)
+}
+
+/// `sync_params` over an arbitrary declaration block kind: resources and
+/// gatherers declare `param`, composites declare `arg`.
+fn sync_params_of(parent: &mut Block, kind: &str, docs: &[ParamDoc], diags: &mut Diags) {
+    let mut ordered: Vec<Block> = Vec::new();
+    let mut pool = extract_managed(&mut parent.items, &[kind]);
     for p in docs {
-        let mut b = take_or_new(&mut pool, "param", p.orig.as_ref().unwrap_or(&p.name));
+        let mut b = take_or_new(&mut pool, kind, p.orig.as_ref().unwrap_or(&p.name));
         set_label(&mut b, 0, string_literal_expr(&p.name));
         set_or_insert_field(&mut b, "description", string_literal_expr(&p.description));
         set_or_insert_field(&mut b, "type", string_literal_expr(&p.ty));
@@ -203,7 +239,7 @@ fn sync_params(parent: &mut Block, docs: &[ParamDoc], diags: &mut Diags) {
         match &p.default {
             Some(v) => match val_to_expr(v) {
                 Ok(e) => set_or_insert_field(&mut b, "default", e),
-                Err(e) => diags.push(format!("param '{}' default: {e}", p.name)),
+                Err(e) => diags.push(format!("{kind} '{}' default: {e}", p.name)),
             },
             None => remove_field(&mut b, "default"),
         }
@@ -509,6 +545,68 @@ mod tests {
         let doc = extract_package(&ast).unwrap();
 
         let once = render_package(&source, &doc).unwrap();
+        let doc2 = extract_package(&parse_for_edit(&once, "t").unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&doc).unwrap(),
+            serde_json::to_value(&doc2).unwrap()
+        );
+        let twice = render_package(&once, &doc2).unwrap();
+        assert_eq!(once, twice);
+    }
+
+    /// A composite carries `arg` declarations and a body of steps, neither
+    /// of which a resource has, so it needs its own fixed-point check.
+    #[test]
+    fn composite_roundtrip_is_a_fixed_point() {
+        let source = "\
+package \"demo\" {
+  description = \"d\"
+
+  composite \"pair\" {
+    description = \"Two steps behind one name\"
+
+    arg \"dir\" {
+      description = \"Where to write\"
+      type = \"string\"
+      required = true
+    }
+    arg \"mode\" {
+      description = \"How\"
+      type = \"symbol\"
+      default = :fast
+    }
+
+    step \"first\" {
+      description = \"one\"
+      resource = \"other.thing\"
+      properties {
+        path = args.dir
+      }
+    }
+
+    step \"second\" {
+      description = \"two\"
+      resource = \"thing\"
+      requires = [\"first\"]
+      concurrency = \"exclusive\"
+      properties {
+        path = args.dir
+      }
+    }
+  }
+}
+";
+        let doc = extract_package(&parse_for_edit(source, "t").unwrap()).unwrap();
+        assert_eq!(doc.composites.len(), 1);
+        assert_eq!(doc.composites[0].args.len(), 2);
+        assert_eq!(doc.composites[0].steps.len(), 2);
+        assert_eq!(doc.composites[0].steps[1].requires, vec!["first"]);
+        assert_eq!(
+            doc.composites[0].steps[1].concurrency.as_deref(),
+            Some("exclusive")
+        );
+
+        let once = render_package(source, &doc).unwrap();
         let doc2 = extract_package(&parse_for_edit(&once, "t").unwrap()).unwrap();
         assert_eq!(
             serde_json::to_value(&doc).unwrap(),

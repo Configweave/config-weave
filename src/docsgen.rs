@@ -79,15 +79,17 @@ pub fn serve(outdir: &Path, addr: Option<&str>) -> Result<(), Diag> {
 }
 
 /// Number of pages `emit` produces: one index, one per play (unless
-/// `pkg_only`), one per package, and one per resource and gatherer.
+/// `pkg_only`), one per package, and one per resource, composite and
+/// gatherer — including the playbook's own composites.
 fn page_count(pb: &Playbook, pkg_only: bool) -> usize {
     let per_pkg: usize = pb
         .packages
         .values()
-        .map(|p| 1 + p.resources.len() + p.gatherers.len())
+        .map(|p| 1 + p.resources.len() + p.composites.len() + p.gatherers.len())
         .sum();
     let plays = if pkg_only { 0 } else { pb.plays.len() };
-    1 + plays + per_pkg
+    let local = if pkg_only { 0 } else { pb.composites.len() };
+    1 + plays + per_pkg + local
 }
 
 /// Escape a string for a WCL double-quoted literal.
@@ -139,6 +141,14 @@ fn play_page(play: &str) -> String {
     format!("play_{}", ident(play))
 }
 
+fn composite_page(pkg: &str, name: &str) -> String {
+    if pkg.is_empty() {
+        format!("comp__{}", ident(name))
+    } else {
+        format!("comp_{}_{}", ident(pkg), ident(name))
+    }
+}
+
 fn resource_page(pkg: &str, res: &str) -> String {
     format!("res_{}_{}", ident(pkg), ident(res))
 }
@@ -183,10 +193,18 @@ fn emit(pb: &Playbook, pkg_only: bool) -> String {
             emit_play(&mut w, pb, play);
         }
     }
+    if !pkg_only {
+        for c in pb.composites.values() {
+            emit_composite(&mut w, "", c);
+        }
+    }
     for pkg in pb.packages.values() {
         emit_package(&mut w, pkg);
         for res in pkg.resources.values() {
             emit_resource(&mut w, &pkg.name, res);
+        }
+        for c in pkg.composites.values() {
+            emit_composite(&mut w, &pkg.name, c);
         }
         for g in pkg.gatherers.values() {
             emit_gatherer(&mut w, &pkg.name, g);
@@ -218,6 +236,18 @@ fn emit_site(w: &mut String, pb: &Playbook, pkg_only: bool) {
         }
         let _ = writeln!(w, "    }}");
     }
+    if !pkg_only && !pb.composites.is_empty() {
+        let _ = writeln!(w, "    chapter \"Composites\" {{");
+        for c in pb.composites.values() {
+            let _ = writeln!(
+                w,
+                "      chapter \"{}\" {{ page = {} }}",
+                esc(&c.name),
+                composite_page("", &c.name)
+            );
+        }
+        let _ = writeln!(w, "    }}");
+    }
     if !pb.packages.is_empty() {
         let _ = writeln!(w, "    chapter \"Packages\" {{");
         for pkg in pb.packages.values() {
@@ -231,6 +261,18 @@ fn emit_site(w: &mut String, pb: &Playbook, pkg_only: bool) {
                         "          chapter \"{}\" {{ page = {} }}",
                         esc(&res.name),
                         resource_page(&pkg.name, &res.name)
+                    );
+                }
+                let _ = writeln!(w, "        }}");
+            }
+            if !pkg.composites.is_empty() {
+                let _ = writeln!(w, "        chapter \"Composites\" {{");
+                for c in pkg.composites.values() {
+                    let _ = writeln!(
+                        w,
+                        "          chapter \"{}\" {{ page = {} }}",
+                        esc(&c.name),
+                        composite_page(&pkg.name, &c.name)
                     );
                 }
                 let _ = writeln!(w, "        }}");
@@ -492,12 +534,27 @@ fn emit_package(w: &mut String, pkg: &crate::model::Package) {
         }
         let _ = writeln!(w, "  }}");
     }
+    if !pkg.composites.is_empty() {
+        let _ = writeln!(w, "  h2 \"Composites\"");
+        let _ = writeln!(w, "  table {{\n    rows:");
+        let _ = writeln!(w, "      | \"Composite\" | \"Steps\" | \"Description\" |");
+        for c in pkg.composites.values() {
+            let _ = writeln!(
+                w,
+                "      | \"{}\" | \"{}\" | \"{}\" |",
+                esc(&page_link(&c.name, &composite_page(&pkg.name, &c.name))),
+                c.steps.len(),
+                esc(&c.description)
+            );
+        }
+        let _ = writeln!(w, "  }}");
+    }
     let _ = writeln!(w, "}}");
     let _ = writeln!(w);
 }
 
-// Resource and gatherer pages carry only their own name in the title and
-// heading — the package is evident from the book tree on the left.
+// Resource, composite and gatherer pages carry only their own name in the
+// title and heading — the package is evident from the book tree on the left.
 
 fn emit_resource(w: &mut String, pkg: &str, res: &crate::model::ResourceDecl) {
     let _ = writeln!(
@@ -522,6 +579,82 @@ fn emit_resource(w: &mut String, pkg: &str, res: &crate::model::ResourceDecl) {
     if !res.params.is_empty() {
         let _ = writeln!(ex, "  properties {{");
         for line in example_param_lines(&res.params, "    ") {
+            let _ = writeln!(ex, "{line}");
+        }
+        let _ = writeln!(ex, "  }}");
+    }
+    let _ = writeln!(ex, "}}");
+    emit_example(w, &ex);
+
+    let _ = writeln!(w, "}}");
+    let _ = writeln!(w);
+}
+
+/// A composite's page: what it takes, what it expands into, and how to
+/// invoke it. `pkg` is empty for a playbook-local composite, which is
+/// referenced by bare name.
+fn emit_composite(w: &mut String, pkg: &str, c: &crate::model::CompositeDecl) {
+    let reference = if pkg.is_empty() {
+        c.name.clone()
+    } else {
+        format!("{}.{}", pkg, c.name)
+    };
+    let _ = writeln!(
+        w,
+        "page {} {{ sites = [:main]  title = \"Composite: {}\"",
+        composite_page(pkg, &c.name),
+        esc(&c.name)
+    );
+    let _ = writeln!(w, "  h1 \"Composite: {}\"", esc(&c.name));
+    let _ = writeln!(w, "  p \"{}\"", esc(&c.description));
+    if pkg.is_empty() {
+        let _ = writeln!(
+            w,
+            "  p \"Declared in this playbook, so a step references it by \
+             bare name: {}\"",
+            esc(&format!("resource = \"{reference}\""))
+        );
+    }
+    emit_decl_table(w, &c.params, "Arguments", "arguments");
+    emit_symbol_values(w, &c.params, &[]);
+
+    let _ = writeln!(w, "  h2 \"Steps\"");
+    let _ = writeln!(
+        w,
+        "  p \"Invoking this composite runs each of these, reported under \
+         the invoking step's name.\""
+    );
+    let _ = writeln!(w, "  table {{\n    rows:");
+    let _ = writeln!(
+        w,
+        "      | \"Step\" | \"Resource\" | \"Requires\" | \"Description\" |"
+    );
+    for s in &c.steps {
+        let target = if s.package.is_empty() {
+            s.resource.clone()
+        } else {
+            format!("{}.{}", s.package, s.resource)
+        };
+        let _ = writeln!(
+            w,
+            "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" |",
+            esc(&s.name),
+            esc(&target),
+            esc(&s.requires.join(", ")),
+            esc(&s.description)
+        );
+    }
+    let _ = writeln!(w, "  }}");
+
+    // The same generated invocation a resource page carries — a composite
+    // is invoked exactly like one.
+    let mut ex = String::new();
+    let _ = writeln!(ex, "step \"{}\" {{", esc(&c.name));
+    let _ = writeln!(ex, "  description = \"{}\"", esc(&c.description));
+    let _ = writeln!(ex, "  resource = \"{}\"", esc(&reference));
+    if !c.params.is_empty() {
+        let _ = writeln!(ex, "  properties {{");
+        for line in example_param_lines(&c.params, "    ") {
             let _ = writeln!(ex, "{line}");
         }
         let _ = writeln!(ex, "  }}");
@@ -733,9 +866,16 @@ fn emit_symbol_values(w: &mut String, params: &[ParamDecl], returns: &[crate::mo
 
 /// The payoff for mandatory descriptions and declared schemas (PRD §12).
 fn emit_param_table(w: &mut String, params: &[ParamDecl]) {
-    let _ = writeln!(w, "  h2 \"Parameters\"");
+    emit_decl_table(w, params, "Parameters", "parameters")
+}
+
+/// The declaration table under its own noun: resources and gatherers
+/// declare `param` blocks, composites declare `arg` blocks, and the docs
+/// should say which.
+fn emit_decl_table(w: &mut String, params: &[ParamDecl], heading: &str, noun: &str) {
+    let _ = writeln!(w, "  h2 \"{heading}\"");
     if params.is_empty() {
-        let _ = writeln!(w, "  p \"Takes no parameters.\"");
+        let _ = writeln!(w, "  p \"Takes no {noun}.\"");
         return;
     }
     let _ = writeln!(w, "  table {{\n    rows:");

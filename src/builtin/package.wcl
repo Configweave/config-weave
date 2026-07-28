@@ -1,0 +1,103 @@
+// The built-in `weave` package: resources config-weave ships itself,
+// compiled into the binary rather than installed from a package repo.
+// The name is reserved — a `pkgs/weave/` folder is rejected at load.
+//
+// Everything here is an escape hatch for imperative work. A real resource
+// models desired state and belongs in a package; these exist so a playbook
+// can keep the shell automation it has not converted yet.
+
+package "weave" {
+  description = "Built-in resources shipped with config-weave itself"
+
+  resource "execute" {
+    description = "Run a script, guarded by a second script that decides whether it is needed"
+    script = "execute.ws"
+    // Deliberately the loosest class: concurrency can only ever be
+    // tightened, so defaulting to `exclusive` here would permanently forbid
+    // running two unrelated scripts at once. A step that touches a shared
+    // lock declares `concurrency = "exclusive"` itself.
+    concurrency = "parallel"
+
+    param "check" {
+      description = "Guard script. Exit status 0 means the host is already in the desired state and `run` is skipped; any other status runs it."
+      type = "string"
+      required = true
+    }
+    param "run" {
+      description = "Action script, run only when the guard says it is needed. The engine re-runs the guard afterwards, so the action must make it exit 0 or the step fails."
+      type = "string"
+      required = true
+    }
+    param "shell" {
+      description = "Interpreter for both scripts"
+      type = "symbol"
+      default = :auto
+
+      symbol "auto" { description = "PowerShell on Windows, bash elsewhere" }
+      symbol "bash" { description = "bash, falling back to sh where bash is absent" }
+      symbol "powershell" { description = "PowerShell, with -NoProfile -NonInteractive" }
+    }
+    param "cwd" {
+      description = "Working directory for both scripts; empty means the directory config-weave was run from"
+      type = "string"
+      default = ""
+    }
+    param "env" {
+      description = "Extra environment variables for both scripts, as a map of string to string"
+      type = "map"
+    }
+    param "timeout" {
+      description = "Kill either script after this long. Omitted or zero means no limit; anything shorter than a second is rounded up to one."
+      type = "duration"
+      default = 0s
+    }
+    param "reboot_on" {
+      description = "Exit statuses from `run` that mean the work succeeded but the host needs a reboot (the Windows installer convention is [3010, 1641]). The play halts and resumes on the next run. Unix truncates an exit status to 0-255, so only Windows can report the four-digit ones."
+      type = "list"
+    }
+  }
+
+  resource "execute_once" {
+    description = "Run a script exactly once per host, recording that it ran so it never runs again"
+    script = "execute_once.ws"
+    concurrency = "parallel"
+
+    param "id" {
+      description = "Names the record of this script having run. Changing it runs the script again; changing `run` does not."
+      type = "string"
+      required = true
+    }
+    param "run" {
+      description = "The script to run once"
+      type = "string"
+      required = true
+    }
+    param "shell" {
+      description = "Interpreter for the script"
+      type = "symbol"
+      default = :auto
+
+      symbol "auto" { description = "PowerShell on Windows, bash elsewhere" }
+      symbol "bash" { description = "bash, falling back to sh where bash is absent" }
+      symbol "powershell" { description = "PowerShell, with -NoProfile -NonInteractive" }
+    }
+    param "cwd" {
+      description = "Working directory for the script; empty means the directory config-weave was run from"
+      type = "string"
+      default = ""
+    }
+    param "env" {
+      description = "Extra environment variables for the script, as a map of string to string"
+      type = "map"
+    }
+    param "timeout" {
+      description = "Kill the script after this long. Omitted or zero means no limit; anything shorter than a second is rounded up to one."
+      type = "duration"
+      default = 0s
+    }
+    param "reboot_on" {
+      description = "Exit statuses that mean the work succeeded but the host needs a reboot. The record is written first, so the script does not run again after the reboot. Unix truncates an exit status to 0-255, so only Windows can report the four-digit installer ones."
+      type = "list"
+    }
+  }
+}

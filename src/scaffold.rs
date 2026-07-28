@@ -74,6 +74,48 @@ pub(crate) const PLAYBOOK: &str = r#"playbook "My Playbook" {
     greeting_file = $"${work_root}/hello.txt"
   }
 
+  // A composite bundles several steps behind one name, and is invoked
+  // from a step exactly like a resource. Its `arg` declarations bind
+  // inside the body as `args.dir` — and bare, as `who` below. Prefer the
+  // `args.` spelling: a property field shadows a bare name of its own, so
+  // `path = path` would refer to itself.
+  //
+  // Declared here it is local to this playbook; move the same block into a
+  // package.wcl and it becomes shareable, referenced as `pkg.name`.
+  composite "greeting_pair" {
+    description = "Write a matching hello and goodbye into one directory"
+
+    arg "dir" {
+      description = "Directory to write both files into"
+      type = "string"
+      required = true
+    }
+    arg "who" {
+      description = "Who to address"
+      type = "string"
+      default = "world"
+    }
+
+    step "hello" {
+      description = "Write the greeting"
+      resource = "example.file_present"
+      properties {
+        path = $"${args.dir}/hello.txt"
+        content = $"hello ${who}"
+      }
+    }
+
+    step "goodbye" {
+      description = "Write the farewell, after the greeting"
+      resource = "example.file_present"
+      requires = ["hello"]
+      properties {
+        path = $"${args.dir}/goodbye.txt"
+        content = $"goodbye ${who}"
+      }
+    }
+  }
+
   play "baseline" {
     description = "A starter play with one step"
 
@@ -84,6 +126,18 @@ pub(crate) const PLAYBOOK: &str = r#"playbook "My Playbook" {
       properties {
         path = greeting_file
         content = "hello from config-weave"
+      }
+    }
+
+    // Invoking a composite reports one row per step inside it, named
+    // `pair/hello` and `pair/goodbye`.
+    step "pair" {
+      description = "Write the greeting pair"
+      resource = "greeting_pair"
+      requires = ["greeting"]
+      properties {
+        dir = work_root
+        who = "config-weave"
       }
     }
   }

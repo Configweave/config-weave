@@ -162,7 +162,10 @@ fn a_package_composite_expands_into_path_namespaced_steps() {
     // Both spellings resolved: `args.dir` built the path, bare `body`
     // supplied the content.
     assert_eq!(std::fs::read_to_string(site.join("conf")).unwrap(), "hello");
-    assert_eq!(std::fs::read_to_string(site.join("index")).unwrap(), "hello");
+    assert_eq!(
+        std::fs::read_to_string(site.join("index")).unwrap(),
+        "hello"
+    );
     // The inner `requires` ordered the siblings.
     let order = std::fs::read_to_string(root.join("order")).unwrap();
     assert_eq!(order, "conf;index;");

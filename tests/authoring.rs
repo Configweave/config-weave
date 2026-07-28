@@ -126,6 +126,11 @@ fn init_validate_apply_docs() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(target.join("hello.txt").exists());
+    // The scaffolded composite expands into two steps, reported under the
+    // invoking step's name.
+    assert!(target.join("goodbye.txt").exists());
+    assert!(stdout.contains("pair/hello"), "{stdout}");
+    assert!(stdout.contains("pair/goodbye"), "{stdout}");
 
     // docs — `config-weave docs` shells out to the `wcl` CLI to render the
     // emitted wdoc source. Skip the rendered-HTML assertions when no `wcl`
@@ -157,6 +162,26 @@ fn init_validate_apply_docs() {
     assert!(
         index.contains("href=\"pkg_example.html\""),
         "index missing package link"
+    );
+
+    // The playbook's own composite gets a page, with its arguments and the
+    // steps it expands into.
+    let comp = std::fs::read_to_string(docs.join("comp__greeting_pair.html")).unwrap();
+    assert!(
+        comp.contains("Arguments"),
+        "composite page missing arg table"
+    );
+    assert!(comp.contains("Steps"), "composite page missing step table");
+    assert!(
+        comp.contains("goodbye"),
+        "composite page missing inner step"
+    );
+
+    // The built-in package is documented like any other.
+    let builtin = std::fs::read_to_string(docs.join("pkg_weave.html")).unwrap();
+    assert!(
+        builtin.contains("href=\"res_weave_execute.html\""),
+        "built-in package page missing execute link"
     );
 
     // Per-play page carries the step table and the DAG diagram (SVG).

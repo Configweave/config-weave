@@ -62,6 +62,7 @@ pub fn extract_package(src: &Source) -> Result<PackageDoc, Diags> {
 
     let mut gatherers = Vec::new();
     let mut resources = Vec::new();
+    let mut composites = Vec::new();
     let mut tests = Vec::new();
     let mut scenarios = Vec::new();
     for item in &block.items {
@@ -69,6 +70,7 @@ pub fn extract_package(src: &Source) -> Result<PackageDoc, Diags> {
         match b.kind.as_str() {
             "gatherer" => gatherers.push(extract_gatherer(b, &mut diags)),
             "resource" => resources.push(extract_resource(b, &mut diags)),
+            "composite" => composites.push(extract_composite(b, &mut diags)),
             "test" => tests.push(extract_test(b, &mut diags)),
             "scenario" => scenarios.push(extract_scenario(b, &mut diags)),
             _ => {}
@@ -81,6 +83,7 @@ pub fn extract_package(src: &Source) -> Result<PackageDoc, Diags> {
             description,
             gatherers,
             resources,
+            composites,
             tests,
             scenarios,
         })
@@ -181,15 +184,55 @@ fn extract_resource(b: &Block, diags: &mut Diags) -> ResourceDoc {
     }
 }
 
+fn extract_composite(b: &Block, diags: &mut Diags) -> CompositeDoc {
+    let name = label_string(b, "composite", diags);
+    let ctx = format!("composite '{name}'");
+    let mut steps = Vec::new();
+    for item in &b.items {
+        let Item::Block(c) = item else { continue };
+        if c.kind == "step" {
+            steps.push(extract_composite_step(c, diags));
+        }
+    }
+    CompositeDoc {
+        orig: Some(name.clone()),
+        description: req_lit_string(b, "description", &ctx, diags),
+        args: extract_params_of(b, "arg", diags),
+        steps,
+        name,
+    }
+}
+
+fn extract_composite_step(b: &Block, diags: &mut Diags) -> CompositeStepDoc {
+    let name = label_string(b, "step", diags);
+    let ctx = format!("composite step '{name}'");
+    CompositeStepDoc {
+        orig: Some(name.clone()),
+        description: req_lit_string(b, "description", &ctx, diags),
+        resource: req_lit_string(b, "resource", &ctx, diags),
+        condition: expr_source(b, "condition"),
+        requires: string_list(b, "requires", &ctx, diags),
+        concurrency: opt_lit_string(b, "concurrency", &ctx, diags),
+        properties: child_kvs(b, "properties", diags),
+        name,
+    }
+}
+
 fn extract_params(parent: &Block, diags: &mut Diags) -> Vec<ParamDoc> {
+    extract_params_of(parent, "param", diags)
+}
+
+/// `extract_params` over an arbitrary declaration block kind: resources
+/// and gatherers declare `param`, composites declare `arg`.
+fn extract_params_of(parent: &Block, kind: &str, diags: &mut Diags) -> Vec<ParamDoc> {
     let mut params = Vec::new();
     for item in &parent.items {
         let Item::Block(b) = item else { continue };
-        if b.kind != "param" {
+        if b.kind != kind {
             continue;
         }
-        let name = label_string(b, "param", diags);
-        let ctx = format!("param '{name}'");
+        let name = label_string(b, kind, diags);
+        let ctx = format!("{kind} '{name}'");
         params.push(ParamDoc {
             orig: Some(name.clone()),
             description: req_lit_string(b, "description", &ctx, diags),

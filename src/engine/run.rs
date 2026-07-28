@@ -242,8 +242,9 @@ impl Planner<'_, '_> {
         let step_name = frame.step.clone();
         let composite = outer_frame.composite.clone();
         self.in_composite(outer_frame, &outer, |doc_block| {
-            let block = composite_step_block(&doc_block, &step_name)
-                .ok_or_else(|| format!("step '{step_name}' not found in composite '{composite}'"))?;
+            let block = composite_step_block(&doc_block, &step_name).ok_or_else(|| {
+                format!("step '{step_name}' not found in composite '{composite}'")
+            })?;
             invocation_args(&block, &params)
         })
     }
@@ -326,9 +327,9 @@ impl FromPlanError for Args {
 /// The `step` block of a composite body, by name. Composite bodies are
 /// flat — no containers — so this is a direct child lookup.
 fn composite_step_block<'a>(composite: &Block<'a>, name: &str) -> Option<Block<'a>> {
-    composite.blocks().find(|b| {
-        b.kind() == "step" && crate::model::label_string(b).as_deref() == Some(name)
-    })
+    composite
+        .blocks()
+        .find(|b| b.kind() == "step" && crate::model::label_string(b).as_deref() == Some(name))
 }
 
 /// Evaluate one composite invocation's condition and properties into the
