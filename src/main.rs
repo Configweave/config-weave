@@ -952,14 +952,18 @@ fn cmd_run_verify(script: &std::path::Path, facts: Option<&std::path::Path>) -> 
         }
     };
     let ctx = hostapi::context();
-    let unit = match ctx.compile(&source) {
-        Ok(u) => u,
-        Err(wscript::Error::Compile(ds)) => {
-            print_diags(&Diag::from_wscript(&ds, script, &source));
-            return EXIT_VALIDATION;
-        }
-        Err(e) => {
-            eprintln!("error: {}: {e}", script.display());
+    // A verify script may import from `lib/` like any other; roots are
+    // rediscovered from the path, since this runs inside an instance with
+    // no playbook model loaded.
+    let resolver = engine::scripts::WeaveResolver::for_script(script);
+    let unit = match ctx.compile_entry(&script.display().to_string(), &source, &resolver) {
+        Ok(compiled) => compiled.unit,
+        Err(failure) => {
+            print_diags(&Diag::from_wscript(
+                &failure.diags,
+                &failure.sources,
+                &failure.source_map,
+            ));
             return EXIT_VALIDATION;
         }
     };

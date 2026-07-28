@@ -77,21 +77,50 @@ impl Diag {
         finish(message, rendered)
     }
 
-    /// Wrap wscript compile diagnostics for one script file.
-    pub fn from_wscript(diags: &[wscript::Diagnostic], file: &Path, source: &str) -> Vec<Diag> {
+    /// Wrap wscript compile diagnostics.
+    ///
+    /// Spans are global offsets into a virtual address space covering
+    /// every file of the import graph, so each is routed through the
+    /// `SourceMap` to find the file it belongs to and rebased local to it.
+    /// Without this, an error inside an imported helper renders against
+    /// the importing file's text — wrong path, wrong line, wrong snippet.
+    pub fn from_wscript(
+        diags: &[wscript::Diagnostic],
+        sources: &[(String, String)],
+        map: &wscript::SourceMap,
+    ) -> Vec<Diag> {
         diags
             .iter()
             .filter(|d| d.severity == wscript::Severity::Error)
             .map(|d| {
-                let mut labels = vec![LabeledSpan::at(
-                    (d.span.lo as usize)..(d.span.hi as usize),
-                    d.message.clone(),
-                )];
+                // Whichever file the primary span lands in is the source
+                // the report renders against.
+                let (path, source, base) = match map.local(d.span.lo) {
+                    Some((info, _)) => {
+                        let text = sources
+                            .iter()
+                            .find(|(p, _)| *p == info.path)
+                            .map(|(_, s)| s.as_str())
+                            .unwrap_or("");
+                        (info.path.clone(), text, info.base)
+                    }
+                    None => match sources.first() {
+                        Some((p, s)) => (p.clone(), s.as_str(), 0),
+                        None => (String::from("<script>"), "", 0),
+                    },
+                };
+                let rebase = |s: &wscript::Span| {
+                    (s.lo.saturating_sub(base) as usize)..(s.hi.saturating_sub(base) as usize)
+                };
+
+                let mut labels = vec![LabeledSpan::at(rebase(&d.span), d.message.clone())];
                 for (span, text) in &d.labels {
-                    labels.push(LabeledSpan::at(
-                        (span.lo as usize)..(span.hi as usize),
-                        text.clone(),
-                    ));
+                    // A secondary label in another file has no home in a
+                    // single-source report; drop it rather than point at a
+                    // meaningless offset in this one.
+                    if map.local(span.lo).is_some_and(|(i, _)| i.path == path) {
+                        labels.push(LabeledSpan::at(rebase(span), text.clone()));
+                    }
                 }
                 let mut md = miette::MietteDiagnostic::new(d.message.clone())
                     .with_code(d.code)
@@ -99,10 +128,8 @@ impl Diag {
                 if let Some(help) = &d.help {
                     md = md.with_help(help.clone());
                 }
-                let report = miette::Report::from(md).with_source_code(NamedSource::new(
-                    file.display().to_string(),
-                    source.to_string(),
-                ));
+                let report = miette::Report::from(md)
+                    .with_source_code(NamedSource::new(path, source.to_string()));
                 finish(format!("[{}] {}", d.code, d.message), format!("{report:?}"))
             })
             .collect()

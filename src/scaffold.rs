@@ -233,5 +233,12 @@ fn verify(facts: Value) -> Result[bool, string] {
 }
 "#;
 
-const LIB_README: &str = "Shared wscript helpers live here. They are compiled during validation;\n\
-script-to-script imports arrive with wscript's module system (v2 roadmap).\n";
+const LIB_README: &str = "Shared wscript helpers live here (`*.ws`). Import one from a resource\n\
+or gatherer script by its file stem:\n\
+\n\
+    use helpers\n\
+\n\
+A package's own `lib/` is searched first, then the playbook's, so a\n\
+package can shadow a playbook-wide helper. Path imports work too\n\
+(`use \"./helpers.ws\"`, relative to the importing script). Host API\n\
+modules always win over a file, so `use fs` still means the host `fs`.\n";

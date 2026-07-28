@@ -869,7 +869,8 @@ fn run_one_scenario(
     );
     let rc = Rc::new(RefCell::new(state));
 
-    match drive_scenario(&rc, &u.scenario.script) {
+    let roots = vec![u.package.dir.join("lib"), pb.root.join("lib")];
+    match drive_scenario(&rc, &u.scenario.script, roots) {
         Ok(true) => {}
         Ok(false) => {
             report.outcome = TestOutcome::Failed;
@@ -897,13 +898,24 @@ fn run_one_scenario(
 }
 
 /// Compile and run a scenario's driver script against a live lab.
-fn drive_scenario(rc: &Rc<RefCell<LabState>>, script: &Path) -> Result<bool, ScenarioEnd> {
+fn drive_scenario(
+    rc: &Rc<RefCell<LabState>>,
+    script: &Path,
+    roots: Vec<std::path::PathBuf>,
+) -> Result<bool, ScenarioEnd> {
     let source = std::fs::read_to_string(script)
         .map_err(|e| ScenarioEnd::Error(format!("cannot read {}: {e}", script.display())))?;
     let ctx = crate::hostapi::scenario_context();
+    // Same `lib/` roots stage-5 validation compiled this driver with, so a
+    // scenario that imports a helper behaves identically here.
+    let resolver = crate::engine::scripts::WeaveResolver::new(roots);
     let unit = ctx
-        .compile(&source)
-        .map_err(|e| ScenarioEnd::Error(format!("{}: {}", script.display(), wscript_err(e))))?;
+        .compile_entry(&script.display().to_string(), &source, &resolver)
+        .map_err(|f| {
+            let msgs: Vec<String> = f.diags.iter().map(|d| d.message.clone()).collect();
+            ScenarioEnd::Error(format!("{}: {}", script.display(), msgs.join("; ")))
+        })?
+        .unit;
     let mut vm = Vm::new(&ctx);
 
     // Contract is validated in stage 5; dispatch on which signature compiled.

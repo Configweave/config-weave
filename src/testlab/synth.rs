@@ -220,6 +220,7 @@ pub fn synthesize(pb: &Playbook, pkg: &Package, test: &TestDecl) -> Result<Synth
             .ok_or_else(|| Diag::bare(format!("test references unknown package '{name}'")))?;
         copy_dir(&p.dir, &dir.path().join("pkgs").join(name))?;
     }
+    copy_playbook_lib(pb, dir.path())?;
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -279,6 +280,7 @@ pub fn synthesize_resource(
         .get(package)
         .ok_or_else(|| Diag::bare(format!("scenario references unknown package '{package}'")))?;
     copy_dir(&p.dir, &dir.path().join("pkgs").join(package))?;
+    copy_playbook_lib(pb, dir.path())?;
 
     let step = "step";
     let mut out = String::new();
@@ -313,6 +315,7 @@ pub fn synthesize_gather(pb: &Playbook, package: &str) -> Result<SynthesizedTest
         .get(package)
         .ok_or_else(|| Diag::bare(format!("scenario references unknown package '{package}'")))?;
     copy_dir(&p.dir, &dir.path().join("pkgs").join(package))?;
+    copy_playbook_lib(pb, dir.path())?;
     let out = format!(
         "playbook \"weave-scenario\" {{\n  description = {}\n  version = \"0.0.0\"\n\n  \
          play \"{PLAY}\" {{\n    description = \"gather only — no steps\"\n  }}\n}}\n",
@@ -367,6 +370,18 @@ fn render_value(v: &wscript_std::DynValue) -> String {
 /// identity-bearing names (load validation keeps those quote-free).
 fn wcl_str(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "/").replace('"', "'"))
+}
+
+/// Copy the playbook's own `lib/` alongside the packages. Package dirs
+/// come across whole (so their `lib/` rides along), but a resource may
+/// also `use` a playbook-level helper — without this the script compiles
+/// on the host and then fails to resolve its import inside the instance.
+fn copy_playbook_lib(pb: &Playbook, dest_root: &Path) -> Result<(), Diag> {
+    let lib = pb.root.join("lib");
+    if lib.is_dir() {
+        copy_dir(&lib, &dest_root.join("lib"))?;
+    }
+    Ok(())
 }
 
 fn copy_dir(from: &Path, to: &Path) -> Result<(), Diag> {
