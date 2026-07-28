@@ -85,7 +85,7 @@ fn derive_key(password: &str, salt: &Salt) -> Result<Key, String> {
 /// A random salt for a fresh encryption pass.
 pub fn random_salt() -> Result<Salt, String> {
     let mut salt = [0u8; SALT_LEN];
-    getrandom::getrandom(&mut salt).map_err(|e| format!("cannot read system randomness: {e}"))?;
+    getrandom::fill(&mut salt).map_err(|e| format!("cannot read system randomness: {e}"))?;
     Ok(salt)
 }
 
@@ -99,13 +99,12 @@ pub fn is_blob(s: &str) -> bool {
 /// `salt` so decryption can re-derive the key without external state.
 pub fn seal(key: &Key, salt: &Salt, plaintext: &str) -> Result<String, String> {
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    getrandom::getrandom(&mut nonce_bytes)
-        .map_err(|e| format!("cannot read system randomness: {e}"))?;
+    getrandom::fill(&mut nonce_bytes).map_err(|e| format!("cannot read system randomness: {e}"))?;
 
     let cipher = XChaCha20Poly1305::new((&key.0).into());
     let ct = cipher
         .encrypt(
-            XNonce::from_slice(&nonce_bytes),
+            &XNonce::from(nonce_bytes),
             Payload {
                 msg: plaintext.as_bytes(),
                 aad: AAD,
@@ -134,7 +133,7 @@ pub fn open(key: &Key, blob: &str) -> Result<String, String> {
     let (_salt, nonce, ct) = parse(blob)?;
     let cipher = XChaCha20Poly1305::new((&key.0).into());
     let pt = cipher
-        .decrypt(XNonce::from_slice(&nonce), Payload { msg: &ct, aad: AAD })
+        .decrypt(&XNonce::from(nonce), Payload { msg: &ct, aad: AAD })
         .map_err(|_| "wrong password, or the encrypted value has been tampered with".to_string())?;
     String::from_utf8(pt).map_err(|_| "decrypted value is not valid UTF-8".to_string())
 }

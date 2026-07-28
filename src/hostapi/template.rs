@@ -48,7 +48,7 @@ fn tera_error(err: tera::Error) -> String {
 
 fn render(template: &str, vars: &DynValue) -> Result<String, String> {
     let context = match vars {
-        DynValue::Map(_) => tera::Context::from_serialize(to_json(vars))
+        DynValue::Map(_) => tera::Context::from_serialize(&to_json(vars))
             .map_err(|e| format!("invalid template vars: {}", tera_error(e)))?,
         DynValue::Null => tera::Context::new(),
         other => {

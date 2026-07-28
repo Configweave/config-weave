@@ -24,18 +24,18 @@ glob = "0.3"
 tempfile = "3"
 shell-words = "1"
 ureq = "3"
-sha2 = "0.10"
-md-5 = "0.10"
+sha2 = "0.11"
+md-5 = "0.11"
 argon2 = "0.5"
-chacha20poly1305 = "0.10"
-base64 = "0.22"
-getrandom = "0.2"
-zeroize = "1.8"
-zip = { version = "5", default-features = false, features = ["deflate", "deflate64", "bzip2", "lzma"] }
+chacha20poly1305 = "0.11"
+base64 = "0.23"
+getrandom = "0.4"
+zeroize = "1.9"
+zip = { version = "8", default-features = false, features = ["deflate", "deflate64", "bzip2", "lzma"] }
 tar = "0.4"
 flate2 = "1"
-sysinfo = { version = "0.36", default-features = false, features = ["system"] }
-tera = { version = "1", default-features = false }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+tera = { version = "2", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"

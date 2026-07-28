@@ -10,10 +10,23 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn digest_file<D: Digest + std::io::Write>(path: &str) -> Result<String, String> {
+/// Digest a file in chunks rather than loading it whole — these hash
+/// downloaded archives. `digest` 0.11 dropped the `io::Write` impl on
+/// hashers, so this reads and `update`s explicitly instead of
+/// `io::copy`ing into one.
+fn digest_file<D: Digest>(path: &str) -> Result<String, String> {
+    use std::io::Read;
+
     let mut file = std::fs::File::open(path).map_err(|e| format!("cannot open {path}: {e}"))?;
     let mut hasher = D::new();
-    std::io::copy(&mut file, &mut hasher).map_err(|e| e.to_string())?;
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     Ok(hex(&hasher.finalize()))
 }
 
