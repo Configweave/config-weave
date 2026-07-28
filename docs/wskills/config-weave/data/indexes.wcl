@@ -34,7 +34,7 @@ index wscript {
     audience = :both
     name    = "Built-ins & standard library"
     summary = "The prelude, container/string/Option/Result methods, the Value type, and json/toml."
-    related = [wscript_prelude, wscript_string_methods, wscript_list_methods, wscript_map_methods, wscript_option_result_methods, value_type, json_module, toml_module, wscript_not_registered, wscript_excluded_v1]
+    related = [wscript_prelude, wscript_string_methods, wscript_list_methods, wscript_map_methods, wscript_option_result_methods, value_type, json_module, toml_module, xml_module, regex_module, wscript_not_registered, wscript_excluded_v1]
   }
 }
 
@@ -42,7 +42,7 @@ index host_api_index {
   audience = :both
   name    = "Host API"
   summary = "The wscript module surface config-weave registers for scripts."
-  related = [host_api, editor_support, weave_wscripti, entry_point_signatures]
+  related = [host_api, script_imports, editor_support, weave_wscripti, entry_point_signatures]
 
   index host_api_cross {
     audience = :both

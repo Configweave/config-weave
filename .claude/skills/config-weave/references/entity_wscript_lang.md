@@ -4,15 +4,15 @@ _software_
 
 The statically typed, Rust-flavored scripting language resources, gatherers and verify scripts are written in.
 
-wscript is the scripting language config-weave embeds for resources, gatherers and verify scripts. Single-file in v1, compiled against the config-weave host API. Its features are documented as the `wscript:` concepts.
+wscript is the scripting language config-weave embeds for resources, gatherers and verify scripts. Compiled against the config-weave host API; scripts may import shared helpers from `lib/`. Its features are documented as the `wscript:` concepts.
 
 | Field | Value |
 | --- | --- |
 | Flavour | Rust minus borrow checker, lifetimes, generics |
 | Typing | Static, compile-time checked |
-| Scripts | Single file (no script-to-script imports in v1) |
+| Scripts | Multi-file — `use` imports helpers from `lib/` (see [Shared script helpers](../references/concept_script_imports.md)) |
 | Compiled against | the config-weave host API (weave.wscripti) |
-| Tour | ~/dev/wscript/docs/tour.md |
+| Reference | the `wscript` wskill (~/dev/wscript/docs/wskills/wscript/) |
 
 ## Related
 

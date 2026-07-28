@@ -2,7 +2,9 @@
 
 Deliberately absent in wscript v1:
 
-Borrow checker, `&`/`&mut`, lifetimes, user-defined generics, exceptions, async, threads, implicit conversions, truthiness, string interpolation (use `fmt`), compound assignment (`+=`), bitwise operators, range values outside `for` headers, and script-to-script imports.
+Borrow checker, `&`/`&mut`, lifetimes, exceptions, async, threads, implicit conversions, truthiness, and bitwise operators.
+
+Shipped since v1, so no longer absent: script-to-script imports, string interpolation in every string literal, compound assignment (`+=`), associated functions, generic functions (not host-callable), and unit families on numeric types.
 
 ## Related
 

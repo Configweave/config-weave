@@ -126,6 +126,8 @@ _The prelude, container/string/Option/Result methods, the Value type, and json/t
 - [Value](references/entity_value_type.md)
 - [json](references/entity_json_module.md)
 - [toml](references/entity_toml_module.md)
+- [xml](references/entity_xml_module.md)
+- [regex](references/entity_regex_module.md)
 - [Not registered in config-weave scripts](references/fact_wscript_not_registered.md)
 - [Excluded from wscript v1](references/fact_wscript_excluded_v1.md)
 
@@ -133,6 +135,7 @@ _The prelude, container/string/Option/Result methods, the Value type, and json/t
 
 _The wscript module surface config-weave registers for scripts._
 - [Host API](references/concept_host_api.md)
+- [Shared script helpers (lib/)](references/concept_script_imports.md)
 - [Editor support (wscripti / LSP)](references/concept_editor_support.md)
 - [weave.wscripti](references/entity_weave_wscripti.md)
 - [Script entry-point signatures](references/fact_entry_point_signatures.md)

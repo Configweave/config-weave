@@ -255,6 +255,57 @@ fn a_broken_helper_fails_validation_even_when_unimported() {
     assert!(stderr.contains("orphan.ws"), "{stderr}");
 }
 
+/// `regex` and `xml` are re-exported from wscript-std alongside `json`
+/// and `toml`; this proves both reach a resource script rather than only
+/// appearing in the interface file.
+#[test]
+fn the_regex_and_xml_modules_are_usable_from_a_script() {
+    let dir = fixture(
+        r#"use value
+use fs
+use regex
+use xml
+
+fn p(params: Value, key: string) -> string {
+    if let Some(v) = params.get(key) {
+        if let Some(s) = v.as_string() { return s }
+    }
+    ""
+}
+
+fn payload() -> Result[string, string] {
+    let doc = xml::parse("<cfg><name>weave</name></cfg>")?
+    let rendered = xml::to_string(doc)?
+    // regex takes (pattern, text), like is_match.
+    let found = regex::find("[a-z]+eave", rendered)
+    if let Some(m) = found { return Ok(m) }
+    Err("no match")
+}
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let path = p(params, "path")
+    if fs::exists(path) {
+        let got = fs::read(path)?
+        if got == payload()? { return Ok(CheckResult::AlreadyConfigured) }
+    }
+    Ok(CheckResult::NotConfigured)
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    fs::write(p(params, "path"), payload()?)?
+    Ok(ApplyResult::Success)
+}
+"#,
+    );
+
+    let (code, stdout, stderr) = run_in(dir.path(), &["apply", ".", "p"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("m.txt")).unwrap(),
+        "weave"
+    );
+}
+
 #[test]
 fn a_host_module_still_wins_over_a_same_named_helper() {
     let dir = fixture(MARKER_USING_HELPER);

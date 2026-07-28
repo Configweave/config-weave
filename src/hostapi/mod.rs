@@ -34,8 +34,15 @@ pub fn context() -> Context {
     Context::new()
         .module(wscript_std::value())
         // Re-exported wscript-std data formats (PRD `data` overlap note).
+        // `data` covers INI; these three are re-exported rather than
+        // reimplemented.
         .module(wscript_std::json())
         .module(wscript_std::toml())
+        .module(wscript_std::xml())
+        // Pattern matching over command output and config files. Scripts
+        // otherwise reach for `shell::run("grep …")`, which is a
+        // subprocess and platform-dependent.
+        .module(wscript_std::regex())
         // Clock access: resources that converge on an age (a package cache
         // refreshed within the last N minutes) need "now" to compare a
         // stamp file's mtime against, and shelling out to `date +%s` for it

@@ -434,7 +434,7 @@ Each lands with tests and an example playbook exercising the new surface.
 |---|---|---|
 | windows-rs coverage on `x86_64-pc-windows-gnu` | COM/SCM/registry APIs unavailable on gnu target | M1 spike; fallback to MSVC target + native Windows CI build (§2) |
 | WCL schema syntax in this PRD is illustrative | Spec drift between PRD sketch and real WCL schema feature | Implementer binds to the WCL spec; §8 behaviour is the contract |
-| wscript import semantics for `lib/` folders | PRD assumes script-to-script imports exist in shipped wscript | Bind to wscript's actual module mechanism; if absent in wscript v1, lib sharing degrades to a documented limitation tied to wscript's roadmap |
+| ~~wscript import semantics for `lib/` folders~~ **RESOLVED 2026-07-28** | PRD assumes script-to-script imports exist in shipped wscript | wscript shipped them; `lib/` folders are resolution roots via a `.ws`-aware `SourceResolver` (see docs/notes.md) |
 | `data` module overlap with wscript-std | Duplicate JSON/TOML handling | Check wscript-std first; re-export, don't reimplement |
 | VARIANT marshalling edge cases (currency, dates, byref) | Obscure COM servers misbehave | v1 supports the common VT set listed in §7; document unsupported VTs as runtime errors |
 | Static musl + TLS | OpenSSL linkage pain | rustls everywhere |

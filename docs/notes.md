@@ -225,9 +225,17 @@ by a CLI command. Bindings fixed here:
   the escape hatches when shell features are wanted. `powershell` tries
   `powershell` then `pwsh`, so it also works on Linux boxes with
   PowerShell Core.
-- The `data` module covers INI only; JSON and TOML are wscript-std's `json`
-  and `toml` modules registered as-is (the PRD's "re-export, don't
-  duplicate" note).
+- The `data` module covers INI only; JSON, TOML and XML are wscript-std's
+  `json`, `toml` and `xml` modules registered as-is (the PRD's "re-export,
+  don't duplicate" note). `regex` is registered for the same reason: the
+  alternative is `shell::run("grep …")`, which is a subprocess and
+  platform-dependent. Two sharp edges worth knowing: every `regex`
+  function takes **`(pattern, text)`** — the argument types are identical,
+  so swapping them compiles and then silently never matches — and an
+  invalid pattern is a *fault*, not an `Err`, surfacing as the step's
+  Error status. `xml` maps elements to nested maps with attributes under
+  `@attrs` and text under `#text`; mixed content concatenates into one
+  `#text`, so a round trip moves text ahead of its sibling elements.
 - The `template` module renders a Tera template string against a `vars`
   map on the target host: `template::render(template, vars) -> string`.
   Autoescape is **off** (config files, not HTML); a non-map `vars` (other
@@ -504,10 +512,36 @@ below). Bindings fixed here:
   (`fn check(params: Value) -> CheckResult`) or fallible
   (`-> Result[CheckResult, string]`), because `?` requires a `Result`
   return. An `Err` maps to the step's Error status, per the PRD.
-- wscript v1 has **no script-to-script imports**: `lib/` folders are
-  compiled standalone during validation but cannot be imported by
-  resource scripts yet. This is the degradation the PRD's risk table
-  anticipated; it lifts when wscript ships imports (its v2 roadmap).
+- **Script-to-script imports (2026-07-28).** wscript shipped them, so
+  `lib/` folders became real resolution roots instead of the standalone
+  compile-only lint they were — the degradation the PRD's risk table
+  anticipated is retired. `ctx.compile_entry(path, src, &resolver)`
+  replaces `ctx.compile(src)` everywhere; the whole import graph becomes
+  one `CompiledUnit` of which only the entry file exports functions, so
+  the entry-point contracts are unchanged.
+  - **`WeaveResolver`, not wscript's `FsResolver`.** The upstream one
+    resolves a bare `use name` to `{name}.wscript`; this repo standardised
+    on `.ws`, so resolution is re-implemented over that extension.
+    Everything else matches upstream: a registered host module wins over a
+    file (so `use fs` still means the host API even with a `lib/fs.ws`
+    present), then the importing file's own directory, then each root.
+    Roots are the declaring package's `lib/` then the playbook's, per
+    PRD §6.
+  - **Diagnostics go through the source map.** Spans from a multi-file
+    compilation are offsets into a virtual space covering every file, so
+    `Diag::from_wscript` routes each through `CompileFailure::source_map`
+    to pick the owning file and rebases the span local to it. Without that
+    an error inside a helper renders against the *importing* file's text.
+    Secondary labels landing in another file are dropped — a miette report
+    carries one source.
+  - **Three compile sites had to move together**, or a script would
+    validate on the host and then fail to resolve its import at run time:
+    stage-5 validation, scenario drivers (host-side), and `__verify`
+    (inside an instance, with no playbook model — so
+    `WeaveResolver::for_script` rediscovers roots by walking ancestors for
+    `lib/` dirs). For the same reason the testlab now copies the
+    playbook's `lib/` into every synthesized playbook; package dirs were
+    already copied whole, so their helpers already rode along.
 - `print`/`println` in wscript-vm write directly to stdout; routing them
   into `log::info` needs a small upstream hook in wscript-vm (planned with
   M3's stdout-redirection work).

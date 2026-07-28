@@ -1,0 +1,34 @@
+concept script_imports {
+  name     = "Shared script helpers (lib/)"
+  summary  = "Resource, gatherer, verify and scenario scripts import shared code from a package's lib/ or the playbook's with `use`."
+  related  = [resource, gatherer, host_api, package, playbook]
+  audience = :both
+  body {
+    p <<PROSE
+Common code lives in `lib/` — either a package's own (`pkgs/<pkg>/lib/`) or the
+playbook's (`lib/`, visible to every package). A script imports a helper by its
+file stem:
+
+```
+use helpers            // pkgs/<pkg>/lib/helpers.ws, then <playbook>/lib/helpers.ws
+use "./shared.ws"      // relative to the importing script
+```
+
+Helper files are ordinary `.ws` scripts and may import each other. The whole
+import graph compiles to a single unit of which **only the entry file exports
+functions**, so a resource still satisfies the `check`/`apply` contract exactly
+as a single-file one does — a helper cannot accidentally supply `check`.
+PROSE
+    table {
+      header = ["Resolution order for `use name`", "Wins because"]
+      rows = [
+        ["A registered host module", "`use fs` always means the host API, even with a `lib/fs.ws` present"],
+        ["The importing script's own directory", "`<dir>/name.ws`"],
+        ["The declaring package's `lib/`", "a package can shadow a playbook-wide helper"],
+        ["The playbook's `lib/`", "shared across every package"],
+      ]
+    }
+    callout "The extension is .ws" { class = ["info"]  body = "`use helpers` resolves `helpers.ws`. Path imports carry their own extension, so write `use \"./shared.ws\"` in full." }
+    callout "Everything under lib/ is validated" { class = ["info"]  body = "`config-weave validate` compiles every `lib/*.ws`, imported or not — a broken helper fails validation on its own, and an error inside one is reported against that helper's file and line, not the script that imported it." }
+  }
+}
