@@ -128,9 +128,30 @@ fn init_validate_apply_docs() {
     assert!(target.join("hello.txt").exists());
     // The scaffolded composite expands into two steps, reported under the
     // invoking step's name.
-    assert!(target.join("goodbye.txt").exists());
+    assert!(target.join("pair-goodbye.txt").exists());
     assert!(stdout.contains("pair/hello"), "{stdout}");
     assert!(stdout.contains("pair/goodbye"), "{stdout}");
+
+    // …and converges: a second apply must find every step already
+    // configured. This is what catches two scaffolded steps writing
+    // different content to the same path, which would leave the starter
+    // playbook flapping forever.
+    let out = Command::new(bin())
+        .args([
+            "apply",
+            root.to_str().unwrap(),
+            "baseline",
+            "--var",
+            &format!("work_root={}", target.display()),
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        !stdout.contains("[         configured]"),
+        "the scaffolded playbook is not idempotent:\n{stdout}"
+    );
 
     // docs — `config-weave docs` shells out to the `wcl` CLI to render the
     // emitted wdoc source. Skip the rendered-HTML assertions when no `wcl`

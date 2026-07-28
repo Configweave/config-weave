@@ -100,7 +100,7 @@ pub(crate) const PLAYBOOK: &str = r#"playbook "My Playbook" {
       description = "Write the greeting"
       resource = "example.file_present"
       properties {
-        path = $"${args.dir}/hello.txt"
+        path = $"${args.dir}/pair-hello.txt"
         content = $"hello ${who}"
       }
     }
@@ -110,7 +110,7 @@ pub(crate) const PLAYBOOK: &str = r#"playbook "My Playbook" {
       resource = "example.file_present"
       requires = ["hello"]
       properties {
-        path = $"${args.dir}/goodbye.txt"
+        path = $"${args.dir}/pair-goodbye.txt"
         content = $"goodbye ${who}"
       }
     }
