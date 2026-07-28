@@ -5,7 +5,7 @@
 //! the generated variables import bound.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use wscript_std::DynValue;
 
@@ -22,6 +22,8 @@ pub struct Playbook {
     /// Declared playbook variables, in declaration order. The expression
     /// text is spliced into the generated vars import verbatim.
     pub vars: Vec<VarDecl>,
+    /// Playbook-local composites, referenced from a step by bare name.
+    pub composites: BTreeMap<String, CompositeDecl>,
     pub plays: Vec<Play>,
     pub packages: BTreeMap<String, Package>,
 }
@@ -33,6 +35,28 @@ impl Playbook {
 
     pub fn resource(&self, package: &str, name: &str) -> Option<&ResourceDecl> {
         self.packages.get(package)?.resources.get(name)
+    }
+
+    /// A composite by the same addressing the model uses everywhere: an
+    /// empty package means the playbook-local namespace.
+    pub fn composite(&self, package: &str, name: &str) -> Option<&CompositeDecl> {
+        if package.is_empty() {
+            self.composites.get(name)
+        } else {
+            self.packages.get(package)?.composites.get(name)
+        }
+    }
+
+    /// Source text of the document a composite was declared in — the
+    /// package's `package.wcl`, or the playbook itself. The planner reopens
+    /// it with the invocation's arguments bound.
+    pub fn composite_source(&self, package: &str) -> Option<(&str, &Path)> {
+        if package.is_empty() {
+            Some((&self.source, &self.root))
+        } else {
+            let pkg = self.packages.get(package)?;
+            Some((&pkg.source, &pkg.dir))
+        }
     }
 }
 
@@ -92,7 +116,7 @@ pub struct Container {
     pub items: Vec<PlayItem>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Step {
     pub name: String,
     pub description: String,
@@ -102,11 +126,57 @@ pub struct Step {
     /// Step-level concurrency tightening, if declared.
     pub concurrency: Option<Concurrency>,
     /// Names of enclosing containers, outermost first. Used to locate the
-    /// step's block at run time and to inherit container conditions.
+    /// step's block at run time and to inherit container conditions. A step
+    /// expanded from a composite extends this with one segment per
+    /// enclosing invocation, so its report path reads
+    /// `container/…/invocation/inner`.
     pub container_path: Vec<String>,
+    /// Empty for a step declared directly in a playbook. Otherwise the
+    /// chain of composite invocations that produced it, outermost first —
+    /// the planner walks it to evaluate each invocation's arguments in the
+    /// document that declared it.
+    ///
+    /// The last `frames.len()` segments of `container_path` are the
+    /// invocation names, so every scope the resolver needs derives from
+    /// these two fields together.
+    pub frames: Vec<CompositeFrame>,
     /// Raw condition expression text, for documentation.
     pub condition_src: Option<String>,
     pub span: (usize, usize),
+}
+
+impl Step {
+    /// The enclosing *playbook* containers, with composite invocation
+    /// segments stripped. Only these carry inheritable conditions.
+    pub fn playbook_path(&self) -> &[String] {
+        &self.container_path[..self.container_path.len() - self.frames.len()]
+    }
+}
+
+/// One composite invocation in a step's provenance chain.
+#[derive(Debug, Clone)]
+pub struct CompositeFrame {
+    /// The invoking step's name — also the `container_path` segment it
+    /// contributes, and the block label the planner looks up.
+    pub step: String,
+    /// Package declaring the composite; empty for a playbook-local one.
+    pub package: String,
+    pub composite: String,
+    /// The invocation's own `requires`, resolved in the *caller's* scope
+    /// rather than the expanded step's.
+    pub requires: Vec<String>,
+}
+
+/// A reusable, parameterised block of steps invoked like a resource.
+#[derive(Debug)]
+pub struct CompositeDecl {
+    pub name: String,
+    pub description: String,
+    pub params: Vec<ParamDecl>,
+    /// Inner steps in declaration order. These are templates: their
+    /// `container_path` and `frames` are empty until expansion clones them
+    /// into a play.
+    pub steps: Vec<Step>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -141,8 +211,13 @@ pub struct Package {
     pub description: String,
     /// Package directory; script paths are relative to it.
     pub dir: PathBuf,
+    /// Raw `package.wcl` source. Kept so the planner can reopen the
+    /// document with a composite invocation's arguments bound.
+    pub source: String,
     pub gatherers: BTreeMap<String, GathererDecl>,
     pub resources: BTreeMap<String, ResourceDecl>,
+    /// Composites, sharing one namespace with `resources`.
+    pub composites: BTreeMap<String, CompositeDecl>,
     /// Convergence tests, in declaration order.
     pub tests: Vec<TestDecl>,
     /// Wscript-scripted scenarios, in declaration order.

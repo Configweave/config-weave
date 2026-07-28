@@ -25,7 +25,7 @@ use wscript_std::DynValue;
 use crate::convert::{FieldValueError, field_value_dyn};
 use crate::diag::Diag;
 use crate::hostapi::{ApplyResult, CheckResult, log};
-use crate::model::{Concurrency, Play, Playbook, Step};
+use crate::model::{CompositeFrame, Concurrency, ParamDecl, Play, Playbook, Step};
 
 use super::dag;
 use super::events::{Event, EventSink, Phase};
@@ -91,19 +91,16 @@ pub fn run_play(
     let dag = dag::build(play)?;
 
     // ---- plan phase: evaluate conditions and properties in order.
-    let mut container_cache: HashMap<Vec<String>, Result<bool, String>> = HashMap::new();
-    let plans: Vec<Plan> = steps
-        .iter()
-        .map(|step| {
-            plan_step(
-                pb,
-                step,
-                &step_blocks,
-                &container_blocks,
-                &mut container_cache,
-            )
-        })
-        .collect();
+    let mut planner = Planner {
+        pb,
+        store,
+        step_blocks: &step_blocks,
+        container_blocks: &container_blocks,
+        container_cache: HashMap::new(),
+        arg_cache: HashMap::new(),
+    };
+    let plans: Vec<Plan> = steps.iter().map(|step| planner.plan(step)).collect();
+    drop(planner);
     drop(doc);
 
     // ---- dispatch phase.
@@ -130,58 +127,237 @@ pub fn run_play(
     })
 }
 
-fn plan_step(
-    pb: &Playbook,
-    step: &Step,
-    step_blocks: &HashMap<(Vec<String>, String), Block<'_>>,
-    container_blocks: &HashMap<Vec<String>, Block<'_>>,
-    container_cache: &mut HashMap<Vec<String>, Result<bool, String>>,
-) -> Plan {
-    let key = (step.container_path.clone(), step.name.clone());
-    let Some(block) = step_blocks.get(&key) else {
-        return Plan::Fail("step block not found at run time".into());
-    };
+/// Outcome of evaluating one composite invocation: the argument map its
+/// body runs under, or `None` when its condition ruled it out.
+type Args = Result<Option<HashMap<String, DynValue>>, String>;
 
-    // Container conditions (outermost first), then the step's own.
-    for depth in 1..=step.container_path.len() {
-        let path = step.container_path[..depth].to_vec();
-        let result = container_cache
-            .entry(path.clone())
-            .or_insert_with(|| match container_blocks.get(&path) {
-                Some(cb) => eval_condition(cb),
-                None => Err("container block not found".into()),
-            });
-        match result {
-            Ok(true) => {}
-            Ok(false) => return Plan::Skip(Some("container condition is false".into())),
-            Err(e) => return Plan::Fail(e.clone()),
+/// The plan phase's working state. Conditions and arguments are memoized
+/// per path, so a container or a composite invocation is evaluated once
+/// however many steps sit under it.
+struct Planner<'a, 'd> {
+    pb: &'a Playbook,
+    store: &'a VarStore,
+    step_blocks: &'a HashMap<(Vec<String>, String), Block<'d>>,
+    container_blocks: &'a HashMap<Vec<String>, Block<'d>>,
+    container_cache: HashMap<Vec<String>, Result<bool, String>>,
+    /// Keyed by the invocation's full `container_path` (its own segment
+    /// included), which is unique within a play.
+    arg_cache: HashMap<Vec<String>, Args>,
+}
+
+impl Planner<'_, '_> {
+    fn plan(&mut self, step: &Step) -> Plan {
+        // Only *playbook* containers carry inheritable conditions; a
+        // composite contributes path segments but no container blocks.
+        for depth in 1..=step.playbook_path().len() {
+            let path = step.playbook_path()[..depth].to_vec();
+            let result = match self.container_cache.get(&path) {
+                Some(r) => r.clone(),
+                None => {
+                    let r = match self.container_blocks.get(&path) {
+                        Some(cb) => eval_condition(cb),
+                        None => Err("container block not found".into()),
+                    };
+                    self.container_cache.insert(path, r.clone());
+                    r
+                }
+            };
+            match result {
+                Ok(true) => {}
+                Ok(false) => return Plan::Skip(Some("container condition is false".into())),
+                Err(e) => return Plan::Fail(e),
+            }
         }
+
+        if step.frames.is_empty() {
+            let key = (step.container_path.clone(), step.name.clone());
+            let Some(block) = self.step_blocks.get(&key) else {
+                return Plan::Fail("step block not found at run time".into());
+            };
+            return plan_from_block(self.pb, step, block);
+        }
+        self.plan_composite(step)
     }
+
+    /// Plan a step expanded from a composite: walk the invocation chain to
+    /// build the innermost argument scope, then evaluate the step's own
+    /// block inside it.
+    fn plan_composite(&mut self, step: &Step) -> Plan {
+        let last = step.frames.len() - 1;
+        let args = match self.args(step, last) {
+            Ok(Some(a)) => a,
+            Ok(None) => return Plan::Skip(Some("composite condition is false".into())),
+            Err(e) => return Plan::Fail(e),
+        };
+        let frame = &step.frames[last];
+        self.in_composite(frame, &args, |doc_block| {
+            let Some(block) = composite_step_block(&doc_block, &step.name) else {
+                return Plan::Fail(format!(
+                    "step '{}' not found in composite '{}' at run time",
+                    step.name, frame.composite
+                ));
+            };
+            plan_from_block(self.pb, step, &block)
+        })
+    }
+
+    /// The argument map for the invocation at frame `k` of `step`.
+    fn args(&mut self, step: &Step, k: usize) -> Args {
+        let cut = step.container_path.len() - (step.frames.len() - k) + 1;
+        let key = step.container_path[..cut].to_vec();
+        if let Some(cached) = self.arg_cache.get(&key) {
+            return cached.clone();
+        }
+        let result = self.eval_args(step, k);
+        self.arg_cache.insert(key, result.clone());
+        result
+    }
+
+    fn eval_args(&mut self, step: &Step, k: usize) -> Args {
+        let frame = &step.frames[k];
+        let decl = self
+            .pb
+            .composite(&frame.package, &frame.composite)
+            .ok_or_else(|| format!("composite '{}' declaration missing", frame.composite))?;
+        let params = decl.params.clone();
+
+        if k == 0 {
+            // The outermost invocation is an ordinary step block in the
+            // playbook document, already indexed.
+            let scope = step.playbook_path().to_vec();
+            let block = self
+                .step_blocks
+                .get(&(scope, frame.step.clone()))
+                .ok_or_else(|| format!("step '{}' not found at run time", frame.step))?;
+            return invocation_args(block, &params);
+        }
+
+        // Otherwise it was invoked from the body of the enclosing
+        // composite, so its block lives in that composite's document.
+        let outer = match self.args(step, k - 1)? {
+            Some(a) => a,
+            None => return Ok(None),
+        };
+        let outer_frame = &step.frames[k - 1];
+        let step_name = frame.step.clone();
+        let composite = outer_frame.composite.clone();
+        self.in_composite(outer_frame, &outer, |doc_block| {
+            let block = composite_step_block(&doc_block, &step_name)
+                .ok_or_else(|| format!("step '{step_name}' not found in composite '{composite}'"))?;
+            invocation_args(&block, &params)
+        })
+    }
+
+    /// Open the document declaring `frame`'s composite with `args` bound
+    /// and hand the composite's block to `f`. The document lives for the
+    /// duration of the call, which is why this is a closure rather than a
+    /// returned value.
+    fn in_composite<T>(
+        &self,
+        frame: &CompositeFrame,
+        args: &HashMap<String, DynValue>,
+        f: impl FnOnce(Block<'_>) -> T,
+    ) -> T
+    where
+        T: FromPlanError,
+    {
+        let Some((source, root)) = self.pb.composite_source(&frame.package) else {
+            return T::from_error(format!("package '{}' not loaded", frame.package));
+        };
+        let (filename, import) = if frame.package.is_empty() {
+            ("playbook.wcl".to_string(), crate::vocab::PLAYBOOK_IMPORT)
+        } else {
+            (
+                format!("pkgs/{}/package.wcl", frame.package),
+                crate::vocab::PACKAGE_IMPORT,
+            )
+        };
+        let wcl_args: HashMap<String, Value> = args
+            .iter()
+            .map(|(k, v)| (k.clone(), crate::convert::dyn_to_wcl(v)))
+            .collect();
+        let doc = match self
+            .store
+            .open_composite(source, &filename, root, import, &wcl_args)
+        {
+            Ok(d) => d,
+            Err(e) => return T::from_error(format!("reopening {filename}: {}", e.message)),
+        };
+        // Composites are declared inside the document's root block.
+        let root = if frame.package.is_empty() {
+            doc.block("playbook")
+        } else {
+            doc.block("package")
+        };
+        let found = root.and_then(|r| {
+            r.blocks().find(|b| {
+                b.kind() == "composite"
+                    && crate::model::label_string(b).as_deref() == Some(frame.composite.as_str())
+            })
+        });
+        let Some(block) = found else {
+            return T::from_error(format!(
+                "composite '{}' not found in {filename} at run time",
+                frame.composite
+            ));
+        };
+        f(block)
+    }
+}
+
+/// Lets `in_composite` report a failure in whichever shape its caller
+/// wants, without every call site repeating the match.
+trait FromPlanError {
+    fn from_error(message: String) -> Self;
+}
+
+impl FromPlanError for Plan {
+    fn from_error(message: String) -> Plan {
+        Plan::Fail(message)
+    }
+}
+
+impl FromPlanError for Args {
+    fn from_error(message: String) -> Args {
+        Err(message)
+    }
+}
+
+/// The `step` block of a composite body, by name. Composite bodies are
+/// flat — no containers — so this is a direct child lookup.
+fn composite_step_block<'a>(composite: &Block<'a>, name: &str) -> Option<Block<'a>> {
+    composite.blocks().find(|b| {
+        b.kind() == "step" && crate::model::label_string(b).as_deref() == Some(name)
+    })
+}
+
+/// Evaluate one composite invocation's condition and properties into the
+/// argument map its body runs under.
+fn invocation_args(block: &Block<'_>, params: &[ParamDecl]) -> Args {
+    match eval_condition(block) {
+        Ok(true) => {}
+        Ok(false) => return Ok(None),
+        Err(e) => return Err(e),
+    }
+    let mut args = read_properties(block)?;
+    apply_param_defaults(&mut args, params).map_err(|errors| errors.join("; "))?;
+    Ok(Some(args))
+}
+
+/// The final step of the chain: condition, properties, declared defaults.
+fn plan_from_block(pb: &Playbook, step: &Step, block: &Block<'_>) -> Plan {
     match eval_condition(block) {
         Ok(true) => {}
         Ok(false) => return Plan::Skip(None),
         Err(e) => return Plan::Fail(e),
     }
-
     let Some(decl) = pb.resource(&step.package, &step.resource) else {
         return Plan::Fail("resource declaration missing".into());
     };
-    let mut params: HashMap<String, DynValue> = HashMap::new();
-    if let Some(props) = block.blocks().find(|b| b.kind() == "properties") {
-        for f in props.fields() {
-            match field_value_dyn(&f) {
-                Ok(fv) => {
-                    params.insert(f.name().to_string(), fv.value);
-                }
-                Err(FieldValueError::Convert(e)) => {
-                    return Plan::Fail(format!("property '{}': {e}", f.name()));
-                }
-                Err(FieldValueError::Unresolved(e) | FieldValueError::Eval(e)) => {
-                    return Plan::Fail(format!("property '{}': {e}", f.name()));
-                }
-            }
-        }
-    }
+    let mut params = match read_properties(block) {
+        Ok(p) => p,
+        Err(e) => return Plan::Fail(e),
+    };
     if let Err(errors) = apply_param_defaults(&mut params, &decl.params) {
         return Plan::Fail(errors.join("; "));
     }
@@ -196,6 +372,27 @@ fn plan_step(
         concurrency,
         params: DynValue::Map(params),
     }
+}
+
+fn read_properties(block: &Block<'_>) -> Result<HashMap<String, DynValue>, String> {
+    let mut params: HashMap<String, DynValue> = HashMap::new();
+    let Some(props) = block.blocks().find(|b| b.kind() == "properties") else {
+        return Ok(params);
+    };
+    for f in props.fields() {
+        match field_value_dyn(&f) {
+            Ok(fv) => {
+                params.insert(f.name().to_string(), fv.value);
+            }
+            Err(FieldValueError::Convert(e)) => {
+                return Err(format!("property '{}': {e}", f.name()));
+            }
+            Err(FieldValueError::Unresolved(e) | FieldValueError::Eval(e)) => {
+                return Err(format!("property '{}': {e}", f.name()));
+            }
+        }
+    }
+    Ok(params)
 }
 
 // ------------------------------------------------------------ scheduler

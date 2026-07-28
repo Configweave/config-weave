@@ -92,6 +92,7 @@ pub fn load(dir: &Path) -> Loaded {
     let mut loader = PlaybookLoader {
         ctx,
         packages: &packages,
+        composites: BTreeMap::new(),
     };
     let playbook = loader.load(dir, &pb_block, &source);
 
@@ -101,6 +102,78 @@ pub fn load(dir: &Path) -> Loaded {
             ..playbook
         }),
         diags,
+    }
+}
+
+/// How deep composites may nest before the loader calls it a mistake.
+const MAX_COMPOSITE_DEPTH: usize = 8;
+
+/// Names a composite argument may not take. Inside a block, WCL puts both
+/// the block kinds it may contain and its schema's own field names in
+/// scope, and either shadows a `let` of the same name — so an argument
+/// called `step` would read the step declarations rather than its value.
+/// The loader turns the name away rather than let the body read the wrong
+/// thing. (`args` itself is handled separately: it holds the whole map.)
+const SHADOWED_ARG_NAMES: &[&str] = &[
+    "arg",
+    "step",
+    "properties",
+    "symbol",
+    "name",
+    "description",
+    "declared_args",
+    "steps",
+];
+
+/// What a playbook `step` block turned out to name.
+enum LoadedStep {
+    Resource(Step),
+    Composite(CompositeInvocation),
+}
+
+/// A step that invokes a composite. It never reaches the scheduler: the
+/// loader expands it into a container of real steps.
+struct CompositeInvocation {
+    name: String,
+    description: String,
+    /// Empty for a playbook-local composite.
+    package: String,
+    composite: String,
+    requires: Vec<String>,
+    concurrency: Option<Concurrency>,
+    span: (usize, usize),
+}
+
+/// A step as the *playbook author* wrote it — one entry per `step` block,
+/// whether it names a resource or a composite. Uniqueness and `requires`
+/// are checked against these, not against expanded steps.
+struct DeclaredStep {
+    name: String,
+    requires: Vec<String>,
+    span: (usize, usize),
+}
+
+/// Resolve a composite by the model's addressing: an empty package means
+/// the playbook-local namespace.
+fn lookup_composite<'a>(
+    packages: &'a BTreeMap<String, Package>,
+    playbook: &'a BTreeMap<String, CompositeDecl>,
+    package: &str,
+    name: &str,
+) -> Option<&'a CompositeDecl> {
+    if package.is_empty() {
+        playbook.get(name)
+    } else {
+        packages.get(package)?.composites.get(name)
+    }
+}
+
+/// The tighter of two optional concurrency classes.
+fn max_opt(a: Option<Concurrency>, b: Option<Concurrency>) -> Option<Concurrency> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.max(y)),
+        (x, None) => x,
+        (None, y) => y,
     }
 }
 
@@ -121,6 +194,9 @@ impl Ctx<'_> {
 struct PlaybookLoader<'a> {
     ctx: Ctx<'a>,
     packages: &'a BTreeMap<String, Package>,
+    /// Playbook-local composites, loaded before any play so a step can
+    /// reference one by bare name.
+    composites: BTreeMap<String, CompositeDecl>,
 }
 
 impl PlaybookLoader<'_> {
@@ -138,6 +214,31 @@ impl PlaybookLoader<'_> {
         let mut vars = Vec::new();
         let mut plays = Vec::new();
         let mut seen_gather_names = HashSet::new();
+
+        // Composites first, and in their own pass: a play references them,
+        // and one composite body may reference another declared further
+        // down the file.
+        let mut pending = Pending::new(self.ctx.file, source);
+        for block in pb.blocks().filter(|b| b.kind() == "composite") {
+            let Some(c) = load_composite(&block, "", source, &mut self.ctx, &mut pending) else {
+                continue;
+            };
+            if self.composites.insert(c.name.clone(), c).is_some() {
+                self.ctx.err(
+                    format!(
+                        "duplicate composite '{}'",
+                        label_string(&block).unwrap_or_default()
+                    ),
+                    wcl_span(block.span()),
+                );
+            }
+        }
+        validate_pending(
+            self.packages,
+            &self.composites,
+            &pending,
+            self.ctx.diags,
+        );
 
         for block in pb.blocks() {
             match block.kind() {
@@ -162,7 +263,13 @@ impl PlaybookLoader<'_> {
                         }
                     }
                 }
-                "play" => plays.push(self.load_play(&block)),
+                // Expansion reads the composite map while diagnostics need
+                // `&mut self`, so the map moves out for the duration.
+                "play" => {
+                    let composites = std::mem::take(&mut self.composites);
+                    plays.push(self.load_play(&block, &composites));
+                    self.composites = composites;
+                }
                 _ => {}
             }
         }
@@ -188,6 +295,7 @@ impl PlaybookLoader<'_> {
             source: source.to_string(),
             gathers,
             vars,
+            composites: std::mem::take(&mut self.composites),
             plays,
             packages: BTreeMap::new(), // filled by caller
         }
@@ -234,42 +342,48 @@ impl PlaybookLoader<'_> {
         })
     }
 
-    fn load_play(&mut self, block: &Block<'_>) -> Play {
+    fn load_play(
+        &mut self,
+        block: &Block<'_>,
+        composites: &BTreeMap<String, CompositeDecl>,
+    ) -> Play {
         let name = label_string(block).unwrap_or_default();
         let description = string_field(block, "description", &mut self.ctx).unwrap_or_default();
         let parallel = bool_field(block, "parallel", &mut self.ctx).unwrap_or(true);
         let mut items = Vec::new();
-        self.load_items(block, &mut items, &[]);
+        let mut declared = Vec::new();
+        self.load_items(block, &mut items, &[], &[], composites, &mut declared);
 
-        // Step names must be unique within the play; `requires` must
-        // reference existing steps.
         let play = Play {
             name,
             description,
             parallel,
             items,
         };
+
+        // Uniqueness and `requires` are checked over what the *playbook*
+        // declares — a composite invocation counts once, under its own
+        // name, not once per step it expands into. Steps inside a composite
+        // are encapsulated: their `requires` were checked against their
+        // siblings where the body was declared.
         let mut names = HashSet::new();
-        for step in play.steps() {
-            if !names.insert(step.name.clone()) {
+        for d in &declared {
+            if !names.insert(d.name.clone()) {
                 self.ctx.err(
-                    format!(
-                        "duplicate step name '{}' in play '{}'",
-                        step.name, play.name
-                    ),
-                    step.span,
+                    format!("duplicate step name '{}' in play '{}'", d.name, play.name),
+                    d.span,
                 );
             }
         }
-        for step in play.steps() {
-            for req in &step.requires {
-                if req == &step.name {
+        for d in &declared {
+            for req in &d.requires {
+                if req == &d.name {
                     self.ctx
-                        .err(format!("step '{}' requires itself", step.name), step.span);
+                        .err(format!("step '{}' requires itself", d.name), d.span);
                 } else if !names.contains(req) {
                     self.ctx.err(
-                        format!("step '{}' requires unknown step '{}'", step.name, req),
-                        step.span,
+                        format!("step '{}' requires unknown step '{}'", d.name, req),
+                        d.span,
                     );
                 }
             }
@@ -277,14 +391,44 @@ impl PlaybookLoader<'_> {
         play
     }
 
-    fn load_items(&mut self, parent: &Block<'_>, out: &mut Vec<PlayItem>, containers: &[String]) {
+    fn load_items(
+        &mut self,
+        parent: &Block<'_>,
+        out: &mut Vec<PlayItem>,
+        containers: &[String],
+        frames: &[CompositeFrame],
+        composites: &BTreeMap<String, CompositeDecl>,
+        declared: &mut Vec<DeclaredStep>,
+    ) {
         for block in parent.blocks() {
             match block.kind() {
-                "step" => {
-                    if let Some(step) = self.load_step(&block, containers) {
+                "step" => match self.load_step(&block, containers, composites) {
+                    Some(LoadedStep::Resource(step)) => {
+                        declared.push(DeclaredStep {
+                            name: step.name.clone(),
+                            requires: step.requires.clone(),
+                            span: step.span,
+                        });
                         out.push(PlayItem::Step(step));
                     }
-                }
+                    Some(LoadedStep::Composite(inv)) => {
+                        declared.push(DeclaredStep {
+                            name: inv.name.clone(),
+                            requires: inv.requires.clone(),
+                            span: inv.span,
+                        });
+                        let mut chain = Vec::new();
+                        let container = self.expand_composite(
+                            inv,
+                            containers,
+                            frames,
+                            composites,
+                            &mut chain,
+                        );
+                        out.push(PlayItem::Container(container));
+                    }
+                    None => {}
+                },
                 "container" => {
                     let name = label_string(&block).unwrap_or_default();
                     let description =
@@ -293,7 +437,7 @@ impl PlaybookLoader<'_> {
                     let mut path = containers.to_vec();
                     path.push(name.clone());
                     let mut items = Vec::new();
-                    self.load_items(&block, &mut items, &path);
+                    self.load_items(&block, &mut items, &path, frames, composites, declared);
                     out.push(PlayItem::Container(Container {
                         name,
                         description,
@@ -306,17 +450,143 @@ impl PlaybookLoader<'_> {
         }
     }
 
-    fn load_step(&mut self, block: &Block<'_>, containers: &[String]) -> Option<Step> {
+    /// Expand one composite invocation into a synthetic container of real
+    /// steps. Expansion is entirely static — the body declares its steps —
+    /// so it happens here rather than at run time, and everything
+    /// downstream (the DAG, the planner, reports, NDJSON) sees ordinary
+    /// steps in ordinary containers.
+    fn expand_composite(
+        &mut self,
+        inv: CompositeInvocation,
+        containers: &[String],
+        frames: &[CompositeFrame],
+        composites: &BTreeMap<String, CompositeDecl>,
+        chain: &mut Vec<String>,
+    ) -> Container {
+        let key = format!("{}.{}", inv.package, inv.composite);
+        let mut container = Container {
+            name: inv.name.clone(),
+            description: inv.description.clone(),
+            // The invocation's own condition is evaluated by the planner as
+            // part of the frame walk, not as a container condition, because
+            // it must be evaluated in the invoking document's scope.
+            condition_src: None,
+            items: Vec::new(),
+        };
+        if let Some(at) = chain.iter().position(|k| k == &key) {
+            let mut cycle: Vec<&str> = chain[at..].iter().map(String::as_str).collect();
+            cycle.push(&key);
+            self.ctx.err(
+                format!("composite cycle: {}", cycle.join(" -> ")),
+                inv.span,
+            );
+            return container;
+        }
+        if chain.len() >= MAX_COMPOSITE_DEPTH {
+            self.ctx.err(
+                format!(
+                    "composite nesting deeper than {MAX_COMPOSITE_DEPTH} at '{}'",
+                    inv.name
+                ),
+                inv.span,
+            );
+            return container;
+        }
+
+        let Some(decl) = lookup_composite(self.packages, composites, &inv.package, &inv.composite)
+        else {
+            // Already reported when the invocation was resolved.
+            return container;
+        };
+
+        let mut path = containers.to_vec();
+        path.push(inv.name.clone());
+        let mut child_frames = frames.to_vec();
+        child_frames.push(CompositeFrame {
+            step: inv.name.clone(),
+            package: inv.package.clone(),
+            composite: inv.composite.clone(),
+            requires: inv.requires.clone(),
+        });
+
+        chain.push(key);
+        // Clone the templates: one declaration can be invoked many times,
+        // and each instance carries its own path and provenance.
+        let templates: Vec<Step> = decl.steps.clone();
+        for tmpl in templates {
+            let nested = lookup_composite(
+                self.packages,
+                composites,
+                &tmpl.package,
+                &tmpl.resource,
+            )
+            .is_some();
+            if nested {
+                let inner = CompositeInvocation {
+                    name: tmpl.name.clone(),
+                    description: tmpl.description.clone(),
+                    package: tmpl.package.clone(),
+                    composite: tmpl.resource.clone(),
+                    requires: tmpl.requires.clone(),
+                    concurrency: tmpl.concurrency.or(inv.concurrency),
+                    span: tmpl.span,
+                };
+                let c = self.expand_composite(inner, &path, &child_frames, composites, chain);
+                container.items.push(PlayItem::Container(c));
+                continue;
+            }
+            container.items.push(PlayItem::Step(Step {
+                // The invocation may tighten every step of the body.
+                concurrency: max_opt(tmpl.concurrency, inv.concurrency),
+                container_path: path.clone(),
+                frames: child_frames.clone(),
+                ..tmpl
+            }));
+        }
+        chain.pop();
+        container
+    }
+
+    fn load_step(
+        &mut self,
+        block: &Block<'_>,
+        containers: &[String],
+        composites: &BTreeMap<String, CompositeDecl>,
+    ) -> Option<LoadedStep> {
         let span = wcl_span(block.span());
         let name = label_string(block)?;
         let description = string_field(block, "description", &mut self.ctx).unwrap_or_default();
         let resource_ref = string_field(block, "resource", &mut self.ctx)?;
-        let (package, resource) = split_qualified(
-            &resource_ref,
-            "step resource must be 'package.resource'",
-            span,
-            &mut self.ctx,
-        )?;
+        let requires = string_list_field(block, "requires", &mut self.ctx).unwrap_or_default();
+        let declared_concurrency = parse_concurrency_field(block, &mut self.ctx);
+        let condition_src = self.condition_src(block);
+
+        // An unqualified reference names a playbook-local composite; there
+        // are no unqualified resources.
+        let Some((package, target)) = resource_ref.split_once('.') else {
+            if !composites.contains_key(&resource_ref) {
+                self.ctx.err(
+                    format!(
+                        "step resource must be 'package.resource' or the name of a \
+                         playbook composite, got '{resource_ref}'"
+                    ),
+                    span,
+                );
+                return None;
+            }
+            return Some(LoadedStep::Composite(self.composite_invocation(
+                block,
+                composites,
+                name,
+                description,
+                String::new(),
+                resource_ref,
+                requires,
+                declared_concurrency,
+                span,
+            )));
+        };
+
         let Some(pkg) = self.packages.get(package) else {
             self.ctx.err(
                 format!("unknown package '{package}' in step '{name}'"),
@@ -324,73 +594,109 @@ impl PlaybookLoader<'_> {
             );
             return None;
         };
-        let Some(decl) = pkg.resources.get(resource) else {
+        if pkg.composites.contains_key(target) {
+            let (package, target) = (package.to_string(), target.to_string());
+            return Some(LoadedStep::Composite(self.composite_invocation(
+                block,
+                composites,
+                name,
+                description,
+                package,
+                target,
+                requires,
+                declared_concurrency,
+                span,
+            )));
+        }
+        let Some(decl) = pkg.resources.get(target) else {
             self.ctx.err(
-                format!("package '{package}' has no resource '{resource}'"),
+                format!("package '{package}' has no resource '{target}'"),
                 span,
             );
             return None;
         };
 
-        let requires = string_list_field(block, "requires", &mut self.ctx).unwrap_or_default();
-
-        let concurrency = match string_field_optional(block, "concurrency", &mut self.ctx) {
-            Some(s) => match Concurrency::parse(&s) {
-                Some(c) => {
-                    // A step may tighten but never loosen.
-                    if c < decl.concurrency {
-                        self.ctx.err(
-                            format!(
-                                "step '{name}' declares concurrency '{}' which is looser than \
-                                 resource '{package}.{resource}' ('{}'); steps may only tighten",
-                                c.as_str(),
-                                decl.concurrency.as_str()
-                            ),
-                            span,
-                        );
-                        None
-                    } else {
-                        Some(c)
-                    }
-                }
-                None => {
-                    self.ctx.err(
-                        format!(
-                            "invalid concurrency '{s}' (expected parallel, exclusive or global)"
-                        ),
-                        span,
-                    );
-                    None
-                }
-            },
-            None => None,
-        };
+        // A step may tighten but never loosen.
+        let concurrency = declared_concurrency.filter(|c| {
+            if *c < decl.concurrency {
+                self.ctx.err(
+                    format!(
+                        "step '{name}' declares concurrency '{}' which is looser than \
+                         resource '{package}.{target}' ('{}'); steps may only tighten",
+                        c.as_str(),
+                        decl.concurrency.as_str()
+                    ),
+                    span,
+                );
+                return false;
+            }
+            true
+        });
 
         // Validate properties against the resource's parameter schema.
         let params = decl.params.clone();
         if let Some(props) = block.blocks().find(|b| b.kind() == "properties") {
-            self.check_params(&props, &params, &format!("resource '{package}.{resource}'"));
+            self.check_params(&props, &params, &format!("resource '{package}.{target}'"));
         } else {
             self.check_param_block_missing(
                 &params,
                 span,
-                &format!("resource '{package}.{resource}'"),
+                &format!("resource '{package}.{target}'"),
             );
         }
 
-        let condition_src = self.condition_src(block);
-
-        Some(Step {
+        Some(LoadedStep::Resource(Step {
             name,
             description,
             package: package.to_string(),
-            resource: resource.to_string(),
+            resource: target.to_string(),
             requires,
             concurrency,
             container_path: containers.to_vec(),
+            frames: Vec::new(),
             condition_src,
             span,
-        })
+        }))
+    }
+
+    /// Validate a composite invocation's properties against the
+    /// composite's params — the same check a resource step gets, so the
+    /// diagnostics read identically.
+    #[allow(clippy::too_many_arguments)]
+    fn composite_invocation(
+        &mut self,
+        block: &Block<'_>,
+        composites: &BTreeMap<String, CompositeDecl>,
+        name: String,
+        description: String,
+        package: String,
+        composite: String,
+        requires: Vec<String>,
+        concurrency: Option<Concurrency>,
+        span: (usize, usize),
+    ) -> CompositeInvocation {
+        let what = if package.is_empty() {
+            format!("composite '{composite}'")
+        } else {
+            format!("composite '{package}.{composite}'")
+        };
+        let params = lookup_composite(self.packages, composites, &package, &composite)
+            .map(|d| d.params.clone())
+            .unwrap_or_default();
+        if let Some(props) = block.blocks().find(|b| b.kind() == "properties") {
+            self.check_params(&props, &params, &what);
+        } else {
+            self.check_param_block_missing(&params, span, &what);
+        }
+        CompositeInvocation {
+            name,
+            description,
+            package,
+            composite,
+            requires,
+            concurrency,
+            span,
+        }
     }
 
     /// Validate a `properties` / `params` block against declared params:
@@ -484,8 +790,10 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
             pending.push(pend);
         }
     }
+    // A package is distributed on its own, so nothing in it may reach into
+    // the playbook's composite namespace — hence the empty map here.
     for p in &pending {
-        validate_tests(&packages, p, diags);
+        validate_pending(&packages, &BTreeMap::new(), p, diags);
     }
     packages
 }
@@ -502,14 +810,56 @@ struct StaticPair {
     symbol_literal: bool,
 }
 
-/// Test reference checks deferred to the second pass: resource/gatherer
-/// refs plus their statically evaluated params, with everything needed to
-/// render diagnostics into the right package.wcl.
-struct PendingTests {
+/// One property field whose check is deferred to the second pass.
+/// `value` is `None` when the expression references something that only
+/// resolves at run time — a composite param, a playbook var — which is
+/// exactly what the in-document `check_params` skips.
+#[derive(Clone)]
+struct DeferredPair {
+    name: String,
+    value: Option<DynValue>,
+    span: (usize, usize),
+    symbol_literal: bool,
+}
+
+/// Reference checks deferred to the second pass: resource/gatherer/composite
+/// refs plus their evaluated params, with everything needed to render
+/// diagnostics back into the file that declared them.
+struct Pending {
     file: PathBuf,
     source: String,
     steps: Vec<PendingStepCheck>,
     gathers: Vec<PendingGatherCheck>,
+    composite_steps: Vec<PendingCompositeStep>,
+}
+
+impl Pending {
+    fn new(file: &Path, source: &str) -> Pending {
+        Pending {
+            file: file.to_path_buf(),
+            source: source.to_string(),
+            steps: Vec::new(),
+            gathers: Vec::new(),
+            composite_steps: Vec::new(),
+        }
+    }
+}
+
+/// One step of a composite body. Its target may be a resource *or* another
+/// composite, and either may be declared in a package that loads later, so
+/// resolution waits for the assembled map.
+struct PendingCompositeStep {
+    /// "step 'x' of composite 'pkg.y'" — diagnostic prefix.
+    what: String,
+    /// Package holding the target; empty means the playbook-local namespace.
+    package: String,
+    /// Resource or composite name.
+    target: String,
+    /// Evaluated properties (None: no `properties` block declared).
+    props: Option<Vec<DeferredPair>>,
+    /// Declared step-level concurrency, for the tighten-only check.
+    concurrency: Option<Concurrency>,
+    span: (usize, usize),
 }
 
 struct PendingStepCheck {
@@ -534,12 +884,22 @@ struct PendingGatherCheck {
     span: (usize, usize),
 }
 
-fn validate_tests(packages: &BTreeMap<String, Package>, p: &PendingTests, diags: &mut Vec<Diag>) {
+/// Second pass over everything whose target could live in a package that
+/// had not loaded yet: test steps/gathers and composite bodies.
+fn validate_pending(
+    packages: &BTreeMap<String, Package>,
+    playbook_composites: &BTreeMap<String, CompositeDecl>,
+    p: &Pending,
+    diags: &mut Vec<Diag>,
+) {
     let mut ctx = Ctx {
         file: &p.file,
         source: &p.source,
         diags,
     };
+    for s in &p.composite_steps {
+        validate_composite_step(&mut ctx, packages, playbook_composites, s);
+    }
     for s in &p.steps {
         let Some(pkg) = packages.get(&s.package) else {
             ctx.err(
@@ -588,6 +948,135 @@ fn validate_tests(packages: &BTreeMap<String, Package>, p: &PendingTests, diags:
         check_params_static(&mut ctx, g.params.as_deref(), &decl.params, &what, g.span);
         check_expect_static(&mut ctx, &g.expect, &decl.returns, &what);
     }
+}
+
+/// Resolve one composite inner step's target and check its properties.
+/// A target may be a resource or another composite; a package declares
+/// both in one namespace, so the lookup order is unambiguous.
+fn validate_composite_step(
+    ctx: &mut Ctx<'_>,
+    packages: &BTreeMap<String, Package>,
+    playbook_composites: &BTreeMap<String, CompositeDecl>,
+    s: &PendingCompositeStep,
+) {
+    if s.package.is_empty() {
+        let Some(decl) = playbook_composites.get(&s.target) else {
+            ctx.err(
+                format!(
+                    "no playbook composite '{}' (in {}); a step resource without a \
+                     '.' names a playbook-local composite",
+                    s.target, s.what
+                ),
+                s.span,
+            );
+            return;
+        };
+        check_params_deferred(
+            ctx,
+            s.props.as_deref(),
+            &decl.params,
+            &format!("composite '{}' in {}", s.target, s.what),
+            s.span,
+        );
+        return;
+    }
+    let Some(pkg) = packages.get(&s.package) else {
+        ctx.err(
+            format!("unknown package '{}' in {}", s.package, s.what),
+            s.span,
+        );
+        return;
+    };
+    if let Some(decl) = pkg.composites.get(&s.target) {
+        check_params_deferred(
+            ctx,
+            s.props.as_deref(),
+            &decl.params,
+            &format!("composite '{}.{}' in {}", s.package, s.target, s.what),
+            s.span,
+        );
+        return;
+    }
+    let Some(decl) = pkg.resources.get(&s.target) else {
+        ctx.err(
+            format!(
+                "package '{}' has no resource or composite '{}' (in {})",
+                s.package, s.target, s.what
+            ),
+            s.span,
+        );
+        return;
+    };
+    let what = format!("resource '{}.{}' in {}", s.package, s.target, s.what);
+    if let Some(c) = s.concurrency
+        && c < decl.concurrency
+    {
+        ctx.err(
+            format!(
+                "{} declares concurrency '{}' which is looser than the resource's \
+                 ('{}'); steps may only tighten",
+                s.what,
+                c.as_str(),
+                decl.concurrency.as_str()
+            ),
+            s.span,
+        );
+    }
+    check_params_deferred(ctx, s.props.as_deref(), &decl.params, &what, s.span);
+}
+
+/// `check_params` over pairs evaluated out of document scope: unknown key,
+/// symbol spelling, coarse type mismatch, missing required. Pairs whose
+/// value only resolves at run time contribute their presence but skip the
+/// value checks — the run-time `apply_param_defaults` catches those.
+fn check_params_deferred(
+    ctx: &mut Ctx<'_>,
+    pairs: Option<&[DeferredPair]>,
+    decls: &[ParamDecl],
+    what: &str,
+    span: (usize, usize),
+) {
+    let declared = declared_params(decls);
+    let mut present = HashSet::new();
+    for p in pairs.unwrap_or_default() {
+        present.insert(p.name.as_str());
+        let Some(decl) = lookup_param(&declared, &p.name, what, p.span, ctx) else {
+            continue;
+        };
+        let Some(value) = &p.value else { continue };
+        check_symbol_spelling(decl, p.symbol_literal, value, what, p.span, ctx);
+        check_param_type(decl, value, what, p.span, ctx);
+    }
+    check_missing_required(decls, what, span, ctx, |n| present.contains(n));
+}
+
+/// Evaluate every field of a `properties` block, tolerating values that
+/// only resolve at run time (`Unresolved`) so composite bodies can refer to
+/// their own params.
+fn deferred_pairs(block: &Block<'_>, what: &str, ctx: &mut Ctx<'_>) -> Vec<DeferredPair> {
+    let mut out = Vec::new();
+    for f in block.fields() {
+        let fspan = wcl_span(f.span());
+        let (value, symbol_literal) = match field_value_dyn(&f) {
+            Ok(fv) => (Some(fv.value), fv.symbol_literal),
+            Err(FieldValueError::Unresolved(_)) => (None, false),
+            Err(FieldValueError::Convert(e)) => {
+                ctx.err(format!("property '{}' of {what}: {e}", f.name()), fspan);
+                continue;
+            }
+            Err(FieldValueError::Eval(e)) => {
+                ctx.diags.push(Diag::from_eval(e, ctx.file, ctx.source));
+                continue;
+            }
+        };
+        out.push(DeferredPair {
+            name: f.name().to_string(),
+            value,
+            span: fspan,
+            symbol_literal,
+        });
+    }
+    out
 }
 
 /// Check a test `expect` block against the gatherer's `returns`
@@ -777,7 +1266,7 @@ fn load_package(
     pkg_dir: &Path,
     wcl_path: &Path,
     diags: &mut Vec<Diag>,
-) -> Option<(Package, PendingTests)> {
+) -> Option<(Package, Pending)> {
     let source = match std::fs::read_to_string(wcl_path) {
         Ok(s) => s,
         Err(e) => {
@@ -832,15 +1321,28 @@ fn load_package(
     let description = string_field(&pkg_block, "description", &mut ctx).unwrap_or_default();
     let mut gatherers = BTreeMap::new();
     let mut resources = BTreeMap::new();
+    let mut composites: BTreeMap<String, CompositeDecl> = BTreeMap::new();
     let mut test_blocks = Vec::new();
     let mut scenarios = Vec::new();
     let mut seen_scenarios = HashSet::new();
+    let mut pending = Pending::new(wcl_path, &source);
 
     for block in pkg_block.blocks() {
         match block.kind() {
             // Tests parse after resources/gatherers so own-package
             // references resolve regardless of declaration order.
             "test" => test_blocks.push(block),
+            "composite" => {
+                let Some(c) = load_composite(&block, &name, &source, &mut ctx, &mut pending) else {
+                    continue;
+                };
+                if composites.insert(c.name.clone(), c).is_some() {
+                    ctx.err(
+                        format!("duplicate composite '{}'", label_string(&block).unwrap_or_default()),
+                        wcl_span(block.span()),
+                    );
+                }
+            }
             "scenario" => {
                 let Some(sname) = label_string(&block) else {
                     continue;
@@ -955,13 +1457,22 @@ fn load_package(
         }
     }
 
+    // Composites and resources share one namespace: a step's `resource`
+    // field names either, so a collision would make one unreachable.
+    for cname in composites.keys() {
+        if let Some(r) = resources.get(cname) {
+            ctx.err(
+                format!(
+                    "'{cname}' is declared as both a resource and a composite; they \
+                     share one namespace, so a step could not name either"
+                ),
+                wcl_span(pkg_block.span()),
+            );
+            let _ = r;
+        }
+    }
+
     let mut tests = Vec::new();
-    let mut pending = PendingTests {
-        file: wcl_path.to_path_buf(),
-        source: source.clone(),
-        steps: Vec::new(),
-        gathers: Vec::new(),
-    };
     let mut seen_tests = HashSet::new();
     for block in &test_blocks {
         if let Some(t) = load_test(block, pkg_dir, &name, &source, &mut ctx, &mut pending) {
@@ -1019,13 +1530,206 @@ fn load_package(
             name,
             description,
             dir: pkg_dir.to_path_buf(),
+            source: source.clone(),
             gatherers,
             resources,
+            composites,
             tests,
             scenarios,
         },
         pending,
     ))
+}
+
+/// One `composite` block: params, then a body of steps whose targets stay
+/// unresolved until the second pass (they may name a package that loads
+/// later, or a composite declared further down the same file).
+///
+/// `owner` is the package name, or empty for a playbook-local composite;
+/// it decides what an unqualified `resource` means inside the body — the
+/// declaring package's own namespace, or the playbook's composites.
+fn load_composite(
+    block: &Block<'_>,
+    owner: &str,
+    source: &str,
+    ctx: &mut Ctx<'_>,
+    pending: &mut Pending,
+) -> Option<CompositeDecl> {
+    let span = wcl_span(block.span());
+    let name = label_string(block)?;
+    let description = string_field(block, "description", ctx).unwrap_or_default();
+    let params = load_params_of(block, "arg", ctx);
+    // Arguments become `let` bindings in the body's scope, so their names
+    // have to be readable there: `args` holds the whole map, and WCL puts
+    // the enclosing block's kinds and schema fields in scope, either of
+    // which would shadow a binding of the same name.
+    for p in &params {
+        if p.name == crate::engine::vars::ARGS_BINDING {
+            ctx.err(
+                format!(
+                    "a composite argument cannot be called '{}'; that name is bound to \
+                     the map of every argument the invocation supplied",
+                    crate::engine::vars::ARGS_BINDING
+                ),
+                span,
+            );
+        } else if SHADOWED_ARG_NAMES.contains(&p.name.as_str()) {
+            ctx.err(
+                format!(
+                    "a composite argument cannot be called '{}'; the name is already in \
+                     scope inside the body and would shadow the argument",
+                    p.name
+                ),
+                span,
+            );
+        } else if !crate::engine::vars::is_identifier(&p.name) {
+            ctx.err(
+                format!(
+                    "composite argument '{}' is not a valid identifier; arguments bind \
+                     as variables inside the body",
+                    p.name
+                ),
+                span,
+            );
+        }
+    }
+    let label = if owner.is_empty() {
+        format!("composite '{name}'")
+    } else {
+        format!("composite '{owner}.{name}'")
+    };
+
+    let mut steps = Vec::new();
+    let mut seen = HashSet::new();
+    for b in block.blocks().filter(|b| b.kind() == "step") {
+        let Some(step) = load_composite_step(&b, owner, &label, source, ctx, pending) else {
+            continue;
+        };
+        if !seen.insert(step.name.clone()) {
+            ctx.err(
+                format!("duplicate step name '{}' in {label}", step.name),
+                step.span,
+            );
+            continue;
+        }
+        steps.push(step);
+    }
+
+    // `requires` inside a body names a sibling and nothing else: inner
+    // steps are not addressable from outside the composite, and the body
+    // cannot see the playbook's steps.
+    let names: HashSet<&str> = steps.iter().map(|s| s.name.as_str()).collect();
+    for s in &steps {
+        for req in &s.requires {
+            if req == &s.name {
+                ctx.err(format!("step '{}' requires itself", s.name), s.span);
+            } else if !names.contains(req.as_str()) {
+                ctx.err(
+                    format!(
+                        "step '{}' of {label} requires unknown step '{req}'; a \
+                         composite step may only require a sibling step of the same \
+                         composite",
+                        s.name
+                    ),
+                    s.span,
+                );
+            }
+        }
+    }
+
+    if steps.is_empty() {
+        ctx.err(format!("{label} declares no steps"), span);
+    }
+
+    Some(CompositeDecl {
+        name,
+        description,
+        params,
+        steps,
+    })
+}
+
+/// One step of a composite body. Target resolution and property checking
+/// are deferred into `pending`; everything else is checked here.
+fn load_composite_step(
+    block: &Block<'_>,
+    owner: &str,
+    label: &str,
+    source: &str,
+    ctx: &mut Ctx<'_>,
+    pending: &mut Pending,
+) -> Option<Step> {
+    let span = wcl_span(block.span());
+    let name = label_string(block)?;
+    let description = string_field(block, "description", ctx).unwrap_or_default();
+    let target_ref = string_field(block, "resource", ctx)?;
+    // Unqualified inside a package composite means that package's own
+    // namespace (as it does in a test step); inside a playbook composite it
+    // means a playbook-local composite.
+    let (package, target) = match target_ref.split_once('.') {
+        Some((p, r)) => (p.to_string(), r.to_string()),
+        None => (owner.to_string(), target_ref.clone()),
+    };
+    let requires = string_list_field(block, "requires", ctx).unwrap_or_default();
+    let concurrency = parse_concurrency_field(block, ctx);
+    // `step` is one schema shared with `test`, so the assertion field has
+    // to be turned away here rather than by the schema.
+    if block.fields().any(|f| f.name() == "expect") {
+        ctx.err(
+            format!(
+                "step '{name}' of {label} declares 'expect'; that is a test assertion, \
+                 and a composite step has nothing to assert against"
+            ),
+            span,
+        );
+    }
+    let what = format!("step '{name}' of {label}");
+    let props = block
+        .blocks()
+        .find(|b| b.kind() == "properties")
+        .map(|p| deferred_pairs(&p, &what, ctx));
+    pending.composite_steps.push(PendingCompositeStep {
+        what,
+        package: package.clone(),
+        target: target.clone(),
+        props,
+        concurrency,
+        span,
+    });
+    let condition_src = block
+        .fields()
+        .find(|f| f.name() == "condition")
+        .and_then(|f| field_expr_source(&f, source));
+
+    Some(Step {
+        name,
+        description,
+        package,
+        resource: target,
+        requires,
+        concurrency,
+        container_path: Vec::new(),
+        frames: Vec::new(),
+        condition_src,
+        span,
+    })
+}
+
+/// Parse an optional `concurrency` field, reporting an invalid class. The
+/// tighten-only comparison against the resource's own class happens where
+/// that declaration is in reach.
+fn parse_concurrency_field(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Option<Concurrency> {
+    let s = string_field_optional(block, "concurrency", ctx)?;
+    match Concurrency::parse(&s) {
+        Some(c) => Some(c),
+        None => {
+            ctx.err(
+                format!("invalid concurrency '{s}' (expected parallel, exclusive or global)"),
+                wcl_span(block.span()),
+            );
+            None
+        }
+    }
 }
 
 /// Parse one `test` block. Reference and parameter-schema checks go into
@@ -1037,7 +1741,7 @@ fn load_test(
     pkg_name: &str,
     source: &str,
     ctx: &mut Ctx<'_>,
-    pending: &mut PendingTests,
+    pending: &mut Pending,
 ) -> Option<TestDecl> {
     let span = wcl_span(block.span());
     let name = label_string(block)?;
@@ -1140,6 +1844,17 @@ fn load_test(
                     None => Expect::Converge,
                 };
                 let requires = string_list_field(&b, "requires", ctx).unwrap_or_default();
+                // Shared schema with `composite`'s steps; a test step runs
+                // alone in its instance, so there is nothing to tighten.
+                if b.fields().any(|f| f.name() == "concurrency") {
+                    ctx.err(
+                        format!(
+                            "step '{sname}' of test '{name}' declares 'concurrency'; test \
+                             steps run one at a time in their own instance"
+                        ),
+                        sspan,
+                    );
+                }
                 let condition_src = b
                     .fields()
                     .find(|f| f.name() == "condition")
@@ -1416,9 +2131,15 @@ fn load_symbols(
 }
 
 fn load_params(block: &Block<'_>, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
+    load_params_of(block, "param", ctx)
+}
+
+/// `load_params` over an arbitrary declaration block kind — resources and
+/// gatherers declare `param`, composites declare `args`.
+fn load_params_of(block: &Block<'_>, kind: &str, ctx: &mut Ctx<'_>) -> Vec<ParamDecl> {
     let mut params = Vec::new();
     let mut seen = HashSet::new();
-    for b in block.blocks().filter(|b| b.kind() == "param") {
+    for b in block.blocks().filter(|b| b.kind() == kind) {
         let Some(name) = label_string(&b) else {
             continue;
         };

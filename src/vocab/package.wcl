@@ -13,8 +13,45 @@ type WeavePackage {
   description: utf8
   @children("gatherer") gatherers: list<WeaveGathererDecl>
   @children("resource") resources: list<WeaveResourceDecl>
+  @children("composite") composites: list<WeaveCompositeDecl>
   @children("test") tests: list<WeaveTestDecl>
   @children("scenario") scenarios: list<WeaveScenarioDecl>
+}
+
+// A named, parameterised block of steps, invoked from a step exactly like a
+// resource — the unit of reuse between "one resource" and "copy-paste five
+// steps". Composites and resources share one namespace, so a package may not
+// declare both under the same name.
+//
+// Each declared `arg` binds as a variable inside the body, two ways: bare
+// (`body`) and under the `args` map (`args.body`). Prefer `args.` — a
+// property field shadows a bare outer variable of the same name, so the
+// pass-through `properties { path = path }` is a self-reference cycle while
+// `properties { path = args.path }` always works.
+//
+// A body sees *only* its own arguments: never the playbook's gatherer
+// results, vars or `--var` overrides. A composite is a function, not a
+// macro; a fact it needs is passed in as a property. That is what lets one
+// be promoted from a playbook to a package unchanged.
+@block("composite")
+type WeaveCompositeDecl {
+  @inline(0) name: utf8
+  description: utf8
+  @children("arg") declared_args: list<WeaveArgDecl>
+  @children("step") steps: list<WeaveStepDecl>
+}
+
+// One declared argument of a composite. Same shape as a resource's
+// `param`, under its own block kind so the body can read the values as
+// `args.name`.
+@block("arg")
+type WeaveArgDecl {
+  @inline(0) name: utf8
+  description: utf8
+  type: utf8
+  @default(false) required: bool
+  @schemaless default: utf8?
+  @children("symbol") symbols: list<WeaveSymbolDecl>
 }
 
 // A wscript-scripted, multi-stage test over a declared vmlab lab. `lab` points
@@ -118,26 +155,30 @@ type WeaveTestDecl {
   group: utf8?
   setup: utf8?
   verify: utf8?
-  @children("step") steps: list<WeaveTestStep>
+  @children("step") steps: list<WeaveStepDecl>
   @children("gather") gathers: list<WeaveTestGather>
 }
 
-// A resource invocation under test; mirrors a playbook step.
+// A resource invocation, used by both a `test` and a `composite` body.
+// Block kinds are one-per-namespace in WCL, so the two share a schema and
+// the loader rejects the fields that belong only to the other: `expect` is
+// a test's assertion, `concurrency` a composite step's tightening.
 @block("step")
-type WeaveTestStep {
+type WeaveStepDecl {
   @inline(0) name: utf8
   description: utf8
   resource: utf8
   @default("converge") expect: utf8
   @schemaless condition: bool?
   requires: list<utf8>?
-  @child("properties") properties: WeaveTestProperties?
+  concurrency: utf8?
+  @child("properties") properties: WeaveProperties?
 }
 
 // Free-form property map validated against the resource's declared params.
 @schemaless
 @block("properties")
-type WeaveTestProperties {}
+type WeaveProperties {}
 
 // A gatherer invocation under test with equality expectations.
 @block("gather")

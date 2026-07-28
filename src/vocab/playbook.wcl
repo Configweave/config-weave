@@ -14,7 +14,52 @@ type WeavePlaybook {
   @default("0.0.0") version: utf8
   @children("gather") gathers: list<WeaveGather>
   @child("vars") vars: WeaveVars?
+  @children("composite") composites: list<WeaveCompositeDecl>
   @children("play") plays: list<WeavePlay>
+}
+
+// A named, parameterised block of steps, invoked from a step exactly like a
+// resource. Declared here it is playbook-local and referenced by bare name
+// (`resource = "site"`); the identical block in a `package.wcl` is shared
+// and referenced qualified (`resource = "web.site"`).
+//
+// Each declared `arg` binds as a variable inside the body, two ways: bare
+// (`body`) and under the `args` map (`args.body`). Prefer `args.` — a
+// property field shadows a bare outer variable of the same name, so the
+// pass-through `properties { path = path }` is a self-reference cycle while
+// `properties { path = args.path }` always works.
+//
+// A body sees *only* its own arguments: never gatherer results, vars or
+// `--var` overrides. A composite is a function, not a macro; a fact it
+// needs is passed in as a property. That is what lets one be promoted from
+// a playbook to a package unchanged.
+@block("composite")
+type WeaveCompositeDecl {
+  @inline(0) name: utf8
+  description: utf8
+  @children("arg") declared_args: list<WeaveArgDecl>
+  @children("step") steps: list<WeaveStep>
+}
+
+// One declared argument of a composite: coarse type, requiredness,
+// default, description. Mirrors `param` in the package vocabulary, under
+// its own block kind so the body can read the values as `args.name`.
+@block("arg")
+type WeaveArgDecl {
+  @inline(0) name: utf8
+  description: utf8
+  type: utf8
+  @default(false) required: bool
+  @schemaless default: utf8?
+  @children("symbol") symbols: list<WeaveSymbolDecl>
+}
+
+// One legal value of a `type = "symbol"` parameter. Declaring any narrows
+// the parameter to exactly this set; declaring none leaves it open.
+@block("symbol")
+type WeaveSymbolDecl {
+  @inline(0) name: utf8
+  description: utf8
 }
 
 // Gatherer invocation: the label is the variable the result lands in.
