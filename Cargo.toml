@@ -4,6 +4,16 @@
 members = [".", "docjson"]
 default-members = ["."]
 
+# Cross-repo deps come from GitHub, not sibling checkouts: a ticket worktree
+# lives at <repo>/.tree/<ticket>, where a relative `../` path resolves to
+# nothing. Declared once here so the CLI and docjson can never disagree about
+# which wcl_lang they build against. Cargo.lock pins the commit;
+# `cargo update -p <crate>` bumps it.
+[workspace.dependencies]
+wcl_lang = { git = "https://github.com/wiltaylor/wcl.git", branch = "main" }
+wscript = { git = "https://github.com/Configweave/wscript.git", branch = "main" }
+wscript-std = { git = "https://github.com/Configweave/wscript.git", branch = "main" }
+
 [package]
 name = "config-weave"
 version = "0.1.0"
@@ -12,10 +22,10 @@ license = "MIT"
 description = "Single-binary configuration management driven by WCL playbooks and wscript scripts"
 
 [dependencies]
-wcl_lang = { path = "../WCL/crates/wcl_lang" }
+wcl_lang = { workspace = true }
 weave-docjson = { path = "docjson" }
-wscript = { path = "../wscript/wscript" }
-wscript-std = { path = "../wscript/wscript-std" }
+wscript = { workspace = true }
+wscript-std = { workspace = true }
 
 clap = { version = "4", features = ["derive"] }
 petgraph = "0.8"

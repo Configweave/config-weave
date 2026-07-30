@@ -6,6 +6,6 @@ license = "MIT"
 description = "DocJson: AST-level extraction and comment-preserving sync for playbook.wcl / package.wcl"
 
 [dependencies]
-wcl_lang = { path = "../../WCL/crates/wcl_lang" }
+wcl_lang = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

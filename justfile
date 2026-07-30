@@ -6,9 +6,13 @@ prefix   := data_dir / "config-weave/bin"
 bin_dir  := env_var("HOME") / ".local/bin"
 
 # Fixed dev-server addresses so the two docs sites (and other projects on the
-# default 8080) never collide. Must match DOCS_ADDR in ../config-weave-pkgs.
+# default 8080) never collide. Must match DOCS_ADDR in config-weave-pkgs.
 docs_addr      := "127.0.0.1:8280"
 pkgs_docs_addr := "127.0.0.1:8281"
+
+# Where the standard package library is checked out. Overridable, because a
+# ticket worktree (<repo>/.tree/<ticket>) has no sibling checkouts.
+pkgs_dir := env_var_or_default("CONFIG_WEAVE_PKGS", "../config-weave-pkgs")
 
 [default, private]
 main:
@@ -44,7 +48,7 @@ sample: build
 # containers, so this needs vmlab and `cross`.
 [group('test'), doc("Testlab suite in vmlab containers (#[ignore]-gated; needs vmlab + cross)")]
 test-lab:
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
+	CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-unknown-linux-musl
 	CONFIG_WEAVE_TEST_BINARY=$(realpath target-cross/x86_64-unknown-linux-musl/release/config-weave) \
 		cargo test --test testlab -- --ignored
@@ -53,8 +57,8 @@ test-lab:
 # every VM package test against the given template. Needs vmlab, KVM, and
 # a built template (see ../vmlab).
 [group('test'), doc("Testlab smoke in disposable VMs (needs vmlab + KVM + template)")]
-test-lab-vm dir='../config-weave-pkgs' template='x86_64/ubuntu-24.04': build
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
+test-lab-vm dir=pkgs_dir template='x86_64/ubuntu-24.04': build
+	CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-unknown-linux-musl
 	target/debug/config-weave test {{dir}} --template {{template}} \
 		--binary target-cross/x86_64-unknown-linux-musl/release/config-weave
@@ -64,12 +68,12 @@ test-lab-vm dir='../config-weave-pkgs' template='x86_64/ubuntu-24.04': build
 # and the x86_64/windows-server-2025 template in the store.
 [group('test'), doc("windows_domain AD scenario, full DC lifecycle (heavy; needs cross + vmlab + KVM)")]
 test-ad: build
-	test -d ../config-weave-pkgs
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
+	test -d {{pkgs_dir}}
+	CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-unknown-linux-musl
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
+	CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-pc-windows-gnu
-	target/debug/config-weave test ../config-weave-pkgs windows_domain:ad_matrix \
+	target/debug/config-weave test {{pkgs_dir}} windows_domain:ad_matrix \
 		--binary target-cross/x86_64-unknown-linux-musl/release/config-weave \
 		--binary-windows target-cross/x86_64-pc-windows-gnu/release/config-weave.exe \
 		--vm-jobs 1
@@ -80,25 +84,25 @@ test-ad: build
 # vmlab + KVM, and a built windows template for the windows tests.
 [group('test'), doc("Run the sibling standard package library checks in vmlab instances")]
 test-pkgs: build
-	test -d ../config-weave-pkgs
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
+	test -d {{pkgs_dir}}
+	CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-unknown-linux-musl
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross \
+	CARGO_TARGET_DIR=target-cross \
 		cross build --release --target x86_64-pc-windows-gnu
-	target/debug/config-weave wscripti ../config-weave-pkgs
-	target/debug/config-weave validate ../config-weave-pkgs
-	target/debug/config-weave test ../config-weave-pkgs \
+	target/debug/config-weave wscripti {{pkgs_dir}}
+	target/debug/config-weave validate {{pkgs_dir}}
+	target/debug/config-weave test {{pkgs_dir}} \
 		--binary target-cross/x86_64-unknown-linux-musl/release/config-weave \
 		--binary-windows target-cross/x86_64-pc-windows-gnu/release/config-weave.exe
-	target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs --pkg-only
+	target/debug/config-weave docs {{pkgs_dir}} {{pkgs_dir}}/docs --pkg-only
 
 # Build config-weave, render the sibling package docs, and serve them with
 # WCL's own dev server. It watches for `.wcl` changes but does not rebuild
 # on its own — press Enter in the console to rebuild. Needs `wcl` on PATH.
 [group('docs'), doc("Render + serve the sibling package docs (needs wcl)")]
 serve-pkgs-docs: build
-	test -d ../config-weave-pkgs
-	target/debug/config-weave docs ../config-weave-pkgs ../config-weave-pkgs/docs --pkg-only --serve --addr {{pkgs_docs_addr}}
+	test -d {{pkgs_dir}}
+	target/debug/config-weave docs {{pkgs_dir}} {{pkgs_dir}}/docs --pkg-only --serve --addr {{pkgs_docs_addr}}
 
 # Serve config-weave's own documentation site (landing at /, the config-weave
 # reference book under /wskills/config-weave/). Watches for `.wcl` changes but
@@ -132,16 +136,16 @@ skill-build *ARGS:
 	wcl wdoc skill docs/wskills/config-weave/wdoc/skill/main.wcl --out .claude/skills/config-weave {{ARGS}}
 
 # Release artifacts for both PRD targets plus a checksums file.
-# Requires `cross` and a container runtime; path deps are mounted into
-# the build container (see Cross.toml).
+# Requires `cross` and a container runtime; the cross-repo deps are fetched
+# from GitHub inside the container (see Cross.toml).
 [group('build'), doc("Cross-build release artifacts for both PRD targets + checksums")]
 release:
 	# Separate CARGO_TARGET_DIRs: cross runs each target in its own container,
 	# and host-arch build scripts compiled under one image's glibc fail to run
 	# under the other's ("GLIBC_x.yz not found" — seen on CI runners).
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross/musl \
+	CARGO_TARGET_DIR=target-cross/musl \
 		cross build --release --target x86_64-unknown-linux-musl
-	CW_WCL=$(realpath ../WCL) CW_WSCRIPT=$(realpath ../wscript) CARGO_TARGET_DIR=target-cross/win \
+	CARGO_TARGET_DIR=target-cross/win \
 		cross build --release --target x86_64-pc-windows-gnu
 	mkdir -p dist
 	cp target-cross/musl/x86_64-unknown-linux-musl/release/config-weave dist/config-weave-linux-x86_64

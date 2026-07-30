@@ -1,10 +1,8 @@
 name: CI
 
-# Lint and test gate for the Rust crate. The crate has path dependencies on
-# the sibling WCL and wscript repos (../WCL, ../wscript), which are public,
-# so we check everything out side by side under the workspace root: this
-# repo into config-weave/, wiltaylor/wcl into WCL/ and Configweave/wscript
-# into wscript/ — the same layout as a local dev checkout. Docker- and
+# Lint and test gate for the Rust crate. The cross-repo deps (wcl_lang,
+# wscript, wscript-std) are GitHub git dependencies pinned by Cargo.lock, so a
+# plain single checkout is all this needs — no sibling repos. Docker- and
 # vmlab-backed testlab tests are #[ignore]-gated, so `cargo test` runs only
 # the host-independent suite here.
 #
@@ -24,19 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: config-weave
-
-      - name: Check out sibling path dependencies
-        uses: actions/checkout@v4
-        with:
-          repository: wiltaylor/wcl
-          path: WCL
-
-      - uses: actions/checkout@v4
-        with:
-          repository: Configweave/wscript
-          path: wscript
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -44,19 +29,14 @@ jobs:
           components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: config-weave
 
       - name: Format check
-        working-directory: config-weave
         run: cargo fmt --check
 
       - name: Clippy
-        working-directory: config-weave
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
-        working-directory: config-weave
         run: cargo test
 
   # ── Version ───────────────────────────────────────────────────────────────
@@ -154,9 +134,9 @@ jobs:
 
   # ── Binaries ──────────────────────────────────────────────────────────────
   # `just release` cross-builds both PRD targets (linux musl + windows gnu)
-  # via `cross`, which runs in docker; Cross.toml mounts the sibling path
-  # deps into the build container through CW_WCL/CW_WSCRIPT. Version-stamped
-  # so `config-weave --version` matches the tag. Artifacts land in dist/
+  # via `cross`, which runs in docker; the cross-repo git deps are fetched
+  # inside the container, so nothing needs mounting. Version-stamped so
+  # `config-weave --version` matches the tag. Artifacts land in dist/
   # (both binaries + SHA256SUMS).
   build:
     name: Build release binaries
@@ -165,19 +145,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: config-weave
-
-      - name: Check out sibling path dependencies
-        uses: actions/checkout@v4
-        with:
-          repository: wiltaylor/wcl
-          path: WCL
-
-      - uses: actions/checkout@v4
-        with:
-          repository: Configweave/wscript
-          path: wscript
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -185,19 +152,17 @@ jobs:
       - uses: taiki-e/install-action@cross
 
       - name: Stamp version
-        working-directory: config-weave
         run: |
           V="${{ needs.version.outputs.version }}"
           sed -i '0,/^version = ".*"$/s//version = "'"$V"'"/' Cargo.toml
 
       - name: Build
-        working-directory: config-weave
         run: just release
 
       - uses: actions/upload-artifact@v4
         with:
           name: binaries
-          path: config-weave/dist/*
+          path: dist/*
           retention-days: 1
 
   # ── Release ───────────────────────────────────────────────────────────────
