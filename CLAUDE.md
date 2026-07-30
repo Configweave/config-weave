@@ -74,17 +74,30 @@ Binary crate per PRD §14: `model/` (WCL loading + schema validation),
 `engine/` (gatherers, DAG scheduler, worker pool, lifecycle), `hostapi/`
 (wscript host modules; Windows impls behind cfg), `comdispatch/` (IDispatch +
 VARIANT marshalling), `docsgen`, `scaffold` (wscripti/init), `vocab/` (the
-embedded WCL schema served as system imports). Path deps on `../WCL` and
-`../wscript`; `Cross.toml` mounts them for `cross` release builds.
+embedded WCL schema served as system imports).
+
+`wcl_lang`, `wscript` and `wscript-std` are **GitHub git dependencies**, not
+sibling path deps — declared once in `[workspace.dependencies]` so the CLI and
+`docjson/` cannot disagree about which `wcl_lang` they build against. The commit
+is pinned by `Cargo.lock`; bump it deliberately with `cargo update -p wcl_lang`
+(or `-p wscript`). No sibling checkout is needed to build, which is what lets a
+ticket worktree (`.tree/<ticket-id>`, where a relative `../` path resolves to
+nothing) build at all. To develop across repos, put a `[patch]` section in a
+**gitignored** `.cargo/config.toml` pointing those git URLs at local paths.
 
 ## Conventions
 
-- Trunk-based development: commit directly to `main`, no branches or PRs
-  unless explicitly asked.
+- Ticket-branch development, driven by the aciddog kanban board: work happens
+  on a branch named for the ticket id (`t-…`) in that ticket's worktree at
+  `.tree/<ticket-id>`, and lands on `main` through a pull request. Never commit
+  or push directly to `main` — the board's Tests and Review stages gate every
+  change, and a direct push bypasses them.
 - **just** as command runner: `just build` / `just test` / `just check` /
   `just release` (cross-builds both PRD targets + checksums).
-- Releases are trailer-gated in CI (same scheme as WCL/vmlab): push a
-  commit to `main` with a `pre-release: true` (→ vX.Y.Z-alpha) or
-  `release: true` (→ vX.Y.Z) trailer; CI bumps from the last tag by
-  conventional commits, cross-builds via `just release`, tags, and
-  publishes a GitHub release.
+- Releases are trailer-gated in CI (same scheme as WCL/vmlab): land a commit on
+  `main` carrying a `pre-release: true` (→ vX.Y.Z-alpha) or `release: true`
+  (→ vX.Y.Z) trailer; CI bumps from the last tag by conventional commits,
+  cross-builds via `just release`, tags, and publishes a GitHub release. CI
+  reads the trailer off the head commit of the push, so when merging a release
+  PR the trailer has to be in the commit that actually lands — put it in the
+  squash-commit message, not only in an intermediate branch commit.
