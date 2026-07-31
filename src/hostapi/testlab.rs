@@ -18,8 +18,7 @@ use wscript_std::DynValue;
 
 use crate::diag::Diag;
 use crate::model::Playbook;
-use crate::report::JsonRunReport;
-use crate::testlab::guest::Guest;
+use crate::testlab::guest::{GatherOutcome, Guest};
 use crate::testlab::synth::{self, BinaryResolver};
 use crate::testlab::vmlab::{VmlabInstance, VmlabLab};
 
@@ -172,35 +171,6 @@ fn step_result(js: Option<&crate::report::JsonRunStep>) -> StepResult {
     }
 }
 
-/// Run `config-weave {mode} <dir> <play> --json` in a machine and return
-/// the parsed report.
-fn run_in_guest(
-    instance: &VmlabInstance,
-    bin: &str,
-    mode: &str,
-    playbook: &str,
-    play: Option<&str>,
-) -> Result<JsonRunReport, Diag> {
-    let mut argv = vec![bin, mode, playbook];
-    if let Some(p) = play {
-        argv.push(p);
-    }
-    argv.extend(["--json", "--continue-on-error"]);
-    let out = instance.exec(&argv)?;
-    serde_json::from_str(out.stdout.trim()).map_err(|_| {
-        let tail = if out.stderr.is_empty() {
-            &out.stdout
-        } else {
-            &out.stderr
-        };
-        Diag::bare(format!(
-            "the {mode} run produced no parseable report (exit {}): {}",
-            out.exit_code,
-            tail.trim()
-        ))
-    })
-}
-
 /// Apply or check a single synthesized resource and return its step result.
 fn apply_resource(
     state: &mut LabState,
@@ -217,15 +187,9 @@ fn apply_resource(
     let ms = &state.machines[name];
     let wd = Guest::new(&ms.instance).scenario_work(name, n)?;
     wd.stage(synthd.dir.path())?;
-    let report = run_in_guest(
-        &ms.instance,
-        wd.bin(),
-        mode,
-        wd.playbook(),
-        Some(synth::PLAY),
-    )?;
+    let out = wd.run(mode, Some(synth::PLAY), None, mode)?;
     Ok(step_result(
-        report.steps.iter().find(|s| s.name == step_name),
+        out.report.steps.iter().find(|s| s.name == step_name),
     ))
 }
 
@@ -248,32 +212,15 @@ fn gather_fact(
     let wd = Guest::new(&ms.instance).scenario_work(name, n)?;
     wd.stage(synthd.dir.path())?;
 
-    let mut argv = vec![wd.bin(), "__gather", wd.playbook(), key];
-    let params_json;
-    if !matches!(params, DynValue::Null) {
-        params_json = crate::convert::dyn_to_json(params).to_string();
-        argv.extend(["--params-json", &params_json]);
+    let params = (!matches!(params, DynValue::Null)).then(|| crate::convert::dyn_to_json(params));
+
+    // A scenario asserts by calling this, so a gatherer's refusal is an
+    // error the script sees — the opposite of the runner, which records it
+    // and carries on.
+    match wd.gather(key, params.as_ref(), key)? {
+        GatherOutcome::Ok(value) => crate::convert::json_to_dyn(&value).map_err(Diag::bare),
+        GatherOutcome::Refused(why) => Err(Diag::bare(format!("gather '{key}' failed: {why}"))),
     }
-    let out = ms.instance.exec(&argv)?;
-    let parsed: serde_json::Value = serde_json::from_str(out.stdout.trim()).map_err(|_| {
-        let tail = if out.stderr.is_empty() {
-            &out.stdout
-        } else {
-            &out.stderr
-        };
-        Diag::bare(format!(
-            "gather '{key}' produced no parseable protocol output (exit {}): {}",
-            out.exit_code,
-            tail.trim()
-        ))
-    })?;
-    if parsed["ok"] != serde_json::Value::Bool(true) {
-        return Err(Diag::bare(format!(
-            "gather '{key}' failed: {}",
-            parsed["error"].as_str().unwrap_or("(no error message)")
-        )));
-    }
-    crate::convert::json_to_dyn(&parsed["value"]).map_err(Diag::bare)
 }
 
 /// Apply or check a whole authored playbook directory (relative to the
@@ -296,14 +243,15 @@ fn apply_playbook(
     let ms = &state.machines[name];
     let wd = Guest::new(&ms.instance).scenario_work(name, n)?;
     wd.stage(&host_dir)?;
-    let report = run_in_guest(&ms.instance, wd.bin(), mode, wd.playbook(), None)?;
-    let steps = report
+    let out = wd.run(mode, None, None, mode)?;
+    let steps = out
+        .report
         .steps
         .iter()
         .map(|s| (s.name.clone(), step_result(Some(s))))
         .collect();
     Ok(RunReport {
-        ok: report.exit_code == 0,
+        ok: out.report.exit_code == 0,
         steps,
     })
 }
