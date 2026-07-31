@@ -92,8 +92,11 @@ nothing) build at all. To develop across repos, put a `[patch]` section in a
   `.tree/<ticket-id>`, and lands on `main` through a pull request. Never commit
   or push directly to `main` — the board's Tests and Review stages gate every
   change, and a direct push bypasses them.
-- **just** as command runner: `just build` / `just test` / `just check` /
-  `just release` (cross-builds both PRD targets + checksums).
+- **just** as command runner: `just build` / `just release` (cross-builds both
+  PRD targets + checksums). The merge bar lives in the `ci` module: `just
+  ci::check` runs the whole gate (lint, format check, tests), `just ci::lint` /
+  `ci::fmt-check` / `ci::test` run one part — `.github/workflows/ci.yml` calls
+  those recipes rather than restating their commands.
 - Releases are trailer-gated in CI (same scheme as WCL/vmlab): land a commit on
   `main` carrying a `pre-release: true` (→ vX.Y.Z-alpha) or `release: true`
   (→ vX.Y.Z) trailer; CI bumps from the last tag by conventional commits,

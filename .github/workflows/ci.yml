@@ -1,10 +1,12 @@
 name: CI
 
-# Lint and test gate for the Rust crate. The cross-repo deps (wcl_lang,
-# wscript, wscript-std) are GitHub git dependencies pinned by Cargo.lock, so a
-# plain single checkout is all this needs — no sibling repos. Docker- and
-# vmlab-backed testlab tests are #[ignore]-gated, so `cargo test` runs only
-# the host-independent suite here.
+# Lint and test gate for the Rust crate — the merge bar itself lives in the
+# `ci` just module (.just/ci/mod.just); the test job below only invokes its
+# parts. The cross-repo deps (wcl_lang, wscript, wscript-std) are GitHub git
+# dependencies pinned by Cargo.lock, so a plain single checkout is all this
+# needs — no sibling repos. The vmlab-backed testlab tests are #[ignore]-gated
+# and outside the gate, so `just ci::test` runs only the host-independent
+# suite here.
 #
 # No paths filter: releases are trailer-gated (see the version job), so the
 # workflow must see every push to main — a release commit that touches
@@ -30,14 +32,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: taiki-e/install-action@just
+
+      # One step per part of `just ci::check`, rather than the whole gate in
+      # one call, so a failure names the part that failed. The commands live
+      # in .just/ci/mod.just — the workflow must not restate them, or the
+      # local gate and CI can drift in what a check actually does.
       - name: Format check
-        run: cargo fmt --check
+        run: just ci::fmt-check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: just ci::lint
 
       - name: Test
-        run: cargo test
+        run: just ci::test
 
   # ── Version ───────────────────────────────────────────────────────────────
   # Trailer-gated: a release only happens when HEAD carries a publish trailer.
