@@ -19,8 +19,7 @@ use wscript_std::DynValue;
 use crate::diag::Diag;
 use crate::model::Playbook;
 use crate::report::JsonRunReport;
-use crate::testlab::backend::GuestOs;
-use crate::testlab::guest::{self, Guest};
+use crate::testlab::guest::Guest;
 use crate::testlab::synth::{self, BinaryResolver};
 use crate::testlab::vmlab::{VmlabInstance, VmlabLab};
 
@@ -133,35 +132,13 @@ fn ds(d: Diag) -> String {
     d.message
 }
 
-/// Per-apply guest paths: a fresh working dir under `/weave/s` (or
-/// `C:/weave/s`), so successive applies on one machine never collide.
-fn scenario_dir(os: GuestOs, name: &str, n: usize) -> (String, String) {
-    let root = match os {
-        GuestOs::Linux => "/weave/s",
-        GuestOs::Windows => "C:/weave/s",
-    };
-    let dir = format!("{root}/{name}-{n}");
-    let playbook = format!("{dir}/playbook");
-    (dir, playbook)
-}
-
-fn mkdir_guest(instance: &VmlabInstance, os: GuestOs, dir: &str) -> Result<(), Diag> {
-    let out = match os {
-        GuestOs::Linux => instance.exec(&["mkdir", "-p", dir])?,
-        GuestOs::Windows => {
-            let win = dir.replace('/', "\\");
-            let script = format!("if not exist {win} md {win}");
-            instance.exec(&["cmd.exe", "/C", &script])?
-        }
-    };
-    if out.exit_code != 0 {
-        return Err(Diag::bare(format!(
-            "cannot create guest dir {dir} (exit {}): {}",
-            out.exit_code,
-            out.stderr.trim()
-        )));
-    }
-    Ok(())
+/// The next working-dir number for `name`, so successive applies on one
+/// machine never collide. The machine is known to exist — `ensure_prepared`
+/// runs first at every call site.
+fn bump(state: &mut LabState, name: &str) -> usize {
+    let ms = state.machines.get_mut(name).expect("machine present");
+    ms.counter += 1;
+    ms.counter
 }
 
 /// Copy the config-weave binary into a machine and smoke-test it, once.
@@ -234,20 +211,19 @@ fn apply_resource(
 ) -> Result<StepResult, Diag> {
     ensure_prepared(state, name)?;
     let (synthd, step_name) = synth::synthesize_resource(&state.playbook, key, props)?;
-    let os = state.machines[name].instance.os();
-    let bin = guest::bin_for(os);
 
     // A fresh working dir per apply.
-    let n = {
-        let ms = state.machines.get_mut(name).unwrap();
-        ms.counter += 1;
-        ms.counter
-    };
-    let (dir, pb_path) = scenario_dir(os, name, n);
+    let n = bump(state, name);
     let ms = &state.machines[name];
-    mkdir_guest(&ms.instance, os, &dir)?;
-    ms.instance.copy_in(synthd.dir.path(), &pb_path)?;
-    let report = run_in_guest(&ms.instance, bin, mode, &pb_path, Some(synth::PLAY))?;
+    let wd = Guest::new(&ms.instance).scenario_work(name, n)?;
+    wd.stage(synthd.dir.path())?;
+    let report = run_in_guest(
+        &ms.instance,
+        wd.bin(),
+        mode,
+        wd.playbook(),
+        Some(synth::PLAY),
+    )?;
     Ok(step_result(
         report.steps.iter().find(|s| s.name == step_name),
     ))
@@ -266,20 +242,13 @@ fn gather_fact(
         .split_once('.')
         .ok_or_else(|| Diag::bare(format!("gatherer key '{key}' must be 'package.gatherer'")))?;
     let synthd = synth::synthesize_gather(&state.playbook, package)?;
-    let os = state.machines[name].instance.os();
-    let bin = guest::bin_for(os);
 
-    let n = {
-        let ms = state.machines.get_mut(name).unwrap();
-        ms.counter += 1;
-        ms.counter
-    };
-    let (dir, pb_path) = scenario_dir(os, name, n);
+    let n = bump(state, name);
     let ms = &state.machines[name];
-    mkdir_guest(&ms.instance, os, &dir)?;
-    ms.instance.copy_in(synthd.dir.path(), &pb_path)?;
+    let wd = Guest::new(&ms.instance).scenario_work(name, n)?;
+    wd.stage(synthd.dir.path())?;
 
-    let mut argv = vec![bin, "__gather", pb_path.as_str(), key];
+    let mut argv = vec![wd.bin(), "__gather", wd.playbook(), key];
     let params_json;
     if !matches!(params, DynValue::Null) {
         params_json = crate::convert::dyn_to_json(params).to_string();
@@ -323,18 +292,11 @@ fn apply_playbook(
             state.pkg_dir.display()
         )));
     }
-    let os = state.machines[name].instance.os();
-    let bin = guest::bin_for(os);
-    let n = {
-        let ms = state.machines.get_mut(name).unwrap();
-        ms.counter += 1;
-        ms.counter
-    };
-    let (gdir, pb_path) = scenario_dir(os, name, n);
+    let n = bump(state, name);
     let ms = &state.machines[name];
-    mkdir_guest(&ms.instance, os, &gdir)?;
-    ms.instance.copy_in(&host_dir, &pb_path)?;
-    let report = run_in_guest(&ms.instance, bin, mode, &pb_path, None)?;
+    let wd = Guest::new(&ms.instance).scenario_work(name, n)?;
+    wd.stage(&host_dir)?;
+    let report = run_in_guest(&ms.instance, wd.bin(), mode, wd.playbook(), None)?;
     let steps = report
         .steps
         .iter()
