@@ -25,9 +25,8 @@ use crate::hostapi::testlab::{Lab, LabState, lab_value};
 use crate::model::{Expect, Package, Playbook, ScenarioDecl, TestDecl, TestTarget};
 use crate::report::JsonRunReport;
 
-use super::backend::GuestOs;
 use super::events::{TestEvent, TestEventSink, TestPhase, tail_chunk};
-use super::guest::{self, Guest};
+use super::guest::{Guest, Workdir};
 use super::report::{TestGatherResult, TestOutcome, TestReport, TestStepResult, VerifyResult};
 use super::synth;
 use super::synth::BinaryResolver;
@@ -47,40 +46,6 @@ pub struct RunnerOptions {
     pub container_cap: usize,
     /// Max VM groups running at once — kept small, VMs are heavy.
     pub vm_cap: usize,
-}
-
-/// The in-instance locations everything runs from, per guest OS. Forward
-/// slashes throughout — Windows APIs accept them everywhere these paths
-/// go (only shell command text needs backslashes, and that is the
-/// instance's concern).
-///
-/// The binary is copied once per group to the shared `bin` path; each
-/// test gets its own working `dir` (and the playbook/facts under it) so
-/// grouped tests sharing one instance never clobber each other's files.
-pub struct GuestPaths {
-    pub bin: &'static str,
-    pub playbook: String,
-    pub facts: String,
-    /// The per-test working directory holding the playbook and facts.
-    pub dir: String,
-}
-
-impl GuestPaths {
-    /// Per-test paths under a working dir named by `slug` (a path-safe
-    /// per-test identifier).
-    pub fn for_test(os: GuestOs, slug: &str) -> GuestPaths {
-        let root = match os {
-            GuestOs::Linux => "/weave/t",
-            GuestOs::Windows => "C:/weave/t",
-        };
-        let dir = format!("{root}/{slug}");
-        GuestPaths {
-            bin: guest::bin_for(os),
-            playbook: format!("{dir}/playbook"),
-            facts: format!("{dir}/facts.json"),
-            dir,
-        }
-    }
 }
 
 /// A path-safe per-test identifier: selection index plus the package and
@@ -403,42 +368,12 @@ fn drive_one(
     slug: &str,
     report: &mut TestReport,
 ) -> Result<(), Diag> {
-    let os = instance.os();
-    let paths = GuestPaths::for_test(os, slug);
-
-    // The per-test working dir must exist before setup cd's into it.
-    let mkdir = match os {
-        GuestOs::Linux => instance.exec(&["mkdir", "-p", &paths.dir])?,
-        GuestOs::Windows => {
-            let win = paths.dir.replace('/', "\\");
-            let script = format!("if not exist {win} md {win}");
-            instance.exec(&["cmd.exe", "/C", &script])?
-        }
-    };
-    if mkdir.exit_code != 0 {
-        return Err(Diag::bare(format!(
-            "cannot create the per-test working dir {} (exit {}): {}",
-            paths.dir,
-            mkdir.exit_code,
-            tail(&mkdir.stderr)
-        )));
-    }
+    // Its own working dir, created here — setup cd's into it below.
+    let wd = Guest::new(instance).test_work(slug)?;
 
     if let Some(setup) = &test.setup {
         ctx.phase(TestPhase::Setup);
-        let script;
-        let argv: [&str; 3] = match os {
-            // The exec working directory is unspecified; pin it.
-            GuestOs::Linux => {
-                script = format!("cd {} || exit 1\n{setup}", paths.dir);
-                ["sh", "-c", &script]
-            }
-            GuestOs::Windows => {
-                script = format!("cd /d {} && {setup}", paths.dir.replace('/', "\\"));
-                ["cmd.exe", "/C", &script]
-            }
-        };
-        let out = instance.exec(&argv)?;
+        let out = wd.exec_in(setup)?;
         ctx.log("setup", &out.stderr);
         if out.exit_code != 0 {
             return Err(Diag::bare(format!(
@@ -449,11 +384,11 @@ fn drive_one(
         }
     }
 
-    instance.copy_in(synthesized.dir.path(), &paths.playbook)?;
+    wd.stage(synthesized.dir.path())?;
 
-    let facts = run_gathers(test, instance, ctx, &mut report.gathers, &paths)?;
-    run_steps(test, instance, opts, ctx, &mut report.steps, &paths)?;
-    report.verify = run_verify(test, instance, ctx, &facts, &paths)?;
+    let facts = run_gathers(test, instance, ctx, &mut report.gathers, &wd)?;
+    run_steps(test, instance, opts, ctx, &mut report.steps, &wd)?;
+    report.verify = run_verify(test, instance, ctx, &facts, &wd)?;
     Ok(())
 }
 
@@ -464,7 +399,7 @@ fn run_gathers(
     instance: &VmlabInstance,
     ctx: &TestCtx,
     results: &mut Vec<TestGatherResult>,
-    paths: &GuestPaths,
+    wd: &Workdir,
 ) -> Result<serde_json::Map<String, serde_json::Value>, Diag> {
     let mut facts = serde_json::Map::new();
     for g in &test.gathers {
@@ -472,7 +407,7 @@ fn run_gathers(
             name: g.name.clone(),
         });
         let key = format!("{}.{}", g.package, g.gatherer);
-        let mut argv = vec![paths.bin, "__gather", paths.playbook.as_str(), &key];
+        let mut argv = vec![wd.bin(), "__gather", wd.playbook(), &key];
         let params_json;
         if !g.params.is_empty() {
             let map: serde_json::Map<String, serde_json::Value> = g
@@ -543,7 +478,7 @@ fn run_steps(
     opts: &RunnerOptions,
     ctx: &TestCtx,
     results: &mut Vec<TestStepResult>,
-    paths: &GuestPaths,
+    wd: &Workdir,
 ) -> Result<(), Diag> {
     if test.steps.is_empty() {
         return Ok(());
@@ -564,9 +499,9 @@ fn run_steps(
         // expectation table stays total; dependents of errored steps
         // still come back `not_run` per the engine's requires semantics.
         let mut argv = vec![
-            paths.bin,
+            wd.bin(),
             mode,
-            paths.playbook.as_str(),
+            wd.playbook(),
             synth::PLAY,
             "--json",
             "--continue-on-error",
@@ -650,7 +585,7 @@ fn run_verify(
     instance: &VmlabInstance,
     ctx: &TestCtx,
     facts: &serde_json::Map<String, serde_json::Value>,
-    paths: &GuestPaths,
+    wd: &Workdir,
 ) -> Result<Option<VerifyResult>, Diag> {
     let Some(verify) = &test.verify else {
         return Ok(None);
@@ -666,16 +601,10 @@ fn run_verify(
                 .as_bytes(),
         )
         .map_err(|e| Diag::bare(format!("cannot write the facts temp file: {e}")))?;
-    instance.copy_in(facts_file.path(), &paths.facts)?;
+    wd.stage_facts(facts_file.path())?;
 
-    let script = in_container_script(verify, paths)?;
-    let out = instance.exec(&[
-        paths.bin,
-        "__verify",
-        &script,
-        "--facts",
-        paths.facts.as_str(),
-    ])?;
+    let script = wd.staged_script(verify)?;
+    let out = instance.exec(&[wd.bin(), "__verify", &script, "--facts", wd.facts()])?;
     let done = |passed: bool, message: Option<String>| {
         (ctx.sink)(TestEvent::VerifyResult {
             package: ctx.package.to_string(),
@@ -697,27 +626,6 @@ fn run_verify(
             })
         ))),
     }
-}
-
-/// Map a host verify path (absolute, under some pkgs/<name>/) to its
-/// location inside the synthesized playbook copy.
-fn in_container_script(verify: &Path, paths: &GuestPaths) -> Result<String, Diag> {
-    // …/pkgs/<pkg>/<rel> — find the pkgs component from the right.
-    let comps: Vec<&str> = verify
-        .iter()
-        .map(|c| c.to_str().unwrap_or_default())
-        .collect();
-    let idx = comps.iter().rposition(|c| *c == "pkgs").ok_or_else(|| {
-        Diag::bare(format!(
-            "verify script {} is not under pkgs/",
-            verify.display()
-        ))
-    })?;
-    Ok(format!(
-        "{}/pkgs/{}",
-        paths.playbook,
-        comps[idx + 1..].join("/")
-    ))
 }
 
 /// First interesting line(s) of command output for diagnostics.
@@ -938,43 +846,9 @@ mod tests {
         assert_eq!(expectations(Expect::Skip), [Some(Skipped); 3]);
     }
 
-    #[test]
-    fn verify_path_maps_into_the_container() {
-        let p = Path::new("/host/playbook/pkgs/core/tests/verify.ws");
-        let linux = GuestPaths::for_test(GuestOs::Linux, "0-core__t");
-        assert_eq!(
-            in_container_script(p, &linux).unwrap(),
-            "/weave/t/0-core__t/playbook/pkgs/core/tests/verify.ws"
-        );
-        let windows = GuestPaths::for_test(GuestOs::Windows, "0-core__t");
-        assert_eq!(
-            in_container_script(p, &windows).unwrap(),
-            "C:/weave/t/0-core__t/playbook/pkgs/core/tests/verify.ws"
-        );
-        assert!(in_container_script(Path::new("/elsewhere/verify.ws"), &linux).is_err());
-    }
-
-    #[test]
-    fn guest_paths_are_per_test_under_a_shared_bin() {
-        // The binary path is shared (copied once per group); playbook and
-        // facts live under a distinct per-test working dir.
-        assert_eq!(guest::bin_for(GuestOs::Linux), "/weave/config-weave");
-        assert_eq!(
-            guest::bin_for(GuestOs::Windows),
-            "C:/weave/config-weave.exe"
-        );
-
-        let a = GuestPaths::for_test(GuestOs::Linux, "0-core__a");
-        let b = GuestPaths::for_test(GuestOs::Linux, "1-core__b");
-        assert_eq!(a.bin, b.bin, "the binary is shared across grouped tests");
-        assert_ne!(a.dir, b.dir, "each test gets its own working dir");
-        assert_eq!(a.dir, "/weave/t/0-core__a");
-        assert_eq!(a.playbook, "/weave/t/0-core__a/playbook");
-        assert_eq!(a.facts, "/weave/t/0-core__a/facts.json");
-
-        let w = GuestPaths::for_test(GuestOs::Windows, "0-core__a");
-        assert_eq!(w.dir, "C:/weave/t/0-core__a");
-    }
+    // The guest path scheme and the verify-script mapping moved to
+    // `testlab::guest`, and are tested there against a fake transport —
+    // which covers the Windows branches this file never could.
 
     #[test]
     fn test_slug_is_path_safe_and_unique_per_index() {
