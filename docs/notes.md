@@ -494,9 +494,48 @@ below). Bindings fixed here:
   ref for tests of the matching kind only; neither can convert a test
   between kinds, because the two refs name entirely different things.
   `cmd_test` probes vmlab once, up front, so a broken environment is
-  exit 2 before any test runs. There is no backend trait any more:
-  `VmlabBackend`/`VmlabInstance`/`VmlabLab` are used concretely and
-  instances report a `GuestOs` the runner derives paths/shell/binary from.
+  exit 2 before any test runs. There is no *backend* trait any more:
+  `VmlabBackend`/`VmlabInstance`/`VmlabLab` are used concretely, and
+  provisioning has no seam. What an instance can *do* once it exists is a
+  separate, narrower seam — see **Talking to a guest** below.
+- **Talking to a guest** (`src/testlab/guest.rs`). One module owns every
+  fact about driving config-weave inside a machine; the runner and the
+  scenario host module (`src/hostapi/testlab.rs`) are both callers and
+  neither restates any of it.
+  - **`Transport`** (`testlab::backend`) is the seam: `os`, `exec`,
+    `copy_in`. A `VmlabInstance` is the production adapter; a scripted
+    fake in `guest`'s unit tests is the other. Everything above it — the
+    path scheme, shell selection, argv framing, output parsing — is
+    exercised by `cargo test` with no hypervisor, which is the only way
+    the **Windows** branches run at all outside a manual
+    `just test-lab-vm`. Deliberately *not* the backend trait removed in
+    2f60bf5: that one sat at provisioning and leaked (two methods
+    documented as unsupported on one adapter), these three are uniform.
+    See `docs/adr/0001-testlab-transport-seam.md`.
+  - **`Guest`** binds a transport to its `GuestOs`. `prepare` is the one
+    implementation of copy-binary → chmod (linux) → smoke-test; *when* to
+    call it stays caller policy, because the two differ for good reason —
+    the runner eagerly once per group so a bad binary errors the whole
+    group, a scenario lazily per machine so one that only ever `exec`s
+    never pays to copy a binary it will not use.
+  - **`Workdir`** is a guest directory that *exists*: obtained from
+    `test_work(slug)` (`<root>/t/<slug>`) or `scenario_work(machine, n)`
+    (`<root>/s/<machine>-<n>`), both of which mkdir as part of handing one
+    back. So nothing can stage into a directory that was never made, and
+    nothing outside this module concatenates a guest path — which is what
+    makes the container rule (`copy_in` only accepts paths under the
+    mounted root) unreachable rather than merely checked. `vmlab`'s
+    `CONTAINER_MOUNT` reads the root from here rather than restating it.
+  - **Outcomes are data where the callers legitimately disagree.**
+    `gather` returns `GatherOutcome::Refused` for a gatherer that answered
+    "no" — the runner records that as a test failure and carries on, a
+    scenario raises it to the script — and reserves `Err` for a broken
+    transport or unparseable protocol output, so neither caller can
+    confuse the two. `verify` likewise separates `Failed` (the assertions
+    did not hold, exit 1) from `Err` (the script never got that far).
+    `run` hands back the parsed report *and* the run's stderr, because the
+    runner republishes it as a log event: the module emits no events, so
+    event policy stays with the caller.
 - **Concurrency.** `runner::run_groups` runs independent groups in
   parallel via scoped `std::thread` workers pulling from per-kind
   cursors — **separate caps per kind** because VMs cost far more than

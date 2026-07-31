@@ -11,7 +11,6 @@
 //! re-applies and surfaces as `configured`, failing the test).
 
 use std::cell::RefCell;
-use std::io::Write as _;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -26,7 +25,7 @@ use crate::model::{Expect, Package, Playbook, ScenarioDecl, TestDecl, TestTarget
 use crate::report::JsonRunReport;
 
 use super::events::{TestEvent, TestEventSink, TestPhase, tail_chunk};
-use super::guest::{Guest, Workdir};
+use super::guest::{GatherOutcome, Guest, VerifyOutcome, Workdir};
 use super::report::{TestGatherResult, TestOutcome, TestReport, TestStepResult, VerifyResult};
 use super::synth;
 use super::synth::BinaryResolver;
@@ -386,9 +385,9 @@ fn drive_one(
 
     wd.stage(synthesized.dir.path())?;
 
-    let facts = run_gathers(test, instance, ctx, &mut report.gathers, &wd)?;
-    run_steps(test, instance, opts, ctx, &mut report.steps, &wd)?;
-    report.verify = run_verify(test, instance, ctx, &facts, &wd)?;
+    let facts = run_gathers(test, ctx, &mut report.gathers, &wd)?;
+    run_steps(test, opts, ctx, &mut report.steps, &wd)?;
+    report.verify = run_verify(test, ctx, &facts, &wd)?;
     Ok(())
 }
 
@@ -396,7 +395,6 @@ fn drive_one(
 /// collect results into the facts map handed to verify().
 fn run_gathers(
     test: &TestDecl,
-    instance: &VmlabInstance,
     ctx: &TestCtx,
     results: &mut Vec<TestGatherResult>,
     wd: &Workdir,
@@ -407,55 +405,39 @@ fn run_gathers(
             name: g.name.clone(),
         });
         let key = format!("{}.{}", g.package, g.gatherer);
-        let mut argv = vec![wd.bin(), "__gather", wd.playbook(), &key];
-        let params_json;
-        if !g.params.is_empty() {
-            let map: serde_json::Map<String, serde_json::Value> = g
-                .params
-                .iter()
-                .map(|(k, v)| (k.clone(), dyn_to_json(v)))
-                .collect();
-            params_json = serde_json::Value::Object(map).to_string();
-            argv.extend(["--params-json", &params_json]);
-        }
-        let out = instance.exec(&argv)?;
-        let parsed: serde_json::Value = serde_json::from_str(out.stdout.trim()).map_err(|_| {
-            Diag::bare(format!(
-                "gather '{}' produced no parseable protocol output (exit {}): {}",
-                g.name,
-                out.exit_code,
-                tail(if out.stderr.is_empty() {
-                    &out.stdout
-                } else {
-                    &out.stderr
-                })
-            ))
-        })?;
+        let params = (!g.params.is_empty()).then(|| {
+            serde_json::Value::Object(
+                g.params
+                    .iter()
+                    .map(|(k, v)| (k.clone(), dyn_to_json(v)))
+                    .collect(),
+            )
+        });
 
         let mut failures = Vec::new();
-        if parsed["ok"] == serde_json::Value::Bool(true) {
-            let value = &parsed["value"];
-            for (k, want) in &g.expect {
-                let want = dyn_to_json(want);
-                match value.get(k) {
-                    Some(got) if *got == want => {}
-                    Some(got) => failures.push(format!(
-                        "gather '{}': expected {k} = {want}, got {got}",
-                        g.name
-                    )),
-                    None => failures.push(format!(
-                        "gather '{}': expected {k} = {want}, but the value has no such key",
-                        g.name
-                    )),
+        // A gatherer that refuses is a failing test, not a broken run —
+        // the transport trouble that would be a broken run is the `?`.
+        match wd.gather(&key, params.as_ref(), &g.name)? {
+            GatherOutcome::Ok(value) => {
+                for (k, want) in &g.expect {
+                    let want = dyn_to_json(want);
+                    match value.get(k) {
+                        Some(got) if *got == want => {}
+                        Some(got) => failures.push(format!(
+                            "gather '{}': expected {k} = {want}, got {got}",
+                            g.name
+                        )),
+                        None => failures.push(format!(
+                            "gather '{}': expected {k} = {want}, but the value has no such key",
+                            g.name
+                        )),
+                    }
                 }
+                facts.insert(g.name.clone(), value);
             }
-            facts.insert(g.name.clone(), value.clone());
-        } else {
-            failures.push(format!(
-                "gather '{}' failed: {}",
-                g.name,
-                parsed["error"].as_str().unwrap_or("(no error message)")
-            ));
+            GatherOutcome::Refused(why) => {
+                failures.push(format!("gather '{}' failed: {why}", g.name));
+            }
         }
         (ctx.sink)(TestEvent::GatherResult {
             package: ctx.package.to_string(),
@@ -474,7 +456,6 @@ fn run_gathers(
 /// The three engine runs and the expectation table.
 fn run_steps(
     test: &TestDecl,
-    instance: &VmlabInstance,
     opts: &RunnerOptions,
     ctx: &TestCtx,
     results: &mut Vec<TestStepResult>,
@@ -491,39 +472,12 @@ fn run_steps(
     ];
     const RUN_IDS: [&str; 3] = ["check", "first_apply", "second_apply"];
 
-    let jobs = opts.jobs.map(|j| j.to_string());
     let mut reports: Vec<JsonRunReport> = Vec::with_capacity(3);
     for (i, mode) in ["check", "apply", "apply"].iter().enumerate() {
         ctx.phase(RUN_PHASES[i].clone());
-        // Always --continue-on-error so every step reports and the
-        // expectation table stays total; dependents of errored steps
-        // still come back `not_run` per the engine's requires semantics.
-        let mut argv = vec![
-            wd.bin(),
-            mode,
-            wd.playbook(),
-            synth::PLAY,
-            "--json",
-            "--continue-on-error",
-        ];
-        if let Some(j) = &jobs {
-            argv.extend(["--jobs", j]);
-        }
-        let out = instance.exec(&argv)?;
+        let out = wd.run(mode, Some(synth::PLAY), opts.jobs, RUN_LABELS[i])?;
         ctx.log(RUN_IDS[i], &out.stderr);
-        let parsed: JsonRunReport = serde_json::from_str(out.stdout.trim()).map_err(|_| {
-            Diag::bare(format!(
-                "the {} run produced no parseable report (exit {}): {}",
-                RUN_LABELS[i],
-                out.exit_code,
-                tail(if out.stderr.is_empty() {
-                    &out.stdout
-                } else {
-                    &out.stderr
-                })
-            ))
-        })?;
-        reports.push(parsed);
+        reports.push(out.report);
     }
 
     for s in &test.steps {
@@ -582,7 +536,6 @@ fn run_steps(
 /// gathered facts.
 fn run_verify(
     test: &TestDecl,
-    instance: &VmlabInstance,
     ctx: &TestCtx,
     facts: &serde_json::Map<String, serde_json::Value>,
     wd: &Workdir,
@@ -592,40 +545,18 @@ fn run_verify(
     };
     ctx.phase(TestPhase::Verify);
 
-    let mut facts_file = tempfile::NamedTempFile::new()
-        .map_err(|e| Diag::bare(format!("cannot create the facts temp file: {e}")))?;
-    facts_file
-        .write_all(
-            serde_json::Value::Object(facts.clone())
-                .to_string()
-                .as_bytes(),
-        )
-        .map_err(|e| Diag::bare(format!("cannot write the facts temp file: {e}")))?;
-    wd.stage_facts(facts_file.path())?;
-
-    let script = wd.staged_script(verify)?;
-    let out = instance.exec(&[wd.bin(), "__verify", &script, "--facts", wd.facts()])?;
-    let done = |passed: bool, message: Option<String>| {
-        (ctx.sink)(TestEvent::VerifyResult {
-            package: ctx.package.to_string(),
-            test: ctx.test.to_string(),
-            passed,
-            message: message.clone(),
-        });
-        Ok(Some(VerifyResult { passed, message }))
+    // A script that broke is the `?` — only its verdict lands here.
+    let (passed, message) = match wd.verify(verify, facts)? {
+        VerifyOutcome::Passed => (true, None),
+        VerifyOutcome::Failed(why) => (false, Some(why)),
     };
-    match out.exit_code {
-        0 => done(true, None),
-        1 => done(false, Some(tail(&out.stdout))),
-        code => Err(Diag::bare(format!(
-            "the verify script broke inside the container (exit {code}): {}",
-            tail(if out.stderr.is_empty() {
-                &out.stdout
-            } else {
-                &out.stderr
-            })
-        ))),
-    }
+    (ctx.sink)(TestEvent::VerifyResult {
+        package: ctx.package.to_string(),
+        test: ctx.test.to_string(),
+        passed,
+        message: message.clone(),
+    });
+    Ok(Some(VerifyResult { passed, message }))
 }
 
 /// First interesting line(s) of command output for diagnostics.

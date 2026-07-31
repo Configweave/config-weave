@@ -12,12 +12,57 @@
 //! scripted fake can drive, which is what makes the Windows branches
 //! testable on a host that has never seen a hypervisor.
 
+use std::io::Write as _;
 use std::path::Path;
 
 use crate::diag::Diag;
+use crate::report::JsonRunReport;
 
 use super::backend::{ExecOutput, GuestOs, Transport};
 use super::synth::BinaryResolver;
+
+/// One config-weave run inside a guest: the report it printed, and the
+/// stderr it produced alongside.
+///
+/// The stderr comes back because the runner republishes it as a log event
+/// — this module deliberately emits none itself, so event policy stays
+/// with the caller.
+pub struct RunOut {
+    pub report: JsonRunReport,
+    pub stderr: String,
+}
+
+/// What a gatherer said.
+///
+/// [`GatherOutcome::Refused`] is the gatherer answering "no" — data, not
+/// a failure of this module. The two callers legitimately disagree about
+/// whether that is fatal: a test records it and carries on, a scenario
+/// raises it to the script. Keeping it distinct from `Err` is what stops
+/// either of them mistaking a broken transport for a refusal.
+pub enum GatherOutcome {
+    Ok(serde_json::Value),
+    Refused(String),
+}
+
+/// What a verify script said. A script that *broke* is an `Err` instead —
+/// "the assertions did not hold" and "the script could not run" are not
+/// the same answer.
+pub enum VerifyOutcome {
+    Passed,
+    Failed(String),
+}
+
+/// The interesting end of a command's output: stderr when there is any,
+/// stdout otherwise. A config-weave run that printed no parseable report
+/// usually explains itself on stderr, but a panic lands on stdout.
+fn tail_of(out: &ExecOutput) -> String {
+    let s = if out.stderr.is_empty() {
+        &out.stdout
+    } else {
+        &out.stderr
+    };
+    super::output::output_tail(s, "(no output)")
+}
 
 /// The one directory inside a guest that everything the host copies lives
 /// under.
@@ -71,7 +116,7 @@ impl<'a> Guest<'a> {
     }
 
     /// Where the config-weave binary lives inside this guest.
-    pub fn bin(&self) -> &'static str {
+    fn bin(&self) -> &'static str {
         bin_for(self.os)
     }
 
@@ -173,28 +218,14 @@ pub struct Workdir<'a> {
 impl Workdir<'_> {
     /// The config-weave binary, shared across every working directory in
     /// this guest.
-    pub fn bin(&self) -> &'static str {
+    fn bin(&self) -> &'static str {
         self.guest.bin()
     }
 
-    /// Where [`Workdir::stage`] puts the playbook.
-    pub fn playbook(&self) -> &str {
-        &self.playbook
-    }
-
-    /// Where [`Workdir::stage_facts`] puts the gathered facts.
-    pub fn facts(&self) -> &str {
-        &self.facts
-    }
-
-    /// Copy a host playbook directory in.
+    /// Copy a host playbook directory in. Everything below runs against
+    /// what this staged.
     pub fn stage(&self, host: &Path) -> Result<(), Diag> {
         self.guest.t.copy_in(host, &self.playbook)
-    }
-
-    /// Copy the gathered facts in, for a verify script to read.
-    pub fn stage_facts(&self, host: &Path) -> Result<(), Diag> {
-        self.guest.t.copy_in(host, &self.facts)
     }
 
     /// Run a shell script with this directory as its working directory.
@@ -217,9 +248,122 @@ impl Workdir<'_> {
         self.guest.t.exec(&argv)
     }
 
+    /// Run config-weave over the staged playbook and parse its report.
+    ///
+    /// Always `--json --continue-on-error`: every step has to report, or
+    /// the runner's expectation table stops being total. `label` names
+    /// this run in diagnostics — the runner has three and needs to say
+    /// which one produced no report.
+    pub fn run(
+        &self,
+        mode: &str,
+        play: Option<&str>,
+        jobs: Option<usize>,
+        label: &str,
+    ) -> Result<RunOut, Diag> {
+        let mut argv = vec![self.bin(), mode, self.playbook.as_str()];
+        if let Some(p) = play {
+            argv.push(p);
+        }
+        argv.extend(["--json", "--continue-on-error"]);
+        let jobs = jobs.map(|j| j.to_string());
+        if let Some(j) = &jobs {
+            argv.extend(["--jobs", j]);
+        }
+
+        let out = self.guest.t.exec(&argv)?;
+        let report = serde_json::from_str(out.stdout.trim()).map_err(|_| {
+            Diag::bare(format!(
+                "the {label} run produced no parseable report (exit {}): {}",
+                out.exit_code,
+                tail_of(&out)
+            ))
+        })?;
+        Ok(RunOut {
+            report,
+            stderr: out.stderr,
+        })
+    }
+
+    /// Run one gatherer through the `__gather` protocol.
+    ///
+    /// `label` names the gatherer in diagnostics: a test names its gathers
+    /// itself, so the key is not always what the reader expects to see.
+    pub fn gather(
+        &self,
+        key: &str,
+        params: Option<&serde_json::Value>,
+        label: &str,
+    ) -> Result<GatherOutcome, Diag> {
+        let mut argv = vec![self.bin(), "__gather", self.playbook.as_str(), key];
+        let params_json;
+        if let Some(p) = params {
+            params_json = p.to_string();
+            argv.extend(["--params-json", &params_json]);
+        }
+
+        let out = self.guest.t.exec(&argv)?;
+        let parsed: serde_json::Value = serde_json::from_str(out.stdout.trim()).map_err(|_| {
+            Diag::bare(format!(
+                "gather '{label}' produced no parseable protocol output (exit {}): {}",
+                out.exit_code,
+                tail_of(&out)
+            ))
+        })?;
+
+        if parsed["ok"] == serde_json::Value::Bool(true) {
+            Ok(GatherOutcome::Ok(parsed["value"].clone()))
+        } else {
+            Ok(GatherOutcome::Refused(
+                parsed["error"]
+                    .as_str()
+                    .unwrap_or("(no error message)")
+                    .to_string(),
+            ))
+        }
+    }
+
+    /// Run a verify script through the `__verify` protocol, with `facts`
+    /// staged alongside for it to read.
+    pub fn verify(
+        &self,
+        host_script: &Path,
+        facts: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<VerifyOutcome, Diag> {
+        let mut file = tempfile::NamedTempFile::new()
+            .map_err(|e| Diag::bare(format!("cannot create the facts temp file: {e}")))?;
+        file.write_all(
+            serde_json::Value::Object(facts.clone())
+                .to_string()
+                .as_bytes(),
+        )
+        .map_err(|e| Diag::bare(format!("cannot write the facts temp file: {e}")))?;
+        self.guest.t.copy_in(file.path(), &self.facts)?;
+
+        let script = self.staged_script(host_script)?;
+        let out = self
+            .guest
+            .t
+            .exec(&[self.bin(), "__verify", &script, "--facts", &self.facts])?;
+
+        // The protocol is the exit code: 0 passed, 1 the assertions did
+        // not hold, anything else the script never got that far.
+        match out.exit_code {
+            0 => Ok(VerifyOutcome::Passed),
+            1 => Ok(VerifyOutcome::Failed(super::output::output_tail(
+                &out.stdout,
+                "(no output)",
+            ))),
+            code => Err(Diag::bare(format!(
+                "the verify script broke inside the guest (exit {code}): {}",
+                tail_of(&out)
+            ))),
+        }
+    }
+
     /// Where a host script living under some `pkgs/<package>/…` ends up
     /// once its playbook has been staged here.
-    pub fn staged_script(&self, host: &Path) -> Result<String, Diag> {
+    fn staged_script(&self, host: &Path) -> Result<String, Diag> {
         let comps: Vec<&str> = host
             .iter()
             .map(|c| c.to_str().unwrap_or_default())
@@ -268,8 +412,15 @@ mod tests {
         /// Queue results for the next execs, in order. Anything beyond the
         /// queue succeeds silently.
         fn replying(self, outs: impl IntoIterator<Item = ExecOutput>) -> FakeGuest {
-            self.replies.borrow_mut().extend(outs);
+            self.queue(outs);
             self
+        }
+
+        /// As [`FakeGuest::replying`], but callable once a `Guest` already
+        /// borrows the fake — which is how the protocol tests queue a reply
+        /// *after* the workdir's mkdir has taken one.
+        fn queue(&self, outs: impl IntoIterator<Item = ExecOutput>) {
+            self.replies.borrow_mut().extend(outs);
         }
 
         /// Every exec's argv, in call order.
@@ -428,15 +579,20 @@ mod tests {
         let g = Guest::new(&linux);
 
         let t = g.test_work("0-core__a").expect("test workdir");
-        assert_eq!(t.playbook(), "/weave/t/0-core__a/playbook");
-        assert_eq!(t.facts(), "/weave/t/0-core__a/facts.json");
+        assert_eq!(t.playbook, "/weave/t/0-core__a/playbook");
+        assert_eq!(t.facts, "/weave/t/0-core__a/facts.json");
 
         let s = g.scenario_work("dc1", 2).expect("scenario workdir");
-        assert_eq!(s.playbook(), "/weave/s/dc1-2/playbook");
+        assert_eq!(s.playbook, "/weave/s/dc1-2/playbook");
 
         // Every path a guest ever sees is under the one root the container
         // payload mount exposes — `copy_in` rejects anything else.
-        for p in [t.playbook(), t.facts(), s.playbook(), t.bin()] {
+        for p in [
+            t.playbook.as_str(),
+            t.facts.as_str(),
+            s.playbook.as_str(),
+            t.bin(),
+        ] {
             assert!(p.starts_with("/weave/"), "{p} escapes the root");
         }
     }
@@ -448,14 +604,13 @@ mod tests {
 
         let a = g.test_work("0-core__a").unwrap();
         let b = g.test_work("1-core__b").unwrap();
-        assert_ne!(a.playbook(), b.playbook(), "each test gets its own dir");
+        assert_ne!(a.playbook, b.playbook, "each test gets its own dir");
         assert_eq!(a.bin(), b.bin(), "the binary is shared across the group");
 
         let first = g.scenario_work("dc1", 1).unwrap();
         let second = g.scenario_work("dc1", 2).unwrap();
         assert_ne!(
-            first.playbook(),
-            second.playbook(),
+            first.playbook, second.playbook,
             "each apply gets its own dir"
         );
     }
@@ -506,25 +661,18 @@ mod tests {
     }
 
     #[test]
-    fn staging_puts_the_playbook_and_facts_where_they_belong() {
+    fn staging_puts_the_playbook_where_it_belongs() {
         let fake = FakeGuest::new(GuestOs::Linux);
         let g = Guest::new(&fake);
         let wd = g.test_work("0-core__a").unwrap();
         wd.stage(Path::new("/host/synth")).unwrap();
-        wd.stage_facts(Path::new("/host/facts.json")).unwrap();
 
         assert_eq!(
             fake.copies(),
-            vec![
-                (
-                    PathBuf::from("/host/synth"),
-                    "/weave/t/0-core__a/playbook".into()
-                ),
-                (
-                    PathBuf::from("/host/facts.json"),
-                    "/weave/t/0-core__a/facts.json".into()
-                ),
-            ]
+            vec![(
+                PathBuf::from("/host/synth"),
+                "/weave/t/0-core__a/playbook".into()
+            )]
         );
     }
 
@@ -576,6 +724,209 @@ mod tests {
         assert!(
             wd.staged_script(Path::new("/elsewhere/verify.ws")).is_err(),
             "a script outside pkgs/ has no staged location"
+        );
+    }
+
+    // ------------------------------------------------------------ protocol
+
+    fn printed(stdout: &str) -> ExecOutput {
+        ExecOutput {
+            exit_code: 0,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+        }
+    }
+
+    const EMPTY_REPORT: &str = r#"{"playbook":"p","version":"0","play":"test","mode":"apply","exit_code":0,"duration_secs":0.0,"gathered":[],"steps":[]}"#;
+
+    // Every protocol test below indexes argvs from [1] — [0] is the mkdir
+    // that creating the workdir performs.
+
+    #[test]
+    fn a_run_always_asks_for_json_and_continue_on_error() {
+        // Otherwise a halted run reports nothing for later steps and the
+        // expectation table stops being total.
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([printed(EMPTY_REPORT)]);
+        wd.run("apply", Some("test"), None, "first apply").unwrap();
+
+        assert_eq!(
+            fake.argvs()[1],
+            vec![
+                "/weave/config-weave",
+                "apply",
+                "/weave/t/0-core__a/playbook",
+                "test",
+                "--json",
+                "--continue-on-error",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_forwards_jobs_and_omits_the_play_when_there_is_none() {
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([printed(EMPTY_REPORT)]);
+        wd.run("check", None, Some(4), "check").unwrap();
+
+        let argv = &fake.argvs()[1];
+        assert!(!argv.contains(&"test".to_string()), "no play: {argv:?}");
+        assert_eq!(&argv[argv.len() - 2..], &["--jobs", "4"]);
+    }
+
+    #[test]
+    fn an_unparseable_report_names_the_run_and_prefers_stderr() {
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([ExecOutput {
+            exit_code: 2,
+            stdout: "half a report".into(),
+            stderr: "playbook.wcl:3 unknown resource".into(),
+        }]);
+        let err = wd
+            .run("apply", Some("test"), None, "second apply")
+            .err()
+            .expect("unparseable output is an error");
+
+        assert!(err.message.contains("second apply"), "{}", err.message);
+        assert!(err.message.contains("exit 2"), "{}", err.message);
+        // stderr is where a config-weave failure explains itself.
+        assert!(err.message.contains("unknown resource"), "{}", err.message);
+    }
+
+    #[test]
+    fn an_unparseable_report_falls_back_to_stdout_when_stderr_is_empty() {
+        // A panic lands on stdout with nothing on stderr.
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([printed("thread 'main' panicked")]);
+        let err = wd.run("apply", None, None, "check").err().expect("error");
+        assert!(err.message.contains("panicked"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_gather_omits_params_when_there_are_none() {
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([printed(r#"{"ok":true,"value":{}}"#)]);
+        wd.gather("core.facts", None, "facts").unwrap();
+
+        assert_eq!(
+            fake.argvs()[1],
+            vec![
+                "/weave/config-weave",
+                "__gather",
+                "/weave/t/0-core__a/playbook",
+                "core.facts",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_gather_passes_params_as_json_when_there_are_some() {
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([printed(r#"{"ok":true,"value":{}}"#)]);
+        let params = serde_json::json!({ "path": "/etc/hosts" });
+        wd.gather("core.facts", Some(&params), "facts").unwrap();
+
+        let argv = &fake.argvs()[1];
+        assert_eq!(argv[argv.len() - 2], "--params-json");
+        assert_eq!(argv[argv.len() - 1], r#"{"path":"/etc/hosts"}"#);
+    }
+
+    #[test]
+    fn a_gatherer_that_refuses_is_data_not_an_error() {
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([printed(r#"{"ok":false,"error":"no such file"}"#)]);
+
+        match wd.gather("core.facts", None, "facts").expect("not an Err") {
+            GatherOutcome::Refused(why) => assert_eq!(why, "no such file"),
+            GatherOutcome::Ok(_) => panic!("a refusing gatherer must not read as Ok"),
+        }
+    }
+
+    #[test]
+    fn a_gather_whose_output_will_not_parse_is_an_error() {
+        // The distinction that matters: a refusal is data, a broken
+        // transport or protocol is not.
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([ExecOutput {
+            exit_code: 127,
+            stdout: String::new(),
+            stderr: "config-weave: not found".into(),
+        }]);
+        let err = wd
+            .gather("core.facts", None, "facts")
+            .err()
+            .expect("unparseable output is an error, not a refusal");
+        assert!(err.message.contains("'facts'"), "{}", err.message);
+        assert!(err.message.contains("not found"), "{}", err.message);
+    }
+
+    #[test]
+    fn verify_triages_on_the_exit_code() {
+        let script = Path::new("/host/playbook/pkgs/core/tests/verify.ws");
+        let facts = serde_json::Map::new();
+
+        let pass = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&pass).test_work("0-core__a").unwrap();
+        pass.queue([exited(0)]);
+        assert!(matches!(
+            wd.verify(script, &facts).unwrap(),
+            VerifyOutcome::Passed
+        ));
+
+        let fail = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fail).test_work("0-core__a").unwrap();
+        fail.queue([ExecOutput {
+            exit_code: 1,
+            stdout: "expected 3, got 4".into(),
+            stderr: String::new(),
+        }]);
+        match wd.verify(script, &facts).unwrap() {
+            VerifyOutcome::Failed(why) => assert!(why.contains("expected 3"), "{why}"),
+            VerifyOutcome::Passed => panic!("exit 1 is a failed assertion"),
+        }
+
+        // Anything else means the script never got as far as an answer,
+        // which is an error rather than a verdict.
+        let broke = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&broke).test_work("0-core__a").unwrap();
+        broke.queue([failed(2, "syntax error")]);
+        let err = wd.verify(script, &facts).err().expect("exit 2 is an error");
+        assert!(err.message.contains("syntax error"), "{}", err.message);
+    }
+
+    #[test]
+    fn verify_stages_the_facts_and_names_the_staged_script() {
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        fake.queue([exited(0)]);
+        let mut facts = serde_json::Map::new();
+        facts.insert("os".into(), serde_json::json!({ "id": "debian" }));
+        wd.verify(Path::new("/host/pkgs/core/v.ws"), &facts)
+            .unwrap();
+
+        // The facts file is copied in under this workdir...
+        let copies = fake.copies();
+        assert_eq!(copies.len(), 1);
+        assert_eq!(copies[0].1, "/weave/t/0-core__a/facts.json");
+
+        // ...and the script is named at its staged location, not its host one.
+        assert_eq!(
+            fake.argvs()[1],
+            vec![
+                "/weave/config-weave",
+                "__verify",
+                "/weave/t/0-core__a/playbook/pkgs/core/v.ws",
+                "--facts",
+                "/weave/t/0-core__a/facts.json",
+            ]
         );
     }
 }
