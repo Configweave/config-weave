@@ -20,7 +20,7 @@ use crate::diag::Diag;
 use crate::model::Playbook;
 use crate::report::JsonRunReport;
 use crate::testlab::backend::GuestOs;
-use crate::testlab::runner::GuestPaths;
+use crate::testlab::guest::{self, Guest};
 use crate::testlab::synth::{self, BinaryResolver};
 use crate::testlab::vmlab::{VmlabInstance, VmlabLab};
 
@@ -166,32 +166,17 @@ fn mkdir_guest(instance: &VmlabInstance, os: GuestOs, dir: &str) -> Result<(), D
 
 /// Copy the config-weave binary into a machine and smoke-test it, once.
 fn ensure_prepared(state: &mut LabState, name: &str) -> Result<(), Diag> {
-    let os = state
+    let ms = state
         .machines
         .get(name)
-        .ok_or_else(|| Diag::bare(format!("no machine '{name}'")))?
-        .instance
-        .os();
-    if state.machines[name].prepared {
+        .ok_or_else(|| Diag::bare(format!("no machine '{name}'")))?;
+    if ms.prepared {
         return Ok(());
     }
-    let bin = GuestPaths::bin_for(os);
-    let host = state.binaries.resolve(os)?;
-    let ms = state.machines.get_mut(name).unwrap();
-    ms.instance.copy_in(&host, bin)?;
-    if os == GuestOs::Linux {
-        let _ = ms.instance.exec(&["chmod", "+x", bin]);
-    }
-    let smoke = ms.instance.exec(&[bin, "version"])?;
-    if smoke.exit_code != 0 {
-        return Err(Diag::bare(format!(
-            "the config-weave binary failed to run inside '{name}' (exit {}): {} — \
-             host/image architecture mismatch?",
-            smoke.exit_code,
-            smoke.stderr.trim()
-        )));
-    }
-    ms.prepared = true;
+    // Lazily, per machine: a scenario that only ever calls `machine.exec`
+    // on this one must not pay to copy a binary it will never use.
+    Guest::new(&ms.instance).prepare(&state.binaries, &format!("'{name}'"))?;
+    state.machines.get_mut(name).unwrap().prepared = true;
     Ok(())
 }
 
@@ -250,7 +235,7 @@ fn apply_resource(
     ensure_prepared(state, name)?;
     let (synthd, step_name) = synth::synthesize_resource(&state.playbook, key, props)?;
     let os = state.machines[name].instance.os();
-    let bin = GuestPaths::bin_for(os);
+    let bin = guest::bin_for(os);
 
     // A fresh working dir per apply.
     let n = {
@@ -282,7 +267,7 @@ fn gather_fact(
         .ok_or_else(|| Diag::bare(format!("gatherer key '{key}' must be 'package.gatherer'")))?;
     let synthd = synth::synthesize_gather(&state.playbook, package)?;
     let os = state.machines[name].instance.os();
-    let bin = GuestPaths::bin_for(os);
+    let bin = guest::bin_for(os);
 
     let n = {
         let ms = state.machines.get_mut(name).unwrap();
@@ -339,7 +324,7 @@ fn apply_playbook(
         )));
     }
     let os = state.machines[name].instance.os();
-    let bin = GuestPaths::bin_for(os);
+    let bin = guest::bin_for(os);
     let n = {
         let ms = state.machines.get_mut(name).unwrap();
         ms.counter += 1;

@@ -8,6 +8,7 @@
 
 pub mod backend;
 pub mod events;
+pub mod guest;
 pub mod output;
 pub mod report;
 pub mod runner;

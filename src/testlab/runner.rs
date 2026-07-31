@@ -27,6 +27,7 @@ use crate::report::JsonRunReport;
 
 use super::backend::GuestOs;
 use super::events::{TestEvent, TestEventSink, TestPhase, tail_chunk};
+use super::guest::{self, Guest};
 use super::report::{TestGatherResult, TestOutcome, TestReport, TestStepResult, VerifyResult};
 use super::synth;
 use super::synth::BinaryResolver;
@@ -65,14 +66,6 @@ pub struct GuestPaths {
 }
 
 impl GuestPaths {
-    /// The shared binary path for `os` — copied once per group.
-    pub fn bin_for(os: GuestOs) -> &'static str {
-        match os {
-            GuestOs::Linux => "/weave/config-weave",
-            GuestOs::Windows => "C:/weave/config-weave.exe",
-        }
-    }
-
     /// Per-test paths under a working dir named by `slug` (a path-safe
     /// per-test identifier).
     pub fn for_test(os: GuestOs, slug: &str) -> GuestPaths {
@@ -82,7 +75,7 @@ impl GuestPaths {
         };
         let dir = format!("{root}/{slug}");
         GuestPaths {
-            bin: GuestPaths::bin_for(os),
+            bin: guest::bin_for(os),
             playbook: format!("{dir}/playbook"),
             facts: format!("{dir}/facts.json"),
             dir,
@@ -282,7 +275,9 @@ fn run_group(
             return reports;
         }
     };
-    if let Err(d) = prepare_instance(&instance, opts, target) {
+    // Eagerly, once per group: a binary that will not run in this instance
+    // errors every test in the group rather than each of them separately.
+    if let Err(d) = Guest::new(&instance).prepare(&opts.binaries, &target.to_string()) {
         fail_all(&mut reports, &d);
         if !opts.keep {
             let _ = instance.teardown();
@@ -394,37 +389,6 @@ impl TestCtx<'_> {
             truncated,
         });
     }
-}
-
-/// Copy the binary into the shared bin path and smoke-test it. Done once
-/// per group, before any test runs.
-fn prepare_instance(
-    instance: &VmlabInstance,
-    opts: &RunnerOptions,
-    target: &TestTarget,
-) -> Result<(), Diag> {
-    let os = instance.os();
-    let bin = GuestPaths::bin_for(os);
-    let binary = opts.binaries.resolve(os)?;
-
-    instance.copy_in(&binary, bin)?;
-    // The container payload mount and vmlab's file transfer both preserve
-    // the executable bit; chmod defensively anyway for odd umasks.
-    // Best-effort: images without chmod surface at the smoke test below.
-    // Windows has no execute bit.
-    if os == GuestOs::Linux {
-        let _ = instance.exec(&["chmod", "+x", bin]);
-    }
-    let smoke = instance.exec(&[bin, "version"])?;
-    if smoke.exit_code != 0 {
-        return Err(Diag::bare(format!(
-            "the test binary failed to run inside {target} (exit {}): {} — host/guest \
-             architecture mismatch?",
-            smoke.exit_code,
-            tail(&smoke.stderr)
-        )));
-    }
-    Ok(())
 }
 
 /// Everything that happens for one test inside the (already prepared)
@@ -994,9 +958,9 @@ mod tests {
     fn guest_paths_are_per_test_under_a_shared_bin() {
         // The binary path is shared (copied once per group); playbook and
         // facts live under a distinct per-test working dir.
-        assert_eq!(GuestPaths::bin_for(GuestOs::Linux), "/weave/config-weave");
+        assert_eq!(guest::bin_for(GuestOs::Linux), "/weave/config-weave");
         assert_eq!(
-            GuestPaths::bin_for(GuestOs::Windows),
+            guest::bin_for(GuestOs::Windows),
             "C:/weave/config-weave.exe"
         );
 

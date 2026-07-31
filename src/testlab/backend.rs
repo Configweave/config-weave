@@ -49,6 +49,28 @@ pub fn run_cmd(cmd: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output, D
         .map_err(|e| Diag::bare(format!("failed to run `{} {}`: {e}", cmd, args.join(" "))))
 }
 
+/// What the host can do to a live instance — and the only thing the
+/// `guest` module needs from one.
+///
+/// Narrow on purpose. Everything interesting sits *above* this line: the
+/// in-instance path scheme, which shell says what, how config-weave is
+/// invoked in there, and how its output is read back. Putting the seam
+/// below all of that means a scripted fake can stand in for a machine, so
+/// those rules — including every Windows branch — are exercised by
+/// `cargo test` on a host with no hypervisor.
+///
+/// This is deliberately *not* the backend trait removed in 2f60bf5. That
+/// one sat at provisioning and leaked: `reboot` and `wait_ready` were
+/// documented as unsupported on one of its two adapters. These three are
+/// uniform — every instance vmlab hands back supports all of them the
+/// same way — so there is no capability to interrogate. See
+/// `docs/adr/0001-testlab-transport-seam.md`.
+pub trait Transport {
+    fn os(&self) -> GuestOs;
+    fn exec(&self, argv: &[&str]) -> Result<ExecOutput, Diag>;
+    fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag>;
+}
+
 /// The operating system running inside an instance. The runner derives
 /// the in-instance path scheme, setup shell, and which test binary to
 /// copy in from this.
