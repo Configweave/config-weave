@@ -282,7 +282,7 @@ fn run_group(
             return reports;
         }
     };
-    if let Err(d) = prepare_instance(&mut instance, opts, target) {
+    if let Err(d) = prepare_instance(&instance, opts, target) {
         fail_all(&mut reports, &d);
         if !opts.keep {
             let _ = instance.teardown();
@@ -315,7 +315,7 @@ fn run_group(
         let t0 = Instant::now();
         let slug = test_slug(*idx, &pkg.name, &test.name);
         match synth::synthesize(pb, pkg, test) {
-            Ok(synth) => match drive_one(test, &mut instance, opts, &ctx, &synth, &slug, report) {
+            Ok(synth) => match drive_one(test, &instance, opts, &ctx, &synth, &slug, report) {
                 Ok(()) => {
                     if report.steps.iter().any(|s| !s.failures.is_empty())
                         || report.gathers.iter().any(|g| !g.failures.is_empty())
@@ -399,7 +399,7 @@ impl TestCtx<'_> {
 /// Copy the binary into the shared bin path and smoke-test it. Done once
 /// per group, before any test runs.
 fn prepare_instance(
-    instance: &mut VmlabInstance,
+    instance: &VmlabInstance,
     opts: &RunnerOptions,
     target: &TestTarget,
 ) -> Result<(), Diag> {
@@ -432,7 +432,7 @@ fn prepare_instance(
 /// gathers, the three-run protocol, and verify.
 fn drive_one(
     test: &TestDecl,
-    instance: &mut VmlabInstance,
+    instance: &VmlabInstance,
     opts: &RunnerOptions,
     ctx: &TestCtx,
     synthesized: &synth::SynthesizedTest,
@@ -497,7 +497,7 @@ fn drive_one(
 /// collect results into the facts map handed to verify().
 fn run_gathers(
     test: &TestDecl,
-    instance: &mut VmlabInstance,
+    instance: &VmlabInstance,
     ctx: &TestCtx,
     results: &mut Vec<TestGatherResult>,
     paths: &GuestPaths,
@@ -575,7 +575,7 @@ fn run_gathers(
 /// The three engine runs and the expectation table.
 fn run_steps(
     test: &TestDecl,
-    instance: &mut VmlabInstance,
+    instance: &VmlabInstance,
     opts: &RunnerOptions,
     ctx: &TestCtx,
     results: &mut Vec<TestStepResult>,
@@ -683,7 +683,7 @@ fn run_steps(
 /// gathered facts.
 fn run_verify(
     test: &TestDecl,
-    instance: &mut VmlabInstance,
+    instance: &VmlabInstance,
     ctx: &TestCtx,
     facts: &serde_json::Map<String, serde_json::Value>,
     paths: &GuestPaths,
