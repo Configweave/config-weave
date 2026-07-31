@@ -363,6 +363,24 @@ pub struct VmlabInstance {
     gone: bool,
 }
 
+/// A live vmlab machine is the production adapter at the `Transport`
+/// seam; the other is the scripted fake the `guest` unit tests drive.
+/// These delegate to the inherent methods below rather than the other way
+/// round, so the concrete type stays usable without importing the trait.
+impl super::backend::Transport for VmlabInstance {
+    fn os(&self) -> GuestOs {
+        self.os
+    }
+
+    fn exec(&self, argv: &[&str]) -> Result<ExecOutput, Diag> {
+        VmlabInstance::exec(self, argv)
+    }
+
+    fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag> {
+        VmlabInstance::copy_in(self, src, dest)
+    }
+}
+
 impl VmlabInstance {
     fn run(&self, args: &[&str]) -> Result<Output, Diag> {
         super::backend::run_cmd(&self.cmd, args, Some(&self.dir))
