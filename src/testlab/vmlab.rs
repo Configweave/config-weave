@@ -48,7 +48,10 @@ const MACHINE: &str = "box";
 /// guest. Everything the runner copies in lives under this path (see
 /// `runner::GuestPaths`), so a container's `copy_in` is a host-side write
 /// into the bind-mounted directory rather than a guest file transfer.
-const CONTAINER_MOUNT: &str = "/weave";
+/// The guest root, mounted into a container from the host. Taken from
+/// `guest` rather than restated: this is the *same* fact as the root every
+/// guest path is built under, and a container `copy_in` outside it fails.
+const CONTAINER_MOUNT: &str = super::guest::root_for(GuestOs::Linux);
 
 /// The host-side directory bind-mounted at [`CONTAINER_MOUNT`], relative to
 /// the synthesized lab root.
@@ -438,11 +441,6 @@ impl VmlabInstance {
             }
             std::thread::sleep(READY_POLL);
         }
-    }
-
-    /// The instance's guest operating system.
-    pub fn os(&self) -> GuestOs {
-        self.os
     }
 
     /// Copy a host file or directory tree to `dest` inside the instance,
