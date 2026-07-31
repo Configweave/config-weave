@@ -49,7 +49,8 @@ my-playbook/
 
 ## Building
 
-`just build` for a debug build, `just test` for the suite. Release
+`just build` for a debug build, `just ci::check` for the merge bar (lint,
+format check and the test suite; `just ci::test` for the suite alone). Release
 artifacts for both targets (`x86_64-unknown-linux-musl`,
 `x86_64-pc-windows-gnu`) cross-build from Linux with `just release`
 (requires `cross` and a container runtime; see `Cross.toml`).

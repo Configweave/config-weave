@@ -18,25 +18,13 @@ pkgs_dir := env_var_or_default("CONFIG_WEAVE_PKGS", "../config-weave-pkgs")
 main:
 	@just --list
 
+# The merge bar — lint, format and the test suite (`just ci::check`)
+mod ci '.just/ci'
+
 # Build the debug binary
 [group('build')]
 build:
 	cargo build
-
-# Run the full test suite (the CLI + the weave-docjson crate; the
-# default-members setting would otherwise skip the latter).
-[group('test')]
-test:
-	cargo test
-	cargo test -p weave-docjson
-
-# Lint and format checks
-[group('test')]
-check:
-	# --all-targets so tests and benches are linted too — CI lints them,
-	# and without it a lint in test code only surfaces after a push.
-	cargo clippy --all-targets -- -D warnings
-	cargo fmt --check
 
 # Validate the sample playbook with the debug binary
 [group('test')]

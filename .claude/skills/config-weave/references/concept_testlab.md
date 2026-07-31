@@ -20,7 +20,7 @@ The `test` block's fields are in [Test block reference](../references/fact_test_
 
 ## Repo test suites
 
-`just test` (fast cargo suite, host-independent) · `just test-lab` (cross-builds the static musl binary, runs the vmlab-gated suite in containers) · `just test-lab-vm playbook template` (end-to-end smoke in full VMs) · `just test-ad` (the full Windows DC lifecycle scenario over real reboots — heavy).
+`just ci::test` (fast cargo suite, host-independent; part of the `just ci::check` merge bar) · `just test-lab` (cross-builds the static musl binary, runs the vmlab-gated suite in containers) · `just test-lab-vm playbook template` (end-to-end smoke in full VMs) · `just test-ad` (the full Windows DC lifecycle scenario over real reboots — heavy).
 
 ## Related
 

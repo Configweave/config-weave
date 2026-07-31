@@ -701,7 +701,7 @@ Structural DocJson extraction and AST-preserving round-tripping for
 playbook.wcl / package.wcl live in the shared workspace crate `docjson/`
 (`weave-docjson`: docjson + inspect_ast + emit, wcl_lang-only deps). The
 CLI keeps its `model::docjson` paths via re-exports in `src/model/mod.rs`,
-and `just test` runs the crate's suite explicitly since `default-members`
+and `just ci::test` runs the crate's suite explicitly since `default-members`
 would skip it. Extraction (`extract_package`/`extract_playbook`) works on
 a `parse_for_edit` AST — every leaf is `{lit}` or `{expr: "source"}` —
 and **fails closed** on constructs forms can't represent; `emit` syncs a
