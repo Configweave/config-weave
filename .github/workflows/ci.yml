@@ -30,14 +30,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: taiki-e/install-action@just
+
+      # One step per part of `just ci::check`, rather than the whole gate in
+      # one call, so a failure names the part that failed. The commands live
+      # in .just/ci/mod.just — the workflow must not restate them, or the
+      # local gate and CI can drift in what a check actually does.
       - name: Format check
-        run: cargo fmt --check
+        run: just ci::fmt-check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: just ci::lint
 
       - name: Test
-        run: cargo test
+        run: just ci::test
 
   # ── Version ───────────────────────────────────────────────────────────────
   # Trailer-gated: a release only happens when HEAD carries a publish trailer.
