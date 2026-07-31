@@ -1,10 +1,12 @@
 name: CI
 
-# Lint and test gate for the Rust crate. The cross-repo deps (wcl_lang,
-# wscript, wscript-std) are GitHub git dependencies pinned by Cargo.lock, so a
-# plain single checkout is all this needs — no sibling repos. Docker- and
-# vmlab-backed testlab tests are #[ignore]-gated, so `cargo test` runs only
-# the host-independent suite here.
+# Lint and test gate for the Rust crate — the merge bar itself lives in the
+# `ci` just module (.just/ci/mod.just); the test job below only invokes its
+# parts. The cross-repo deps (wcl_lang, wscript, wscript-std) are GitHub git
+# dependencies pinned by Cargo.lock, so a plain single checkout is all this
+# needs — no sibling repos. The vmlab-backed testlab tests are #[ignore]-gated
+# and outside the gate, so `just ci::test` runs only the host-independent
+# suite here.
 #
 # No paths filter: releases are trailer-gated (see the version job), so the
 # workflow must see every push to main — a release commit that touches
