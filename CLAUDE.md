@@ -104,3 +104,20 @@ nothing) build at all. To develop across repos, put a `[patch]` section in a
   reads the trailer off the head commit of the push, so when merging a release
   PR the trailer has to be in the commit that actually lands — put it in the
   squash-commit message, not only in an intermediate branch commit.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `Configweave/config-weave`, driven via the `gh`
+CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, each label string equal to its name. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the repo root, created lazily.
+See `docs/agents/domain.md`.
