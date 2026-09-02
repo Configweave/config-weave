@@ -1,6 +1,6 @@
 ---
 name: config-weave
-description: "Expertise skill for config-weave: authoring WCL playbooks and packages, writing wscript resource/gatherer/verify scripts, the host API surface, running and testing playbooks. Single-binary configuration management driven by WCL playbooks and wscript resource scripts, with a check → apply → re-check convergence contract and a disposable-instance testlab. Auto-activated when working with playbook.wcl, package.wcl, .ws scripts, the config-weave CLI, or the testlab."
+description: "Read when writing or fixing a playbook.wcl, a package.wcl, a wscript resource, gatherer or verify script (.ws), a test or scenario block, or when running config-weave (validate, check, apply, test, secrets, pkg, wscripti). Carries the complete block, host-API and CLI surface, so nothing needs guessing."
 allowed-tools:
   - Read
   - Write
@@ -9,197 +9,93 @@ allowed-tools:
   - Grep
   - Bash
   - Agent
-disable-model-invocation: false
-metadata:
-  wskill_schema_version: 1.3.0
 ---
 
 # config-weave
 
 <overview>
-
-Single-binary configuration management driven by WCL playbooks and wscript resource scripts, with a check → apply → re-check convergence contract and a disposable-instance testlab.
-
-**Upstream version:** `0.1.0`. If the real upstream has moved past this, the skill may be stale — bump `topic.version` and re-verify (see the update workflow).
-
-config-weave is single-binary configuration management. Playbooks are WCL documents whose plays run steps; each step invokes a resource (declared in a package, implemented as a wscript script) with a check → apply → re-check convergence contract. This skill captures every layer as data — playbooks, packages, scripts, the host API, the CLI, and the testlab — projected from one model.
-
+config-weave is a single static binary that reads a WCL playbook and either
+checks a machine against it or applies it. A playbook's plays run steps; each
+step invokes a resource declared in a package and implemented by a wscript
+script. Every resource obeys one contract, **converge**: `check` reads the host
+and never writes; `apply` changes the host so that a re-check, in the same run
+and in a fresh process, reports already configured. The engine validates
+everything before anything runs, then runs the re-check itself.
 </overview>
 
-## Parameters
-
 <variables>
-
-- `${CLAUDE_SKILL_DIR}`: path to this skill's directory (its `scripts/`, `assets/`, and `references/` live here).
-
-- `$ARGUMENTS`: The config-weave topic to look up — a playbook/package block, a wscript contract, a host-API module, a CLI subcommand, or a testlab feature. How to determine: Take it from the user's request. If empty, summarise the reference and ask which layer they need.
-
+- `${CLAUDE_SKILL_DIR}`: this skill's directory. The reference files below are
+  under `${CLAUDE_SKILL_DIR}/reference/`.
 </variables>
 
+<workflow>
+<step order="1">
+Pick the branch from the table below and read its reference file in full before
+writing a line. The files are exhaustive on their topic: a block, field, function
+or flag that is absent from them does not exist.
+</step>
+
+<step order="2">
+Author against the reference. WCL blocks take exactly the fields in the tables.
+Scripts call only functions listed in `host-api.md`, and each resource script
+keeps `check` read-only and makes `apply` converge.
+</step>
+
+<step order="3">
+Run `config-weave validate <playbook-dir>` and fix every diagnostic. Done when it
+exits 0: the WCL, the schema, every reference, the step graph and every script's
+compilation are all clean.
+</step>
+
+<step order="4">
+Prove convergence rather than assuming it. For a play on a machine you may
+change: `check`, then `apply`, then `apply` again, and the second apply reports
+every step already configured. For a package: `config-weave test <playbook-dir>
+<pkg>` or `<pkg>:<test>`, and every test passes all three runs. A step that
+reports configured on the third run has an `apply` that does not satisfy its own
+`check`.
+</step>
+
+<step order="5">
+When a reference file and the code disagree, the code wins: `src/vocab/*.wcl`
+for blocks, `src/hostapi/*.rs` and `config-weave wscripti` for the host API,
+`src/main.rs` for the CLI. Correct the reference file in this skill in the same
+change.
+</step>
+</workflow>
+
+<reference>
+| Task | Read |
+|------|------|
+| Write or fix `playbook.wcl`: plays, steps, containers, composites, variables, `secret()` | `reference/playbook.md` |
+| Write or fix `package.wcl`: resources, gatherers, params, composites, the built-in `weave` package, `config-weave pkg` | `reference/package.md` |
+| Write a resource, gatherer or verify script: the contract, entry points, `Value`, wscript essentials, prelude and methods | `reference/scripts.md` |
+| Call the host from a script: every module, function, type and option map | `reference/host-api.md` |
+| Run the CLI: every command and flag, output modes, exit codes, environment, troubleshooting | `reference/cli.md` |
+| Write or run tests and scenarios: the `test` block, expectations, the three-run protocol, instances, the driver API | `reference/testlab.md` |
+</reference>
+
 <boundaries>
-
 <always>
-
-- Read docs/notes.md before changing the WCL vocabulary, variable scheme, host API surface, or test protocol — it is the binding source of truth over the PRD's sketches.
-- Trust real source over these references if they disagree: src/vocab/\*.wcl, src/hostapi/\*.rs, src/main.rs, ~/dev/wscript/docs — then update the reference.
-- Regenerate weave.wscripti (config-weave wscripti) after changing the host API, and update the host-API reference to match.
-
+- Validate before check, check before apply, and read the re-check result: a
+  step reported as Error after a successful apply is a contract violation in the
+  resource, and the fix is in the script.
+- Treat `host-api.md` as the whole host surface when writing a script. A function
+  it lacks is one to implement another way, with the registered modules.
 </always>
 
 <ask>
-
-- Before running config-weave apply against the local machine (it mutates system state) — validate, check, and test are safe.
-- Before adding new fields to the WCL vocabulary (src/vocab/\*.wcl) — that is a schema change, not playbook authoring.
-
+- Before `config-weave apply` against the machine you are running on, since it
+  changes system state. `validate`, `check` and `test` are safe to run freely.
+- Before editing `src/vocab/*.wcl` or `src/hostapi/`: that changes the language
+  every playbook and script is written in, which is engine development rather than
+  authoring.
 </ask>
 
 <never>
-
-- Invent host API functions or modules not listed in the host-API reference — the surface is exactly what config-weave wscripti emits.
-- Use wscript-std's math / process / xml / standalone-fs in playbook scripts — they are not registered.
-- Write WCL import lines in playbooks or packages — the engine appends system imports.
-
+- Write `import` lines in a playbook or package. The engine appends the system
+  imports itself when it opens the file.
+- Encrypt, decrypt or rekey secrets by editing the `CWENC1` blobs by hand. Use
+  `config-weave secrets`, which rewrites the byte span in place.
 </never>
-
 </boundaries>
-
-## Reference
-
-### Foundations
-
-_What config-weave is and the convergence model every resource obeys._
-- [config-weave](references/entity_config_weave.md)
-- [Convergence contract](references/concept_convergence_contract.md)
-- [Step lifecycle](references/concept_step_lifecycle.md)
-- [Cross-process idempotence](references/concept_idempotence.md)
-- [Concurrency classes](references/concept_concurrency_classes.md)
-- [CheckResult and ApplyResult](references/fact_result_enums.md)
-
-### Authoring playbooks & packages
-
-_The WCL building blocks: plays of steps, packages of resources and gatherers._
-- [Playbook](references/concept_playbook.md)
-- [Play](references/concept_play.md)
-- [Step](references/concept_step.md)
-- [Container](references/concept_container.md)
-- [Package](references/concept_package.md)
-- [Resource](references/concept_resource.md)
-- [Gatherer](references/concept_gatherer.md)
-- [Variables](references/concept_variables.md)
-- [Encrypted values](references/concept_encrypted_values.md)
-- [DAG scheduling](references/concept_dag_scheduling.md)
-- [playbook.wcl](references/entity_playbook_wcl.md)
-- [package.wcl](references/entity_package_wcl.md)
-
-#### Block reference
-
-_The playbook / package block tables and the variable rules._
-- [Playbook block reference](references/fact_playbook_blocks.md)
-- [Package block reference](references/fact_package_blocks.md)
-- [Concurrency classes](references/fact_concurrency_class_table.md)
-- [Variable precedence and overrides](references/fact_variable_precedence.md)
-
-### The wscript language
-
-_The statically typed, Rust-flavored language resources and gatherers are written in._
-- [wscript](references/entity_wscript_lang.md)
-- [wscript: overview](references/concept_wscript_overview.md)
-- [wscript: values and types](references/concept_wscript_values_types.md)
-- [wscript: reference semantics](references/concept_wscript_reference_semantics.md)
-- [wscript: functions and closures](references/concept_wscript_functions.md)
-- [wscript: structs, enums, methods](references/concept_wscript_structs_enums.md)
-- [wscript: pattern matching](references/concept_wscript_pattern_matching.md)
-- [wscript: Option, Result and ?](references/concept_wscript_option_result.md)
-- [wscript: containers and strings](references/concept_wscript_containers.md)
-- [wscript: loops](references/concept_wscript_loops.md)
-- [wscript: traits and operators](references/concept_wscript_traits_operators.md)
-- [wscript: memory and faults](references/concept_wscript_memory_faults.md)
-
-#### Built-ins & standard library
-
-_The prelude, container/string/Option/Result methods, the Value type, and json/toml._
-- [wscript prelude](references/fact_wscript_prelude.md)
-- [wscript string methods](references/fact_wscript_string_methods.md)
-- [wscript list methods](references/fact_wscript_list_methods.md)
-- [wscript map methods](references/fact_wscript_map_methods.md)
-- [Option / Result methods](references/fact_wscript_option_result_methods.md)
-- [Value](references/entity_value_type.md)
-- [json](references/entity_json_module.md)
-- [toml](references/entity_toml_module.md)
-- [xml](references/entity_xml_module.md)
-- [regex](references/entity_regex_module.md)
-- [Not registered in config-weave scripts](references/fact_wscript_not_registered.md)
-- [Excluded from wscript v1](references/fact_wscript_excluded_v1.md)
-
-### Host API
-
-_The wscript module surface config-weave registers for scripts._
-- [Host API](references/concept_host_api.md)
-- [Shared script helpers (lib/)](references/concept_script_imports.md)
-- [Editor support (wscripti / LSP)](references/concept_editor_support.md)
-- [weave.wscripti](references/entity_weave_wscripti.md)
-- [Script entry-point signatures](references/fact_entry_point_signatures.md)
-
-#### Cross-platform modules
-
-_Registered on every platform._
-- [log](references/entity_log_module.md)
-- [fs](references/entity_fs_module.md)
-- [path](references/entity_path_module.md)
-- [shell](references/entity_shell_module.md)
-- [http](references/entity_http_module.md)
-- [hash](references/entity_hash_module.md)
-- [archive](references/entity_archive_module.md)
-- [env](references/entity_env_module.md)
-- [sys](references/entity_sys_module.md)
-- [data](references/entity_data_module.md)
-- [template](references/entity_template_module.md)
-- [time](references/entity_time_module.md)
-
-#### Windows modules
-
-_Registered everywhere; runtime-error off Windows._
-- [registry](references/entity_registry_module.md)
-- [service](references/entity_service_module.md)
-- [com](references/entity_com_module.md)
-
-### Testing & the testlab
-
-_Proving package convergence in disposable vmlab containers or VMs._
-- [Testlab](references/concept_testlab.md)
-- [Three-run protocol](references/concept_three_run_protocol.md)
-- [Grouping tests into one instance](references/concept_test_grouping.md)
-- [Scenarios](references/concept_scenarios.md)
-- [container instance](references/entity_container_instance.md)
-- [VM instance](references/entity_vm_instance.md)
-- [testlab](references/entity_testlab_module.md)
-
-#### Test reference
-
-_The test block, the expectation table, flags, exit codes and backend requirements._
-- [Test block reference](references/fact_test_block_fields.md)
-- [Step expectation table](references/fact_step_expectation_table.md)
-- [config-weave test flags](references/fact_testlab_flags.md)
-- [config-weave test exit codes](references/fact_testlab_exit_codes.md)
-- [Testlab instance requirements](references/fact_testlab_backend_requirements.md)
-
-### Task runbooks
-
-_Step-by-step runbooks for authoring, testing and applying playbooks._
-- [Scaffold and validate a playbook](references/process_scaffold_validate.md)
-- [Add a package resource](references/process_add_resource.md)
-- [Test a package for idempotence](references/process_test_package.md)
-- [Check, then apply a play](references/process_check_then_apply.md)
-
-- [CLI reference](references/cli_ref.md) — every `config-weave` subcommand, its arguments and switches
-
-- [Glossary](references/glossary_ref.md) — config-weave vocabulary
-
-## Views
-
-Beyond this skill, the wskill ships these views — build them with `just render` in the wskill folder:
-
-- **Reference book** — The comprehensive human reference — every layer of config-weave, curated into chapters. (`wdoc/book/main.wcl`)
-- **Claude Code skill** — The Claude Code expertise skill (committed at .claude/skills/config-weave). (`wdoc/skill/main.wcl`)
-- **Overview deck** — An introduction to config-weave as an overview deck — the model, packages, and the testlab. (`wdoc/presentation/main.wcl`)
-- **Training course** — First playbook → packages → testlab: a hands-on lesson series with verifiable exercises. (`wdoc/training/main.wcl`)
