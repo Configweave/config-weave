@@ -4,7 +4,7 @@
 // for the apply/check demos and the static-binary proof.
 //
 // Each component is an ordinary
-// user-declared `@block(...) extends WdocBlock` whose `lower` builds a
+// user-declared `@block(...) extends ContentBlock` whose `lower` builds a
 // semantic element tree, so the same page content renders through the
 // `website` template for HTML and degrades to sensible Markdown / PDF
 // (headings stay headings, links ride `Inline` markdown text, chrome —
@@ -20,82 +20,85 @@
 // toggle — no bespoke palette, no parallel toggle script.
 
 // ── Styling ──────────────────────────────────────────────────────────
-// IMPORTANT: the heredoc is emitted verbatim into <head>, so it must be
-// pure CSS — never a `//` line (CSS has no `//` comment).
-stylesheet "config-weave-landing" {
+// One structured rule per selector; declaration bodies stay CSS text.
+// (Ported from the previous single stylesheet heredoc.)
+base ".ws-banner .callout" { sites = [:config_weave]  css = "display: flex; align-items: center; justify-content: center; gap: 0.75rem; max-width: 70rem; margin: 0 auto; padding: 0.45rem 1rem; border: 0; border-radius: 0; background: none; font-size: 0.85rem;" }
+base ".ws-banner .callout-title, .ws-banner .callout-body p" { sites = [:config_weave]  css = "margin: 0;" }
+base ".lp-hero" { sites = [:config_weave]  css = "position: relative; text-align: center; padding: 4.5rem 0 3rem;" }
+base ".lp-hero > :not(.lp-hero-bg)" { sites = [:config_weave]  css = "position: relative;" }
+base ".lp-hero-bg" { sites = [:config_weave]  css = "position: absolute; inset: 0; pointer-events: none; opacity: 0.55; background-image: linear-gradient(var(--wdoc-border, rgba(127,127,127,0.25)) 1px, transparent 1px), linear-gradient(90deg, var(--wdoc-border, rgba(127,127,127,0.25)) 1px, transparent 1px); background-size: 44px 44px; -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 0%, transparent 72%); mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 0%, transparent 72%);" }
+base ".lp-badge" { sites = [:config_weave]  css = "display: inline-flex; align-items: center; gap: 0.5rem; margin: 0; padding: 0.3rem 0.8rem; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 999px; background: var(--wdoc-bg-alt, transparent); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--wdoc-fg-muted, inherit);" }
+base ".lp-badge::before" { sites = [:config_weave]  css = "content: ''; width: 6px; height: 6px; border-radius: 999px; background: var(--wdoc-accent, #4060ff);" }
+base ".lp-hero h1" { sites = [:config_weave]  css = "margin: 1.4rem auto 0; max-width: 16ch; font-size: clamp(2.4rem, 6vw, 4rem); line-height: 1.05; letter-spacing: -0.03em; text-wrap: balance;" }
+base ".lp-hero .lp-lede" { sites = [:config_weave]  css = "margin: 1.3rem auto 0;" }
+base ".lp-lede" { sites = [:config_weave]  css = "max-width: 60ch; font-size: 1.05rem; line-height: 1.6; color: var(--wdoc-fg-muted, inherit);" }
+base ".lp-ctas" { sites = [:config_weave]  css = "display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; margin-top: 2rem;" }
+base ".lp-ctas p" { sites = [:config_weave]  css = "margin: 0;" }
+base ".lp-cta a" { sites = [:config_weave]  css = "display: inline-flex; align-items: center; gap: 0.5rem; height: 2.6rem; padding: 0 1.25rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; text-decoration: none;" }
+base ".lp-cta-primary a" { sites = [:config_weave]  css = "background: var(--wdoc-accent, #4060ff); color: var(--wdoc-on-accent, #fff); border: 1px solid transparent;" }
+base ".lp-cta-primary a::after" { sites = [:config_weave]  css = "content: '→';" }
+base ".lp-cta-primary a:hover" { sites = [:config_weave]  css = "background: color-mix(in srgb, var(--wdoc-accent, #4060ff) 85%, var(--wdoc-fg, #000) 15%);" }
+base ".lp-cta-ghost a" { sites = [:config_weave]  css = "background: transparent; color: inherit; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); font-weight: 500;" }
+base ".lp-cta-ghost a:hover" { sites = [:config_weave]  css = "border-color: var(--wdoc-border-strong, rgba(127,127,127,0.7)); background: var(--wdoc-bg-alt, transparent);" }
+base ".lp-hero-footnote" { sites = [:config_weave]  css = "margin-top: 1.4rem; font-size: 0.8rem; color: var(--wdoc-fg-subtle, inherit);" }
+base ".lp-section" { sites = [:config_weave]  css = "padding: 2.75rem 0 1rem;" }
+base ".lp-section-head" { sites = [:config_weave]  css = "display: block; text-align: center; max-width: 60ch; margin: 0 auto 2.25rem;" }
+base ".lp-section-head h2, .lp-showcase-text h2" { sites = [:config_weave]  css = "margin: 0.7rem 0 0; font-size: 1.9rem; letter-spacing: -0.02em; line-height: 1.12;" }
+base ".lp-section-head .lp-lede" { sites = [:config_weave]  css = "margin: 0.85rem auto 0; font-size: 1rem;" }
+base ".lp-eyebrow" { sites = [:config_weave]  css = "margin: 0; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--wdoc-fg-subtle, inherit);" }
+base ".lp-grid" { sites = [:config_weave]  css = "display: grid; grid-template-columns: repeat(auto-fit, minmax(17.5rem, 1fr)); gap: 1rem;" }
+base ".lp-card, .lp-refcard" { sites = [:config_weave]  css = "display: flex; flex-direction: column; margin: 0; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 8px; background: var(--wdoc-bg-alt, transparent); padding: 1.4rem;" }
+base ".lp-card:hover, .lp-refcard:hover" { sites = [:config_weave]  css = "border-color: var(--wdoc-border-strong, rgba(127,127,127,0.7));" }
+base ".lp-card-icon" { sites = [:config_weave]  css = "display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; margin: 0 0 0.85rem; border-radius: 8px; background: color-mix(in srgb, var(--wdoc-accent, #4060ff) 14%, transparent); color: var(--wdoc-accent, #4060ff);" }
+base ".lp-card-icon svg.wdoc-icon" { sites = [:config_weave]  css = "width: 1.2rem; height: 1.2rem;" }
+base ".lp-card h3" { sites = [:config_weave]  css = "margin: 0 0 0.4rem; font-size: 1rem;" }
+base ".lp-card p:last-child, .lp-refcard p" { sites = [:config_weave]  css = "margin: 0; font-size: 0.88rem; line-height: 1.6; color: var(--wdoc-fg-muted, inherit);" }
+base ".lp-refcard-head" { sites = [:config_weave]  css = "display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.85rem;" }
+base ".lp-refcard-head .lp-card-icon" { sites = [:config_weave]  css = "margin: 0;" }
+base ".lp-refcard-name" { sites = [:config_weave]  css = "margin: 0; font-family: var(--wdoc-font-mono, ui-monospace, monospace); font-weight: 600; font-size: 1.05rem; color: var(--wdoc-heading, inherit);" }
+base ".lp-refcard-body" { sites = [:config_weave]  css = "flex: 1; margin-bottom: 1rem;" }
+base ".lp-refcard-cta" { sites = [:config_weave]  css = "font-size: 0.85rem; font-weight: 500;" }
+base ".lp-showcase" { sites = [:config_weave]  css = "display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.75rem; align-items: start;" }
+base ".lp-codepanel" { sites = [:config_weave]  css = "margin: 0; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 8px; background: var(--wdoc-bg-alt, transparent); overflow: hidden;" }
+base ".lp-codehead" { sites = [:config_weave]  css = "display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--wdoc-border, rgba(127,127,127,0.25)); background: var(--wdoc-bg-inset, rgba(127,127,127,0.08)); font-family: var(--wdoc-font-mono, ui-monospace, monospace); font-size: 0.8rem; color: var(--wdoc-fg-muted, inherit);" }
+// `lp-codename` is a hook only: the filename span inherits the head's styling.
+class "lp-codename" { sites = [:config_weave] }
+base ".lp-codehead svg.wdoc-icon" { sites = [:config_weave]  css = "width: 0.95rem; height: 0.95rem;" }
+base ".lp-codetag" { sites = [:config_weave]  css = "margin-left: auto; padding: 0.1rem 0.5rem; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 4px; font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase;" }
+base ".lp-code" { sites = [:config_weave]  css = "margin: 0; padding: 1.1rem 1.25rem; overflow-x: auto; line-height: 1.65; font-size: 0.85rem;" }
+base ".lp-code code" { sites = [:config_weave]  css = "background: none; border: 0; padding: 0;" }
+base ".lp-termgrid" { sites = [:config_weave]  css = "display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; align-items: start;" }
+base ".lp-termtag" { sites = [:config_weave]  css = "margin-left: auto; padding: 0.1rem 0.5rem; border: 1px solid color-mix(in srgb, var(--wdoc-accent, #4060ff) 45%, transparent); border-radius: 4px; font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--wdoc-accent, #4060ff);" }
+base ".lp-showcase-text" { sites = [:config_weave]  css = "display: block;" }
+base ".lp-showcase-text p:last-child" { sites = [:config_weave]  css = "margin-bottom: 0; max-width: 62ch; color: var(--wdoc-fg-muted, inherit); line-height: 1.65;" }
+base ".lp-steps-panel" { sites = [:config_weave]  css = "border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 8px; background: var(--wdoc-bg-alt, transparent); padding: 1.9rem;" }
+base ".lp-steps-panel .lp-section-head" { sites = [:config_weave]  css = "text-align: left; margin: 0 0 1.5rem; max-width: 60ch;" }
+base "ol.lp-steps" { sites = [:config_weave]  css = "list-style: none; counter-reset: lp-step; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1rem;" }
+base "ol.lp-steps > li" { sites = [:config_weave]  css = "position: relative; padding-left: 2.5rem;" }
+base "ol.lp-steps > li::before" { sites = [:config_weave]  css = "counter-increment: lp-step; content: counter(lp-step); position: absolute; left: 0; top: 0; width: 1.5rem; height: 1.5rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 999px; font-size: 0.75rem; font-weight: 600; font-family: var(--wdoc-font-mono, ui-monospace, monospace); color: var(--wdoc-fg-muted, inherit);" }
+base ".lp-step-title" { sites = [:config_weave]  css = "margin: 0 0 0.5rem; font-weight: 500;" }
+base ".lp-cmd" { sites = [:config_weave]  css = "margin: 0; padding: 0.65rem 0.9rem; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.25)); border-radius: 6px; background: var(--wdoc-bg-inset, rgba(127,127,127,0.06)); font-size: 0.85rem; overflow-x: auto; white-space: nowrap;" }
+base ".lp-cmd::before" { sites = [:config_weave]  css = "content: '$ '; color: var(--wdoc-fg-subtle, inherit); font-family: var(--wdoc-font-mono, ui-monospace, monospace);" }
+base ".lp-cmd code" { sites = [:config_weave]  css = "background: none; border: 0; padding: 0;" }
+base "footer.ws-footer" { sites = [:config_weave]  css = "opacity: 1; text-align: left; padding: 0;" }
+base ".lp-footgrid" { sites = [:config_weave]  css = "max-width: 70rem; margin: 0 auto; padding: 2.75rem clamp(1rem, 5vw, 3rem); display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 2rem;" }
+base ".lp-footbrand p" { sites = [:config_weave]  css = "margin: 0 0 0.75rem;" }
+base ".lp-footlogo" { sites = [:config_weave]  css = "display: flex; align-items: center; gap: 0.6rem; font-family: var(--wdoc-font-mono, ui-monospace, monospace); font-weight: 600; color: var(--wdoc-heading, inherit);" }
+base ".lp-footlogo svg.wdoc-icon" { sites = [:config_weave]  css = "width: 1.1rem; height: 1.1rem; color: var(--wdoc-accent, #4060ff);" }
+base ".lp-foottag" { sites = [:config_weave]  css = "max-width: 34ch; font-size: 0.85rem; line-height: 1.6; color: var(--wdoc-fg-subtle, inherit);" }
+base ".lp-footcol p" { sites = [:config_weave]  css = "margin: 0 0 0.55rem; font-size: 0.85rem;" }
+base ".lp-foothead" { sites = [:config_weave]  css = "font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--wdoc-fg-subtle, inherit);" }
+base ".lp-footlink a" { sites = [:config_weave]  css = "color: var(--wdoc-fg-muted, inherit); text-decoration: none;" }
+base ".lp-footlink a:hover" { sites = [:config_weave]  css = "color: var(--wdoc-fg, inherit);" }
+base ".lp-footbottom" { sites = [:config_weave]  css = "display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: space-between; max-width: 70rem; margin: 0 auto; padding: 1rem clamp(1rem, 5vw, 3rem); border-top: 1px solid var(--wdoc-border, rgba(127,127,127,0.2));" }
+base ".lp-footbottom p" { sites = [:config_weave]  css = "margin: 0; font-size: 0.75rem; color: var(--wdoc-fg-subtle, inherit);" }
+media "(max-width: 48rem)" {
   sites = [:config_weave]
-  css = <<CSS
-    .ws-banner .callout { display: flex; align-items: center; justify-content: center; gap: 0.75rem; max-width: 70rem; margin: 0 auto; padding: 0.45rem 1rem; border: 0; border-radius: 0; background: none; font-size: 0.85rem; }
-    .ws-banner .callout-title, .ws-banner .callout-body p { margin: 0; }
-    .lp-hero { position: relative; text-align: center; padding: 4.5rem 0 3rem; }
-    .lp-hero > :not(.lp-hero-bg) { position: relative; }
-    .lp-hero-bg { position: absolute; inset: 0; pointer-events: none; opacity: 0.55; background-image: linear-gradient(var(--wdoc-border, rgba(127,127,127,0.25)) 1px, transparent 1px), linear-gradient(90deg, var(--wdoc-border, rgba(127,127,127,0.25)) 1px, transparent 1px); background-size: 44px 44px; -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 0%, transparent 72%); mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 0%, transparent 72%); }
-    .lp-badge { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0; padding: 0.3rem 0.8rem; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 999px; background: var(--wdoc-bg-alt, transparent); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--wdoc-fg-muted, inherit); }
-    .lp-badge::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--wdoc-accent, #4060ff); }
-    .lp-hero h1 { margin: 1.4rem auto 0; max-width: 16ch; font-size: clamp(2.4rem, 6vw, 4rem); line-height: 1.05; letter-spacing: -0.03em; text-wrap: balance; }
-    .lp-hero .lp-lede { margin: 1.3rem auto 0; }
-    .lp-lede { max-width: 60ch; font-size: 1.05rem; line-height: 1.6; color: var(--wdoc-fg-muted, inherit); }
-    .lp-ctas { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; margin-top: 2rem; }
-    .lp-ctas p { margin: 0; }
-    .lp-cta a { display: inline-flex; align-items: center; gap: 0.5rem; height: 2.6rem; padding: 0 1.25rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; text-decoration: none; }
-    .lp-cta-primary a { background: var(--wdoc-accent, #4060ff); color: var(--wdoc-on-accent, #fff); border: 1px solid transparent; }
-    .lp-cta-primary a::after { content: "→"; }
-    .lp-cta-primary a:hover { background: color-mix(in srgb, var(--wdoc-accent, #4060ff) 85%, var(--wdoc-fg, #000) 15%); }
-    .lp-cta-ghost a { background: transparent; color: inherit; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); font-weight: 500; }
-    .lp-cta-ghost a:hover { border-color: var(--wdoc-border-strong, rgba(127,127,127,0.7)); background: var(--wdoc-bg-alt, transparent); }
-    .lp-hero-footnote { margin-top: 1.4rem; font-size: 0.8rem; color: var(--wdoc-fg-subtle, inherit); }
-    .lp-section { padding: 2.75rem 0 1rem; }
-    .lp-section-head { display: block; text-align: center; max-width: 60ch; margin: 0 auto 2.25rem; }
-    .lp-section-head h2, .lp-showcase-text h2 { margin: 0.7rem 0 0; font-size: 1.9rem; letter-spacing: -0.02em; line-height: 1.12; }
-    .lp-section-head .lp-lede { margin: 0.85rem auto 0; font-size: 1rem; }
-    .lp-eyebrow { margin: 0; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--wdoc-fg-subtle, inherit); }
-    .lp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(17.5rem, 1fr)); gap: 1rem; }
-    .lp-card, .lp-refcard { display: flex; flex-direction: column; margin: 0; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 8px; background: var(--wdoc-bg-alt, transparent); padding: 1.4rem; }
-    .lp-card:hover, .lp-refcard:hover { border-color: var(--wdoc-border-strong, rgba(127,127,127,0.7)); }
-    .lp-card-icon { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; margin: 0 0 0.85rem; border-radius: 8px; background: color-mix(in srgb, var(--wdoc-accent, #4060ff) 14%, transparent); color: var(--wdoc-accent, #4060ff); }
-    .lp-card-icon svg.wdoc-icon { width: 1.2rem; height: 1.2rem; }
-    .lp-card h3 { margin: 0 0 0.4rem; font-size: 1rem; }
-    .lp-card p:last-child, .lp-refcard p { margin: 0; font-size: 0.88rem; line-height: 1.6; color: var(--wdoc-fg-muted, inherit); }
-    .lp-refcard-head { display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.85rem; }
-    .lp-refcard-head .lp-card-icon { margin: 0; }
-    .lp-refcard-name { margin: 0; font-family: var(--wdoc-font-mono, ui-monospace, monospace); font-weight: 600; font-size: 1.05rem; color: var(--wdoc-heading, inherit); }
-    .lp-refcard-body { flex: 1; margin-bottom: 1rem; }
-    .lp-refcard-cta { font-size: 0.85rem; font-weight: 500; }
-    .lp-showcase { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.75rem; align-items: start; }
-    .lp-codepanel { margin: 0; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 8px; background: var(--wdoc-bg-alt, transparent); overflow: hidden; }
-    .lp-codehead { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--wdoc-border, rgba(127,127,127,0.25)); background: var(--wdoc-bg-inset, rgba(127,127,127,0.08)); font-family: var(--wdoc-font-mono, ui-monospace, monospace); font-size: 0.8rem; color: var(--wdoc-fg-muted, inherit); }
-    .lp-codehead svg.wdoc-icon { width: 0.95rem; height: 0.95rem; }
-    .lp-codetag { margin-left: auto; padding: 0.1rem 0.5rem; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 4px; font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; }
-    .lp-code { margin: 0; padding: 1.1rem 1.25rem; overflow-x: auto; line-height: 1.65; font-size: 0.85rem; }
-    .lp-code code { background: none; border: 0; padding: 0; }
-    .lp-termgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; align-items: start; }
-    .lp-termtag { margin-left: auto; padding: 0.1rem 0.5rem; border: 1px solid color-mix(in srgb, var(--wdoc-accent, #4060ff) 45%, transparent); border-radius: 4px; font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--wdoc-accent, #4060ff); }
-    .lp-showcase-text { display: block; }
-    .lp-showcase-text p:last-child { margin-bottom: 0; max-width: 62ch; color: var(--wdoc-fg-muted, inherit); line-height: 1.65; }
-    .lp-steps-panel { border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 8px; background: var(--wdoc-bg-alt, transparent); padding: 1.9rem; }
-    .lp-steps-panel .lp-section-head { text-align: left; margin: 0 0 1.5rem; max-width: 60ch; }
-    ol.lp-steps { list-style: none; counter-reset: lp-step; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1rem; }
-    ol.lp-steps > li { position: relative; padding-left: 2.5rem; }
-    ol.lp-steps > li::before { counter-increment: lp-step; content: counter(lp-step); position: absolute; left: 0; top: 0; width: 1.5rem; height: 1.5rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.35)); border-radius: 999px; font-size: 0.75rem; font-weight: 600; font-family: var(--wdoc-font-mono, ui-monospace, monospace); color: var(--wdoc-fg-muted, inherit); }
-    .lp-step-title { margin: 0 0 0.5rem; font-weight: 500; }
-    .lp-cmd { margin: 0; padding: 0.65rem 0.9rem; border: 1px solid var(--wdoc-border, rgba(127,127,127,0.25)); border-radius: 6px; background: var(--wdoc-bg-inset, rgba(127,127,127,0.06)); font-size: 0.85rem; overflow-x: auto; white-space: nowrap; }
-    .lp-cmd::before { content: "$ "; color: var(--wdoc-fg-subtle, inherit); font-family: var(--wdoc-font-mono, ui-monospace, monospace); }
-    .lp-cmd code { background: none; border: 0; padding: 0; }
-    footer.ws-footer { opacity: 1; text-align: left; padding: 0; }
-    .lp-footgrid { max-width: 70rem; margin: 0 auto; padding: 2.75rem clamp(1rem, 5vw, 3rem); display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 2rem; }
-    .lp-footbrand p { margin: 0 0 0.75rem; }
-    .lp-footlogo { display: flex; align-items: center; gap: 0.6rem; font-family: var(--wdoc-font-mono, ui-monospace, monospace); font-weight: 600; color: var(--wdoc-heading, inherit); }
-    .lp-footlogo svg.wdoc-icon { width: 1.1rem; height: 1.1rem; color: var(--wdoc-accent, #4060ff); }
-    .lp-foottag { max-width: 34ch; font-size: 0.85rem; line-height: 1.6; color: var(--wdoc-fg-subtle, inherit); }
-    .lp-footcol p { margin: 0 0 0.55rem; font-size: 0.85rem; }
-    .lp-foothead { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--wdoc-fg-subtle, inherit); }
-    .lp-footlink a { color: var(--wdoc-fg-muted, inherit); text-decoration: none; }
-    .lp-footlink a:hover { color: var(--wdoc-fg, inherit); }
-    .lp-footbottom { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: space-between; max-width: 70rem; margin: 0 auto; padding: 1rem clamp(1rem, 5vw, 3rem); border-top: 1px solid var(--wdoc-border, rgba(127,127,127,0.2)); }
-    .lp-footbottom p { margin: 0; font-size: 0.75rem; color: var(--wdoc-fg-subtle, inherit); }
-    @media (max-width: 48rem) { .lp-footgrid { grid-template-columns: 1fr 1fr; } }
-    @media (prefers-reduced-motion: reduce) { .lp-hero-bg { opacity: 0.3; } }
-    CSS
+  base ".lp-footgrid" { css = "grid-template-columns: 1fr 1fr;" }
+}
+media "(prefers-reduced-motion: reduce)" {
+  sites = [:config_weave]
+  base ".lp-hero-bg" { css = "opacity: 0.3;" }
 }
 
 // ── Child-element helpers ────────────────────────────────────────────
@@ -105,78 +108,78 @@ stylesheet "config-weave-landing" {
 
 // A call-to-action button: a styled `<p><a></a></p>` whose link rides
 // the inline-pattern engine, so Markdown keeps a real `[label](href)`.
-let lp_cta_el = fn(x: LpCta) -> HtmlFundamental
-  HtmlFundamental::Element {
+let lp_cta_el = fn(x: LpCta) -> Html
+  Html::Element {
     tag: "p", id: none,
     class: if x.primary == true { ["lp-cta", "lp-cta-primary"] } else { ["lp-cta", "lp-cta-ghost"] },
     attrs: none,
-    children: [ HtmlFundamental::Inline { text: $"[${x.label}](${x.href})" } ],
+    children: [ Html::Inline { text: $"[${x.label}](${x.href})" } ],
   }
 
 // One feature card: icon chip, title, body prose.
-let lp_feature_el = fn(f: LpFeature) -> HtmlFundamental {
+let lp_feature_el = fn(f: LpFeature) -> Html {
   let icon_name = if f.icon == none { "lucide.sparkles" } else { f.icon };
-  HtmlFundamental::Element {
+  Html::Element {
     tag: "article", id: none, class: ["lp-card"], attrs: none,
     children: [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "p", id: none, class: ["lp-card-icon"], attrs: none,
-        children: [ HtmlFundamental::Icon { name: icon_name, class: none } ],
+        children: [ Html::Icon { name: icon_name, class: none } ],
       },
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "h3", id: none, class: none, attrs: none,
-        children: [ HtmlFundamental::Inline { text: f.title } ],
+        children: [ Html::Inline { text: f.title } ],
       },
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "p", id: none, class: none, attrs: none,
-        children: [ HtmlFundamental::Inline { text: f.body } ],
+        children: [ Html::Inline { text: f.body } ],
       },
     ],
   }
 }
 
 // One reference-manual card, built from a data record (see `lp_cards`).
-let lp_refcard_el = fn(r: LpRefCard) -> HtmlFundamental
-  HtmlFundamental::Element {
+let lp_refcard_el = fn(r: LpRefCard) -> Html
+  Html::Element {
     tag: "article", id: none, class: ["lp-refcard"], attrs: none,
     children: [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "header", id: none, class: ["lp-refcard-head"], attrs: none,
         children: [
-          HtmlFundamental::Element {
+          Html::Element {
             tag: "p", id: none, class: ["lp-card-icon"], attrs: none,
-            children: [ HtmlFundamental::Icon { name: r.icon, class: none } ],
+            children: [ Html::Icon { name: r.icon, class: none } ],
           },
-          HtmlFundamental::Element {
+          Html::Element {
             tag: "p", id: none, class: ["lp-refcard-name"], attrs: none,
-            children: [ HtmlFundamental::Inline { text: $"**${r.name}**" } ],
+            children: [ Html::Inline { text: $"**${r.name}**" } ],
           },
         ],
       },
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "p", id: none, class: ["lp-refcard-body"], attrs: none,
-        children: [ HtmlFundamental::Inline { text: r.summary } ],
+        children: [ Html::Inline { text: r.summary } ],
       },
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "p", id: none, class: ["lp-refcard-cta"], attrs: none,
-        children: [ HtmlFundamental::Inline { text: $"[Read the manual](${r.href})${r.links}" } ],
+        children: [ Html::Inline { text: $"[Read the manual](${r.href})${r.links}" } ],
       },
     ],
   }
 
 // One getting-started step: a numbered row (the number is a CSS counter)
 // with a title and a command line rendered as inline code.
-let lp_step_el = fn(s: LpStep) -> HtmlFundamental
-  HtmlFundamental::Element {
+let lp_step_el = fn(s: LpStep) -> Html
+  Html::Element {
     tag: "li", id: none, class: none, attrs: none,
     children: [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "p", id: none, class: ["lp-step-title"], attrs: none,
-        children: [ HtmlFundamental::Inline { text: s.title } ],
+        children: [ Html::Inline { text: s.title } ],
       },
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "p", id: none, class: ["lp-cmd"], attrs: none,
-        children: [ HtmlFundamental::Inline { text: $"`${s.command}`" } ],
+        children: [ Html::Inline { text: $"`${s.command}`" } ],
       },
     ],
   }
@@ -184,33 +187,33 @@ let lp_step_el = fn(s: LpStep) -> HtmlFundamental
 // One terminal panel: a title-barred code panel whose body is a console
 // transcript. The chrome (terminal icon, host label, mode chip) is
 // HTML-only; Markdown keeps the transcript as a fenced listing.
-let lp_term_el = fn(t: LpTerm) -> HtmlFundamental
-  HtmlFundamental::Element {
+let lp_term_el = fn(t: LpTerm) -> Html
+  Html::Element {
     tag: "figure", id: t.id, class: ["lp-codepanel"], attrs: none,
     children: [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "figcaption", id: none, class: ["lp-codehead"], attrs: none,
         children: flatten([
-          [ HtmlFundamental::Icon { name: "lucide.terminal", class: none },
-            HtmlFundamental::Element {
+          [ Html::Icon { name: "lucide.terminal", class: none },
+            Html::Element {
               tag: "span", id: none, class: ["lp-codename"], attrs: none,
-              children: [ HtmlFundamental::Raw { html: t.title } ],
+              children: [ Html::Raw { html: t.title } ],
             } ],
           if t.tag == none { [] }
           else {
-            [ HtmlFundamental::Element {
+            [ Html::Element {
                 tag: "span", id: none, class: ["lp-termtag"], attrs: none,
-                children: [ HtmlFundamental::Raw { html: t.tag } ],
+                children: [ Html::Raw { html: t.tag } ],
             } ]
           },
         ]),
       },
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "pre", id: none, class: ["lp-code"], attrs: none,
         children: [
-          HtmlFundamental::Element {
+          Html::Element {
             tag: "code", id: none, class: ["language-console"], attrs: none,
-            children: [ HtmlFundamental::Highlighted { source: t.source, language: "console" } ],
+            children: [ Html::Highlighted { source: t.source, language: "console" } ],
           },
         ],
       },
@@ -218,19 +221,19 @@ let lp_term_el = fn(t: LpTerm) -> HtmlFundamental
   }
 
 // One footer column: an uppercase heading over a list of links.
-let lp_footcol_el = fn(col: LpFootcol) -> HtmlFundamental {
+let lp_footcol_el = fn(col: LpFootcol) -> Html {
   let links = if col.links == none { [] } else { col.links };
-  HtmlFundamental::Element {
+  Html::Element {
     tag: "section", id: none, class: ["lp-footcol"], attrs: none,
     children: flatten([
-      [ HtmlFundamental::Element {
+      [ Html::Element {
           tag: "p", id: none, class: ["lp-foothead"], attrs: none,
-          children: [ HtmlFundamental::Inline { text: col.title } ],
+          children: [ Html::Inline { text: col.title } ],
       } ],
-      map(links, fn(l: LpFootlink) -> HtmlFundamental
-        HtmlFundamental::Element {
+      map(links, fn(l: LpFootlink) -> Html
+        Html::Element {
           tag: "p", id: none, class: ["lp-footlink"], attrs: none,
-          children: [ HtmlFundamental::Inline { text: $"[${l.label}](${l.href})" } ],
+          children: [ Html::Inline { text: $"[${l.label}](${l.href})" } ],
         }),
     ]),
   }
@@ -240,33 +243,33 @@ let lp_footcol_el = fn(col: LpFootcol) -> HtmlFundamental {
 // `cls` is the wrapping class ("lp-section-head"); the wrapper is a
 // `<header>` (not a `<div>`) so Markdown descends into it as blocks and
 // the `<h2>` survives as a `##` heading. Absent fields render nothing.
-let lp_section_head = fn(eyebrow: utf8, title: utf8, lede: utf8, cls: utf8) -> list<HtmlFundamental> {
+let lp_section_head = fn(eyebrow: utf8, title: utf8, lede: utf8, cls: utf8) -> list<Html> {
   let parts = flatten([
     if eyebrow == none || eyebrow == "" { [] }
     else {
-      [ HtmlFundamental::Element {
+      [ Html::Element {
           tag: "p", id: none, class: ["lp-eyebrow"], attrs: none,
-          children: [ HtmlFundamental::Inline { text: eyebrow } ],
+          children: [ Html::Inline { text: eyebrow } ],
       } ]
     },
     if title == none || title == "" { [] }
     else {
-      [ HtmlFundamental::Element {
+      [ Html::Element {
           tag: "h2", id: none, class: none, attrs: none,
-          children: [ HtmlFundamental::Inline { text: title } ],
+          children: [ Html::Inline { text: title } ],
       } ]
     },
     if lede == none || lede == "" { [] }
     else {
-      [ HtmlFundamental::Element {
+      [ Html::Element {
           tag: "p", id: none, class: ["lp-lede"], attrs: none,
-          children: [ HtmlFundamental::Inline { text: lede } ],
+          children: [ Html::Inline { text: lede } ],
       } ]
     },
   ]);
   if len(parts) == 0 { [] }
   else {
-    [ HtmlFundamental::Element {
+    [ Html::Element {
         tag: "header", id: none, class: [cls], attrs: none,
         children: parts,
     } ]
@@ -278,7 +281,7 @@ let lp_section_head = fn(eyebrow: utf8, title: utf8, lede: utf8, cls: utf8) -> l
 // The hero: a decorative grid backdrop, an optional badge pill, the
 // headline, the lede, CTA buttons, and an optional footnote.
 @block("lp_hero")
-type LpHero extends WdocBlock {
+type LpHero extends ContentBlock {
   @doc("The main headline (rendered as the page `<h1>`).")
   @inline(0) heading: utf8
   @doc("The supporting paragraph under the headline.")
@@ -290,43 +293,43 @@ type LpHero extends WdocBlock {
   id: identifier?
   @children("lp_cta") ctas: list<LpCta>?
 
-  lower = fn(b: LpHero) -> list<HtmlFundamental> {
+  lower = fn(b: LpHero) -> list<Html> {
     let ctas = if b.ctas == none { [] } else { b.ctas };
     [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "section", id: b.id, class: ["lp-hero"], attrs: none,
         children: flatten([
-          [ HtmlFundamental::Element {
+          [ Html::Element {
               tag: "div", id: none, class: ["lp-hero-bg"],
               attrs: [["aria-hidden", "true"]], children: [],
           } ],
           if b.badge == none { [] }
           else {
-            [ HtmlFundamental::Element {
+            [ Html::Element {
                 tag: "p", id: none, class: ["lp-badge"], attrs: none,
-                children: [ HtmlFundamental::Inline { text: b.badge } ],
+                children: [ Html::Inline { text: b.badge } ],
             } ]
           },
-          [ HtmlFundamental::Element {
+          [ Html::Element {
               tag: "h1", id: none, class: none, attrs: none,
-              children: [ HtmlFundamental::Inline { text: b.heading } ],
+              children: [ Html::Inline { text: b.heading } ],
           } ],
-          [ HtmlFundamental::Element {
+          [ Html::Element {
               tag: "p", id: none, class: ["lp-lede"], attrs: none,
-              children: [ HtmlFundamental::Inline { text: b.lede } ],
+              children: [ Html::Inline { text: b.lede } ],
           } ],
           if len(ctas) == 0 { [] }
           else {
-            [ HtmlFundamental::Element {
+            [ Html::Element {
                 tag: "nav", id: none, class: ["lp-ctas"], attrs: none,
                 children: map(ctas, lp_cta_el),
             } ]
           },
           if b.footnote == none { [] }
           else {
-            [ HtmlFundamental::Element {
+            [ Html::Element {
                 tag: "p", id: none, class: ["lp-hero-footnote"], attrs: none,
-                children: [ HtmlFundamental::Inline { text: b.footnote } ],
+                children: [ Html::Inline { text: b.footnote } ],
             } ]
           },
         ]),
@@ -338,33 +341,33 @@ type LpHero extends WdocBlock {
 // A CTA button (child of `lp_hero`). `primary = true` fills it with the
 // accent colour; otherwise it renders as a ghost/outline button.
 @block("lp_cta")
-type LpCta extends WdocBlock {
+type LpCta extends ContentBlock {
   @inline(0) label: utf8
   href: utf8
   primary: bool?
   id: identifier?
-  lower = fn(x: LpCta) -> list<HtmlFundamental> [ lp_cta_el(x) ]
+  lower = fn(x: LpCta) -> list<Html> [ lp_cta_el(x) ]
 }
 
 // A feature-card grid section with an optional centred header.
 @block("lp_features")
-type LpFeatures extends WdocBlock {
+type LpFeatures extends ContentBlock {
   eyebrow: utf8?
   title: utf8?
   lede: utf8?
   id: identifier?
   @children("lp_feature") items: list<LpFeature>?
 
-  lower = fn(b: LpFeatures) -> list<HtmlFundamental> {
+  lower = fn(b: LpFeatures) -> list<Html> {
     let items = if b.items == none { [] } else { b.items };
     [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "section", id: b.id, class: ["lp-section"], attrs: none,
         children: flatten([
           lp_section_head(b.eyebrow, b.title, b.lede, "lp-section-head"),
           if len(items) == 0 { [] }
           else {
-            [ HtmlFundamental::Element {
+            [ Html::Element {
                 tag: "section", id: none, class: ["lp-grid"], attrs: none,
                 children: map(items, lp_feature_el),
             } ]
@@ -377,13 +380,13 @@ type LpFeatures extends WdocBlock {
 
 // One feature card (child of `lp_features`).
 @block("lp_feature")
-type LpFeature extends WdocBlock {
+type LpFeature extends ContentBlock {
   @inline(0) title: utf8
   body: utf8
   @doc("Icon as `pack.name` (default `lucide.sparkles`).")
   icon: utf8?
   id: identifier?
-  lower = fn(f: LpFeature) -> list<HtmlFundamental> [ lp_feature_el(f) ]
+  lower = fn(f: LpFeature) -> list<Html> [ lp_feature_el(f) ]
 }
 
 // A reference card record for `lp_cards` (built with `map(...)` from
@@ -400,23 +403,23 @@ type LpRefCard {
 // A data-driven card grid: same shell as `lp_features`, but the cards
 // come from a value field instead of child blocks.
 @block("lp_cards")
-type LpCards extends WdocBlock {
+type LpCards extends ContentBlock {
   eyebrow: utf8?
   title: utf8?
   lede: utf8?
   id: identifier?
   cards: list<LpRefCard>?
 
-  lower = fn(b: LpCards) -> list<HtmlFundamental> {
+  lower = fn(b: LpCards) -> list<Html> {
     let cards = if b.cards == none { [] } else { b.cards };
     [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "section", id: b.id, class: ["lp-section"], attrs: none,
         children: flatten([
           lp_section_head(b.eyebrow, b.title, b.lede, "lp-section-head"),
           if len(cards) == 0 { [] }
           else {
-            [ HtmlFundamental::Element {
+            [ Html::Element {
                 tag: "section", id: none, class: ["lp-grid"], attrs: none,
                 children: map(cards, lp_refcard_el),
             } ]
@@ -432,14 +435,14 @@ type LpCards extends WdocBlock {
 // (filename bar, language tag) is `Raw`, so Markdown drops it and keeps
 // just the fenced listing.
 @block("lp_showcase")
-type LpShowcase extends WdocBlock {
+type LpShowcase extends ContentBlock {
   heading: utf8
   body: utf8
   eyebrow: utf8?
   id: identifier?
   @children("code") snippets: list<Code>?
 
-  lower = fn(b: LpShowcase) -> list<HtmlFundamental> {
+  lower = fn(b: LpShowcase) -> list<Html> {
     let snips = if b.snippets == none { [] } else { b.snippets };
     let panel =
       if len(snips) == 0 { [] }
@@ -448,29 +451,29 @@ type LpShowcase extends WdocBlock {
         let fname = if sn.filename == none { "" } else { sn.filename };
         let lang = format("{}", sn.language);
         [
-          HtmlFundamental::Element {
+          Html::Element {
             tag: "figure", id: none, class: ["lp-codepanel"], attrs: none,
             children: [
-              HtmlFundamental::Element {
+              Html::Element {
                 tag: "figcaption", id: none, class: ["lp-codehead"], attrs: none,
                 children: [
-                  HtmlFundamental::Icon { name: "lucide.file-text", class: none },
-                  HtmlFundamental::Element {
+                  Html::Icon { name: "lucide.file-text", class: none },
+                  Html::Element {
                     tag: "span", id: none, class: ["lp-codename"], attrs: none,
-                    children: [ HtmlFundamental::Raw { html: fname } ],
+                    children: [ Html::Raw { html: fname } ],
                   },
-                  HtmlFundamental::Element {
+                  Html::Element {
                     tag: "span", id: none, class: ["lp-codetag"], attrs: none,
-                    children: [ HtmlFundamental::Raw { html: lang } ],
+                    children: [ Html::Raw { html: lang } ],
                   },
                 ],
               },
-              HtmlFundamental::Element {
+              Html::Element {
                 tag: "pre", id: none, class: ["lp-code"], attrs: none,
                 children: [
-                  HtmlFundamental::Element {
+                  Html::Element {
                     tag: "code", id: none, class: [format("language-{}", lang)], attrs: none,
-                    children: [ HtmlFundamental::Highlighted { source: sn.source, language: lang } ],
+                    children: [ Html::Highlighted { source: sn.source, language: lang } ],
                   },
                 ],
               },
@@ -479,7 +482,7 @@ type LpShowcase extends WdocBlock {
         ]
       };
     [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "section", id: b.id, class: ["lp-section", "lp-showcase"], attrs: none,
         children: flatten([
           panel,
@@ -493,26 +496,26 @@ type LpShowcase extends WdocBlock {
 // A getting-started panel: header plus numbered steps, each a title over
 // a command line.
 @block("lp_steps")
-type LpSteps extends WdocBlock {
+type LpSteps extends ContentBlock {
   eyebrow: utf8?
   title: utf8?
   lede: utf8?
   id: identifier?
   @children("lp_step") steps: list<LpStep>?
 
-  lower = fn(b: LpSteps) -> list<HtmlFundamental> {
+  lower = fn(b: LpSteps) -> list<Html> {
     let steps = if b.steps == none { [] } else { b.steps };
     [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "section", id: b.id, class: ["lp-section"], attrs: none,
         children: [
-          HtmlFundamental::Element {
+          Html::Element {
             tag: "article", id: none, class: ["lp-steps-panel"], attrs: none,
             children: flatten([
               lp_section_head(b.eyebrow, b.title, b.lede, "lp-section-head"),
               if len(steps) == 0 { [] }
               else {
-                [ HtmlFundamental::Element {
+                [ Html::Element {
                     tag: "ol", id: none, class: ["lp-steps"], attrs: none,
                     children: map(steps, lp_step_el),
                 } ]
@@ -527,18 +530,18 @@ type LpSteps extends WdocBlock {
 
 // One numbered step (child of `lp_steps`).
 @block("lp_step")
-type LpStep extends WdocBlock {
+type LpStep extends ContentBlock {
   @inline(0) title: utf8
   command: utf8
   id: identifier?
-  lower = fn(s: LpStep) -> list<HtmlFundamental> [ lp_step_el(s) ]
+  lower = fn(s: LpStep) -> list<Html> [ lp_step_el(s) ]
 }
 
 // A terminal transcript panel (config-weave addition). Standalone or a
 // child of `lp_terms`; the transcript survives Markdown as a fenced
 // `console` listing while the title bar and mode chip drop away.
 @block("lp_term")
-type LpTerm extends WdocBlock {
+type LpTerm extends ContentBlock {
   @doc("The title-bar label, e.g. \"target host\".")
   @inline(0) title: utf8
   @doc("The console transcript shown in the panel body.")
@@ -546,29 +549,29 @@ type LpTerm extends WdocBlock {
   @doc("Optional right-aligned mode chip, e.g. \"apply\".")
   tag: utf8?
   id: identifier?
-  lower = fn(t: LpTerm) -> list<HtmlFundamental> [ lp_term_el(t) ]
+  lower = fn(t: LpTerm) -> list<Html> [ lp_term_el(t) ]
 }
 
 // A section of terminal panels in a responsive grid, with the usual
 // optional eyebrow / title / lede header (config-weave addition).
 @block("lp_terms")
-type LpTerms extends WdocBlock {
+type LpTerms extends ContentBlock {
   eyebrow: utf8?
   title: utf8?
   lede: utf8?
   id: identifier?
   @children("lp_term") terms: list<LpTerm>?
 
-  lower = fn(b: LpTerms) -> list<HtmlFundamental> {
+  lower = fn(b: LpTerms) -> list<Html> {
     let terms = if b.terms == none { [] } else { b.terms };
     [
-      HtmlFundamental::Element {
+      Html::Element {
         tag: "section", id: b.id, class: ["lp-section"], attrs: none,
         children: flatten([
           lp_section_head(b.eyebrow, b.title, b.lede, "lp-section-head"),
           if len(terms) == 0 { [] }
           else {
-            [ HtmlFundamental::Element {
+            [ Html::Element {
                 tag: "section", id: none, class: ["lp-termgrid"], attrs: none,
                 children: map(terms, lp_term_el),
             } ]
@@ -582,7 +585,7 @@ type LpTerms extends WdocBlock {
 // The multi-column site footer: a brand cell (icon + wordmark + tagline)
 // beside link columns, over a bottom bar with the copyright and a note.
 @block("lp_footer")
-type LpFooter extends WdocBlock {
+type LpFooter extends ContentBlock {
   @doc("Short prose under the brand wordmark.")
   tagline: utf8
   @doc("Brand wordmark text (chrome — dropped in Markdown).")
@@ -592,45 +595,45 @@ type LpFooter extends WdocBlock {
   id: identifier?
   @children("lp_footcol") columns: list<LpFootcol>?
 
-  lower = fn(b: LpFooter) -> list<HtmlFundamental> {
+  lower = fn(b: LpFooter) -> list<Html> {
     let cols = if b.columns == none { [] } else { b.columns };
     let brand = if b.brand == none { "" } else { b.brand };
     let bottom = flatten([
       if b.copyright == none { [] }
       else {
-        [ HtmlFundamental::Element {
+        [ Html::Element {
             tag: "p", id: none, class: none, attrs: none,
-            children: [ HtmlFundamental::Inline { text: b.copyright } ],
+            children: [ Html::Inline { text: b.copyright } ],
         } ]
       },
       if b.note == none { [] }
       else {
-        [ HtmlFundamental::Element {
+        [ Html::Element {
             tag: "p", id: none, class: none, attrs: none,
-            children: [ HtmlFundamental::Inline { text: b.note } ],
+            children: [ Html::Inline { text: b.note } ],
         } ]
       },
     ]);
     flatten([
-      [ HtmlFundamental::Element {
+      [ Html::Element {
           tag: "nav", id: b.id, class: ["lp-footgrid"], attrs: none,
           children: flatten([
-            [ HtmlFundamental::Element {
+            [ Html::Element {
                 tag: "header", id: none, class: ["lp-footbrand"], attrs: none,
                 children: [
-                  HtmlFundamental::Element {
+                  Html::Element {
                     tag: "p", id: none, class: ["lp-footlogo"], attrs: none,
                     children: [
-                      HtmlFundamental::Icon { name: "lucide.layers", class: none },
-                      HtmlFundamental::Element {
+                      Html::Icon { name: "lucide.layers", class: none },
+                      Html::Element {
                         tag: "span", id: none, class: none, attrs: none,
-                        children: [ HtmlFundamental::Raw { html: brand } ],
+                        children: [ Html::Raw { html: brand } ],
                       },
                     ],
                   },
-                  HtmlFundamental::Element {
+                  Html::Element {
                     tag: "p", id: none, class: ["lp-foottag"], attrs: none,
-                    children: [ HtmlFundamental::Inline { text: b.tagline } ],
+                    children: [ Html::Inline { text: b.tagline } ],
                   },
                 ],
             } ],
@@ -639,7 +642,7 @@ type LpFooter extends WdocBlock {
       } ],
       if len(bottom) == 0 { [] }
       else {
-        [ HtmlFundamental::Element {
+        [ Html::Element {
             tag: "section", id: none, class: ["lp-footbottom"], attrs: none,
             children: bottom,
         } ]
@@ -652,23 +655,23 @@ type LpFooter extends WdocBlock {
 // as nested `lp_footlink` blocks or spliced in as data with
 // `links = map(...)` (computed `@children`).
 @block("lp_footcol")
-type LpFootcol extends WdocBlock {
+type LpFootcol extends ContentBlock {
   @inline(0) title: utf8
   id: identifier?
   @children("lp_footlink") links: list<LpFootlink>?
-  lower = fn(col: LpFootcol) -> list<HtmlFundamental> [ lp_footcol_el(col) ]
+  lower = fn(col: LpFootcol) -> list<Html> [ lp_footcol_el(col) ]
 }
 
 // One footer link (child of `lp_footcol`).
 @block("lp_footlink")
-type LpFootlink extends WdocBlock {
+type LpFootlink extends ContentBlock {
   @inline(0) label: utf8
   href: utf8
   id: identifier?
-  lower = fn(l: LpFootlink) -> list<HtmlFundamental> [
-    HtmlFundamental::Element {
+  lower = fn(l: LpFootlink) -> list<Html> [
+    Html::Element {
       tag: "p", id: none, class: ["lp-footlink"], attrs: none,
-      children: [ HtmlFundamental::Inline { text: $"[${l.label}](${l.href})" } ],
+      children: [ Html::Inline { text: $"[${l.label}](${l.href})" } ],
     },
   ]
 }
