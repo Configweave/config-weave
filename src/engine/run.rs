@@ -19,7 +19,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use wcl_lang::{Block, Value};
-use wscript::{Context, Vm};
+use wscript::Context;
 use wscript_std::DynValue;
 
 use crate::convert::{FieldValueError, field_value_dyn};
@@ -784,7 +784,7 @@ fn call_check(
     ctx: &Context,
     params: DynValue,
 ) -> Result<CheckResult, String> {
-    let mut vm = Vm::new(ctx);
+    let mut vm = crate::hostapi::vm(ctx);
     match res.check {
         EntryKind::Plain => vm
             .call_unit(&res.unit, "check", (params,))
@@ -801,7 +801,7 @@ fn call_apply(
     ctx: &Context,
     params: DynValue,
 ) -> Result<ApplyResult, String> {
-    let mut vm = Vm::new(ctx);
+    let mut vm = crate::hostapi::vm(ctx);
     match res.apply {
         EntryKind::Plain => vm
             .call_unit(&res.unit, "apply", (params,))

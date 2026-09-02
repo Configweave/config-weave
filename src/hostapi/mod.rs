@@ -73,26 +73,33 @@ pub fn scenario_context() -> Context {
     context().module(testlab::module())
 }
 
-/// Install the print hook for the current thread: raw `print`/`println`
-/// from scripts route into `log::info` so stdout stays clean (PRD §7).
-pub fn redirect_print_to_log() {
-    wscript::vm::set_print_hook(Some(Box::new(|text: &str, _newline: bool| {
-        for line in text.lines() {
-            log::emit(log::Level::Info, line);
-        }
-    })));
+/// Build a VM whose `print`/`println` route into `log::info` so stdout
+/// stays clean (PRD §7). Every VM config-weave runs scripts on is built
+/// here — the sink is per-VM, so a VM built any other way prints to
+/// stdout and breaks the output contract.
+pub fn vm(ctx: &Context) -> wscript::Vm {
+    wscript::Vm::with_config(
+        ctx,
+        wscript::VmConfig {
+            out: Box::new(|text: &str, _newline: bool| {
+                for line in text.lines() {
+                    log::emit(log::Level::Info, line);
+                }
+            }),
+            ..wscript::VmConfig::default()
+        },
+    )
 }
 
-/// Per-thread setup for any thread that runs scripts: print redirection
-/// plus COM (STA) initialisation on Windows (PRD §7). Hold the guard for
-/// the thread's lifetime.
+/// Per-thread setup for any thread that runs scripts: COM (STA)
+/// initialisation on Windows (PRD §7). Hold the guard for the thread's
+/// lifetime.
 pub struct WorkerGuard {
     #[cfg(windows)]
     _com: crate::comdispatch::ComInit,
 }
 
 pub fn worker_init() -> WorkerGuard {
-    redirect_print_to_log();
     WorkerGuard {
         #[cfg(windows)]
         _com: crate::comdispatch::init_sta(),

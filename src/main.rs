@@ -997,7 +997,7 @@ fn cmd_run_verify(script: &std::path::Path, facts: Option<&std::path::Path>) -> 
     };
 
     let _worker = hostapi::worker_init();
-    let mut vm = wscript::Vm::new(&ctx);
+    let mut vm = hostapi::vm(&ctx);
     let outcome: Result<bool, String> = if unit.fn_handle::<(DynValue,), bool>("verify").is_ok() {
         vm.call_unit(&unit, "verify", (facts_value,))
             .map_err(|e| e.to_string())

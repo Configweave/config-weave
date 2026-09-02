@@ -151,7 +151,10 @@ fn walk_expr(expr: &Expr, out: &mut Vec<SecretCall>) {
         } => {
             walk_expr(cond, out);
             walk_expr(then_block, out);
-            walk_expr(else_block, out);
+            // An `if` without an `else` has no else branch to walk.
+            if let Some(e) = else_block {
+                walk_expr(e, out);
+            }
         }
         Expr::IfLet {
             scrut,

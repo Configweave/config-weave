@@ -7,7 +7,8 @@
 
 use std::path::Path;
 
-use wcl_lang::{Document, Environment, ast, edit, format as wclformat};
+use wcl_lang::{Document, Environment, ast, format as wclformat};
+use weave_docjson::wcl_edit as edit;
 
 use super::{InstalledPkg, PkgFile, RepoDef};
 use crate::diag::Diag;

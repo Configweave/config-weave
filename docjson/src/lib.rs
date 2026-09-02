@@ -6,3 +6,4 @@
 pub mod docjson;
 pub mod emit;
 pub mod inspect_ast;
+pub mod wcl_edit;

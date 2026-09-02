@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 
-use wscript::Vm;
 use wscript_std::DynValue;
 
 use crate::convert::{
@@ -186,7 +185,7 @@ pub fn run_single(
     };
     let _worker = crate::hostapi::worker_init();
     crate::logging::install_gatherer_sink(key);
-    let mut vm = Vm::new(ctx);
+    let mut vm = crate::hostapi::vm(ctx);
     match g.gather {
         EntryKind::Plain => vm
             .call_unit(&g.unit, "gather", (params,))

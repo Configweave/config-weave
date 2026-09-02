@@ -15,7 +15,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use wscript::{UnitExt, Vm};
+use wscript::UnitExt;
 
 use crate::convert::dyn_to_json;
 use crate::diag::Diag;
@@ -719,7 +719,7 @@ fn drive_scenario(
             ScenarioEnd::Error(format!("{}: {}", script.display(), msgs.join("; ")))
         })?
         .unit;
-    let mut vm = Vm::new(&ctx);
+    let mut vm = crate::hostapi::vm(&ctx);
 
     // Contract is validated in stage 5; dispatch on which signature compiled.
     if unit.fn_handle::<(Lab,), bool>("run").is_ok() {

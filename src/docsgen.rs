@@ -180,12 +180,10 @@ fn emit(pb: &Playbook, pkg_only: bool) -> String {
     let _ = writeln!(w);
     emit_site(&mut w, pb, pkg_only);
     let _ = writeln!(w);
-    // The renderer's auto-numbered "§ N" heading markers read like PRD
-    // section references; keep the generated docs free of them.
-    let _ = writeln!(w, "stylesheet no_section_markers {{");
-    let _ = writeln!(w, "  css = \".heading-marker{{display:none}}\"");
-    let _ = writeln!(w, "}}");
-    let _ = writeln!(w);
+    // A `stylesheet` block used to hide the renderer's auto-numbered
+    // "§ N" heading markers, which read like PRD section references.
+    // wdoc now renders headings bare and dropped the block kind, so
+    // there is nothing left to suppress.
 
     emit_index(&mut w, pb, pkg_only);
     if !pkg_only {

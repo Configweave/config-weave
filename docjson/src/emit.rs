@@ -10,12 +10,12 @@
 //! then re-parses as a belt-and-braces check.
 
 use wcl_lang::ast::{Block, Expr, Item, Source, Span, Trivia};
-use wcl_lang::edit::{build_block, set_label, set_or_insert_field, string_literal_expr};
 use wcl_lang::format::to_source;
 use wcl_lang::parse_for_edit;
 
 use crate::docjson::*;
 use crate::inspect_ast::find_top_block;
+use crate::wcl_edit::{build_block, set_label, set_or_insert_field, string_literal_expr};
 
 type Diags = Vec<String>;
 
@@ -306,7 +306,7 @@ fn ensure_top_block<'a>(src: &'a mut Source, kind: &str, name: &str) -> &'a mut 
     let exists = find_top_block(src, kind).is_some();
     if !exists {
         let block = build_block(kind, &[], vec![string_literal_expr(name)], vec![]);
-        wcl_lang::edit::append_top_level_block(src, block);
+        crate::wcl_edit::append_top_level_block(src, block);
     }
     src.items
         .iter_mut()
