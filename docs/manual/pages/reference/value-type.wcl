@@ -1,0 +1,127 @@
+// Part III — Reference. Declared mode: reference.
+page ref_value {
+  sites = [:manual]
+  title = "The Value type"
+
+  chapter_header "The Value type" {
+    kicker       = "Reference · reference"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`Value` is the one dynamically typed value in a config-weave script. The `params` argument of every `check`, `apply` and `gather` entry point is a `Value`, a gatherer returns a `Value`, the `facts` a verify script receives is a `Value`, and the `json`, `toml`, `xml` and `data` modules parse into and serialise from a `Value`. The type name is ambient: no `use` is needed to write `Value` in a signature. The accessor methods below come from the `value` module, so a script that calls them starts with `use value`.
+PROSE
+
+  h2 "The enum"
+
+  code rust {
+    source = <<'SRC'
+enum Value {
+    Null,
+    Bool(bool),
+    Int(int),
+    Float(float),
+    String(string),
+    List(List[Value]),
+    Map(Map[string, Value]),
+}
+SRC
+  }
+
+  p <<'PROSE'
+`Value` is an ordinary enum, so `match`, `if let` and `let-else` all apply to it, and a script constructs one with variant syntax. A map key is always a `string`.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+use value
+use sys
+
+fn gather(params: Value) -> Value {
+    Value::Map(#{
+        "family": Value::String(sys::family()),
+        "cores": Value::Int(sys::cpu_count()),
+    })
+}
+SRC
+  }
+
+  p <<'PROSE'
+The `params` map handed to a resource or gatherer has the package's declared parameter defaults already applied and every declared type validated, so a script does not re-check a parameter's type. It does still need an accessor, because the static type of `params.get("path")` is `Option[Value]`.
+PROSE
+
+  h2 "Navigation"
+
+  code rust {
+    source = <<'SRC'
+fn get(self, key: string) -> Option[Value]
+fn at(self, idx: int) -> Option[Value]
+fn keys(self) -> List[string]
+fn len(self) -> int
+fn is_null(self) -> bool
+SRC
+  }
+
+  p <<'PROSE'
+`get` looks up a key in a `Map` and returns `None` for any other variant or a missing key. `at` indexes a `List` and returns `None` for any other variant, a negative index, or an index past the end. `keys` returns a `Map`'s keys sorted, or an empty list for any other variant. `len` is the element count of a `List` or `Map`. `is_null` is true only for `Value::Null`.
+PROSE
+
+  table {
+    rows:
+      | "Method" | "Parameter" | "Returns" |
+      | "`get`" | "`key: string`" | "`Option[Value]`" |
+      | "`at`" | "`idx: int`" | "`Option[Value]`" |
+      | "`keys`" | "" | "`List[string]`" |
+      | "`len`" | "" | "`int`" |
+      | "`is_null`" | "" | "`bool`" |
+  }
+
+  h2 "Conversion"
+
+  code rust {
+    source = <<'SRC'
+fn as_bool(self) -> Option[bool]
+fn as_int(self) -> Option[int]
+fn as_float(self) -> Option[float]
+fn as_string(self) -> Option[string]
+fn as_list(self) -> Option[List[Value]]
+fn as_map(self) -> Option[Map[string, Value]]
+SRC
+  }
+
+  p <<'PROSE'
+Each conversion returns `Some` when the variant matches and `None` otherwise. `as_float` also accepts an `Int` and widens it. No other conversion coerces: `as_string` on an `Int` is `None`, and `as_int` on a `String` is `None`, so parse the string yourself with `parse_int` from [built-in methods](ref_wscript_methods).
+PROSE
+
+  table {
+    rows:
+      | "Method" | "Accepts" | "Returns" |
+      | "`as_bool`" | "`Bool`" | "`Option[bool]`" |
+      | "`as_int`" | "`Int`" | "`Option[int]`" |
+      | "`as_float`" | "`Float` or `Int`" | "`Option[float]`" |
+      | "`as_string`" | "`String`" | "`Option[string]`" |
+      | "`as_list`" | "`List`" | "`Option[List[Value]]`" |
+      | "`as_map`" | "`Map`" | "`Option[Map[string, Value]]`" |
+  }
+
+  h2 "Reading a parameter"
+
+  code rust {
+    source = <<'SRC'
+fn param_str(params: Value, key: string, fallback: string) -> string {
+    if let Some(v) = params.get(key) {
+        if let Some(s) = v.as_string() {
+            return s
+        }
+    }
+    fallback
+}
+SRC
+  }
+
+  p <<'PROSE'
+This helper is the idiom the sample resources use: navigate with `get`, convert with an `as_` method, and fall back when either step yields `None`. A `match` on the `Value` itself reads better when a script needs to branch on the variant, for example to accept a parameter given either as a single string or as a list of strings.
+PROSE
+}

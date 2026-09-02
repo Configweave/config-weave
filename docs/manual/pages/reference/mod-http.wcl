@@ -1,0 +1,82 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_http {
+  sites = [:manual]
+  title = "http module"
+
+  chapter_header "http module" {
+    kicker       = "Reference · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use http` is an HTTP client. It is built on rustls, so it has no dependency
+on the system TLS library. Every function returns `Result[…, string]` and
+takes an options `Value` as its last argument. The options argument is
+required: pass `Value::Null` for the defaults, or a `Value::Map` with any of
+the keys below. A response with an error status is still `Ok`; inspect
+`status`.
+PROSE
+
+  table {
+    rows:
+      | "Option" | "Type" | "Meaning" |
+      | "`headers`" | "map of string" | "request headers" |
+      | "`timeout`" | "int or float" | "seconds before the request is abandoned" |
+      | "`redirects`" | "bool" | "follow redirects, default `true`" |
+  }
+
+  h2 "HttpResponse"
+
+  code rust {
+    source = <<'SRC'
+struct HttpResponse {
+    status: int,
+    body: string,
+    headers: Map[string, string],
+}
+SRC
+  }
+
+  p "The result of `get` and `post`."
+
+  h2 "get"
+
+  code rust {
+    source = <<'SRC'
+http::get(url: string, opts: Value) -> Result[HttpResponse, string]
+SRC
+  }
+
+  p "Sends a GET request and returns the response."
+
+  h2 "post"
+
+  code rust {
+    source = <<'SRC'
+http::post(url: string, body: string, opts: Value) -> Result[HttpResponse, string]
+SRC
+  }
+
+  p "Sends `body` in a POST request and returns the response. Set the content type with a `headers` entry."
+
+  h2 "download"
+
+  code rust {
+    source = <<'SRC'
+http::download(url: string, dest: string, opts: Value) -> Result[int, string]
+SRC
+  }
+
+  p "Fetches `url` and writes the body to the file at `dest`. It returns the number of bytes written. Pair it with the [archive module](ref_mod_archive) to unpack what was fetched."
+
+  code rust {
+    source = <<'SRC'
+use http
+use value
+
+let n = http::download("https://example.org/tool.tar.gz", "/tmp/tool.tar.gz", Value::Null)?
+SRC
+  }
+}

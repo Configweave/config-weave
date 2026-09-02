@@ -1,0 +1,70 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_check {
+  sites = [:manual]
+  title = "config-weave check"
+
+  chapter_header "config-weave check" {
+    kicker       = "Commands · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`check` reports the configuration status of every step in a play and never changes the machine. It runs the same validation, gatherer phase and DAG walk as `apply`, but stops after each step's first `check` call and never invokes `apply`. Run it before an `apply` to see what would change, and after one to confirm the machine converged. See [Check, then apply](howto_check_apply).
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave check [OPTIONS] <PLAYBOOK_DIR> <PLAY>
+SRC
+  }
+
+  h2 "Arguments"
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PLAYBOOK_DIR`" | "The playbook directory, containing `playbook.wcl`." |
+      | "`PLAY`" | "The name of the play to check." |
+  }
+
+  h2 "Options"
+
+  p "All [global options](cmd_root) apply."
+
+  table {
+    rows:
+      | "Option" | "Value" | "Meaning" |
+      | "`--events-ndjson`" | "" | "Stream one JSON event per line to stderr: run and gather lifecycle plus per-step phase progress. Stdout still carries the final report." |
+      | "`--continue-on-error`" | "" | "Keep checking the remaining steps after a step's check returns Error." |
+      | "`--jobs`" | "`N`" | "Worker pool size." |
+  }
+
+  h2 "Examples"
+
+  p "Report the state of the `baseline` play."
+
+  code console {
+    source = <<'SRC'
+config-weave check ./my-playbook baseline
+SRC
+  }
+
+  p "Produce a JSON report and count the steps that still need work."
+
+  code console {
+    source = <<'SRC'
+config-weave check ./my-playbook baseline --json \
+  | jq '[.steps[] | select(.status == "not_configured")] | length'
+SRC
+  }
+
+  h2 "Exit status"
+
+  p <<'PROSE'
+0 when every step reported without error, whether or not any is NotConfigured. A NotConfigured step is a finding, not a failure. 1 when any step's check returned Error. 2 when validation failed or the play does not exist. `check` never returns 3: a RebootRequired result is reported as the step's status, but only `apply` turns it into an exit code.
+PROSE
+}

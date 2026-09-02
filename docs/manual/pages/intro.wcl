@@ -1,0 +1,110 @@
+// Front matter. Declared mode: explanation.
+page intro {
+  sites = [:manual]
+  title = "Introduction"
+  start = true
+
+  chapter_header "Introduction" {
+    kicker       = "Front matter · explanation"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+config-weave is a configuration management tool that ships as a single static
+binary. You copy the binary onto a target machine alongside a **playbook**
+folder and run it. There is no agent, no runtime and no package to install
+first. A playbook describes the desired state of a machine. config-weave can
+**check** whether the machine matches that state, as a report-only dry run, or
+**apply** it to converge the machine to the playbook. The same binary runs on
+Linux and Windows.
+PROSE
+
+  callout "Alpha software" {
+    kind = :warning
+    body = "config-weave is under heavy active development. The playbook and package vocabulary, the host API and the CLI can change without notice."
+  }
+
+  h2 "What a playbook is"
+
+  p <<'PROSE'
+A playbook is a folder. Its `playbook.wcl` file declares **plays** of **steps**.
+Each step invokes a **resource**, and each resource is declared in a **package**
+under `pkgs/<name>/package.wcl` and implemented by a script. **Gatherers**, also
+declared in packages, collect facts about the host into playbook variables, so a
+step can be conditioned on the operating system family or on a disk's mount
+point. The engine loads every package it finds under `pkgs/` on each run, so
+adding a package is dropping in a folder.
+PROSE
+
+  h2 "Three languages"
+
+  p <<'PROSE'
+Three languages divide the work, and they never interact directly.
+PROSE
+
+  list {
+    li "**WCL** encodes playbooks and packages: plays, steps, variables, conditions, gatherer invocations and the resource and gatherer declarations. WCL never executes against the system."
+    li "**wscript** implements resources and gatherers. A wscript script is the code that inspects and mutates the machine, through a host API that config-weave registers for it."
+    li "**The Rust engine** mediates. It evaluates WCL to plain data, marshals that data into wscript values, runs the scripts, and routes their results back into the report."
+  }
+
+  p <<'PROSE'
+The engine validates everything before anything runs. WCL parses, every step's
+properties are checked against the resource's declared parameters, the step
+graph is checked for cycles, and every script compiles and type-checks against
+the host API. A typo in the fortieth step's script fails the run before the
+first script executes. Once validation passes, the engine schedules steps over
+a dependency graph and runs independent steps in parallel, within the
+concurrency class each resource declares.
+PROSE
+
+  h2 "The convergence contract"
+
+  p <<'PROSE'
+Every resource script exports two functions and obeys one rule. `check`
+reports whether the machine already matches the step and must never change
+anything. `apply` makes the change and must leave the machine in a state that
+a following `check` reports as already configured, even in a fresh process.
+`config-weave check` runs only the check side of every step. `config-weave
+apply` runs check, then apply for each step that is not configured, then check
+again in the same run, so convergence is proven rather than assumed. The
+testlab extends the proof with a third run in a disposable instance.
+[The convergence contract](guide_convergence) explains the rule in full.
+PROSE
+
+  h2 "How this manual is organised"
+
+  p <<'PROSE'
+**Getting started** is a pair of tutorials. You install the binary, scaffold a
+playbook, validate it and take it through check and apply on your own machine.
+Start with [Install](gs_install).
+PROSE
+
+  p <<'PROSE'
+**The guide** explains the model. It covers the convergence contract,
+playbooks and packages, variables and secrets, scheduling, the wscript
+language, the host API and the testlab, and it closes with four how-to
+chapters for common tasks. Start with
+[The convergence contract](guide_convergence).
+PROSE
+
+  p <<'PROSE'
+**Reference** lists every block of `playbook.wcl` and `package.wcl`, the
+script entry points, the test block, the wscript prelude and built-in methods,
+and one chapter per host API module. Start with [playbook.wcl](ref_playbook).
+PROSE
+
+  p <<'PROSE'
+**Commands** documents the CLI, one chapter per subcommand, with the global
+options, the output modes and the exit codes. Start with
+[config-weave](cmd_root).
+PROSE
+
+  p <<'PROSE'
+**Appendices** hold the troubleshooting chapter, the list of what scripts
+cannot use, and the glossary. Start with
+[Troubleshooting](apx_troubleshooting).
+PROSE
+}

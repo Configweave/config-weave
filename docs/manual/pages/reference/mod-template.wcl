@@ -1,0 +1,55 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_template {
+  sites = [:manual]
+  title = "template module"
+
+  chapter_header "template module" {
+    kicker       = "Reference · reference"
+    reading_time = "1 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use template` renders Tera templates against a map of variables. It backs
+the `linux_files.template` resource. Autoescaping is off, because the output
+is a configuration file rather than HTML. The one function returns
+`Result[string, string]` and fails on a template syntax error or a missing
+variable.
+PROSE
+
+  h2 "render"
+
+  code rust {
+    source = <<'SRC'
+template::render(template: string, vars: Value) -> Result[string, string]
+SRC
+  }
+
+  p <<'PROSE'
+Renders `template` with the entries of `vars` as its variables. `vars` must
+be a `Value::Map`; `Value::Null` renders with an empty context, and any other
+kind of value is an error. The template language provides `{{ x }}`
+expressions, `{% for %}` and `{% if %}` blocks, and Tera's filters.
+PROSE
+
+  callout "Author template bodies as raw heredocs" {
+    kind = :tip
+    body = "Write a template body in WCL as a raw heredoc, `<<'TMPL'`, so WCL's own `${}` interpolation leaves Tera's `{{ }}` and `{% %}` markers alone. Pass data through `vars`."
+  }
+
+  code rust {
+    source = <<'SRC'
+use template
+use value
+
+let out = template::render(
+    "listen {{ port }};\n{% for h in hosts %}server {{ h }};\n{% endfor %}",
+    Value::Map(#{
+        "port": Value::Int(8080),
+        "hosts": Value::List([Value::String("a"), Value::String("b")])
+    }),
+)?
+SRC
+  }
+}

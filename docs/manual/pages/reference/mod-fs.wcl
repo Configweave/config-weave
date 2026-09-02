@@ -1,0 +1,168 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_fs {
+  sites = [:manual]
+  title = "fs module"
+
+  chapter_header "fs module" {
+    kicker       = "Reference · reference"
+    reading_time = "3 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use fs` gives a script file input and output. It replaces the standalone
+`fs` module of wscript-std, which config-weave does not register. Every
+function that can fail returns `Result[…, string]`, where the error string
+names the path and the operating system error. The predicates `exists`,
+`is_file` and `is_dir` return a plain `bool`. Path strings are passed through
+to the operating system unchanged; use the [path module](ref_mod_path) to
+build them.
+PROSE
+
+  h2 "read and read_bytes"
+
+  code rust {
+    source = <<'SRC'
+fs::read(path: string) -> Result[string, string]
+fs::read_bytes(path: string) -> Result[List[int], string]
+SRC
+  }
+
+  p "`read` returns the file as text. `read_bytes` returns the raw bytes as a list of integers."
+
+  h2 "write, write_bytes and append"
+
+  code rust {
+    source = <<'SRC'
+fs::write(path: string, content: string) -> Result[unit, string]
+fs::write_bytes(path: string, bytes: List[int]) -> Result[unit, string]
+fs::append(path: string, content: string) -> Result[unit, string]
+SRC
+  }
+
+  p "`write` and `write_bytes` replace the file's contents. `append` adds text to the end of the file and creates the file when it is absent."
+
+  h2 "copy and move"
+
+  code rust {
+    source = <<'SRC'
+fs::copy(from: string, to: string) -> Result[unit, string]
+fs::move(from: string, to: string) -> Result[unit, string]
+SRC
+  }
+
+  p "`copy` copies one file. `move` renames a file or a directory."
+
+  h2 "delete and delete_dir"
+
+  code rust {
+    source = <<'SRC'
+fs::delete(path: string) -> Result[unit, string]
+fs::delete_dir(path: string) -> Result[unit, string]
+SRC
+  }
+
+  p "`delete` removes a file or a symlink. `delete_dir` removes a directory and everything in it."
+
+  h2 "mkdir"
+
+  code rust {
+    source = <<'SRC'
+fs::mkdir(path: string) -> Result[unit, string]
+SRC
+  }
+
+  p "Creates a directory, including any missing parents."
+
+  h2 "exists, is_file and is_dir"
+
+  code rust {
+    source = <<'SRC'
+fs::exists(path: string) -> bool
+fs::is_file(path: string) -> bool
+fs::is_dir(path: string) -> bool
+SRC
+  }
+
+  p "Each predicate answers one question about a path. A path that cannot be read answers `false`."
+
+  h2 "list_dir"
+
+  code rust {
+    source = <<'SRC'
+fs::list_dir(path: string) -> Result[List[string], string]
+SRC
+  }
+
+  p "Returns the names of the entries in a directory, sorted."
+
+  h2 "metadata"
+
+  code rust {
+    source = <<'SRC'
+fs::metadata(path: string) -> Result[Value, string]
+SRC
+  }
+
+  p "Returns a map describing the path. Read it with the accessors of the [Value type](ref_value)."
+
+  table {
+    rows:
+      | "Key" | "Type" | "Meaning" |
+      | "`size`" | "int" | "size in bytes" |
+      | "`modified`" | "int" | "modification time, seconds since the Unix epoch" |
+      | "`readonly`" | "bool" | "the read-only attribute" |
+      | "`is_file`" | "bool" | "the path is a regular file" |
+      | "`is_dir`" | "bool" | "the path is a directory" |
+      | "`is_symlink`" | "bool" | "the path is a symlink" |
+      | "`mode`" | "int" | "Unix permission bits, `0` on other platforms" |
+  }
+
+  h2 "glob"
+
+  code rust {
+    source = <<'SRC'
+fs::glob(pattern: string) -> Result[List[string], string]
+SRC
+  }
+
+  p "Expands a glob pattern to the matching paths, sorted."
+
+  h2 "temp_file and temp_dir"
+
+  code rust {
+    source = <<'SRC'
+fs::temp_file() -> Result[string, string]
+fs::temp_dir() -> Result[string, string]
+SRC
+  }
+
+  p "Each creates a fresh temporary file or directory and returns its path."
+
+  h2 "symlink and read_link"
+
+  code rust {
+    source = <<'SRC'
+fs::symlink(target: string, link: string) -> Result[unit, string]
+fs::read_link(path: string) -> Result[string, string]
+SRC
+  }
+
+  p "`symlink` creates a link at `link` that points to `target`. `read_link` returns the target a symlink points to."
+
+  code rust {
+    source = <<'SRC'
+use fs
+use hash
+
+fn check(props: Value) -> Result[CheckResult, string] {
+    let path = "/etc/app/app.conf"
+    if !fs::is_file(path) { return Ok(CheckResult::NotConfigured) }
+    let current = hash::sha256_file(path)?
+    let wanted = hash::sha256(props.get("content").unwrap().as_string().unwrap())
+    if current == wanted { Ok(CheckResult::AlreadyConfigured) } else { Ok(CheckResult::NotConfigured) }
+}
+SRC
+  }
+}

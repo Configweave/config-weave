@@ -1,0 +1,177 @@
+// The config-weave manual: a wdoc book.
+//
+//   wcl wdoc serve docs/manual/main.wcl --addr auto
+//   wcl wdoc build docs/manual/main.wcl --out _site
+//
+// docs/main.wcl imports this file so the manual renders under /manual/ beside
+// the landing page; built on its own it renders flat. Every page therefore
+// carries `sites = [:manual]`, which a multi-site document requires.
+import <wdoc.wcl>
+
+// Front matter.
+import "./pages/intro.wcl"
+
+// Part I — Getting started.
+import "./pages/getting-started/install.wcl"
+import "./pages/getting-started/first-playbook.wcl"
+
+// Part II — The guide.
+import "./pages/guide/convergence.wcl"
+import "./pages/guide/playbooks.wcl"
+import "./pages/guide/packages.wcl"
+import "./pages/guide/variables.wcl"
+import "./pages/guide/scheduling.wcl"
+import "./pages/guide/wscript-basics.wcl"
+import "./pages/guide/wscript-data.wcl"
+import "./pages/guide/wscript-flow.wcl"
+import "./pages/guide/host-api.wcl"
+import "./pages/guide/testlab.wcl"
+import "./pages/guide/add-resource.wcl"
+import "./pages/guide/check-then-apply.wcl"
+import "./pages/guide/encrypt-secrets.wcl"
+import "./pages/guide/test-package.wcl"
+
+// Part III — Reference.
+import "./pages/reference/playbook-wcl.wcl"
+import "./pages/reference/package-wcl.wcl"
+import "./pages/reference/script-entry-points.wcl"
+import "./pages/reference/test-block.wcl"
+import "./pages/reference/wscript-prelude.wcl"
+import "./pages/reference/wscript-methods.wcl"
+import "./pages/reference/value-type.wcl"
+import "./pages/reference/mod-log.wcl"
+import "./pages/reference/mod-fs.wcl"
+import "./pages/reference/mod-path.wcl"
+import "./pages/reference/mod-shell.wcl"
+import "./pages/reference/mod-http.wcl"
+import "./pages/reference/mod-hash.wcl"
+import "./pages/reference/mod-archive.wcl"
+import "./pages/reference/mod-env.wcl"
+import "./pages/reference/mod-sys.wcl"
+import "./pages/reference/mod-data.wcl"
+import "./pages/reference/mod-template.wcl"
+import "./pages/reference/mod-time.wcl"
+import "./pages/reference/mod-json.wcl"
+import "./pages/reference/mod-toml.wcl"
+import "./pages/reference/mod-xml.wcl"
+import "./pages/reference/mod-regex.wcl"
+import "./pages/reference/mod-registry.wcl"
+import "./pages/reference/mod-service.wcl"
+import "./pages/reference/mod-com.wcl"
+import "./pages/reference/mod-testlab.wcl"
+
+// Part IV — Commands.
+import "./pages/commands/config-weave.wcl"
+import "./pages/commands/apply.wcl"
+import "./pages/commands/check.wcl"
+import "./pages/commands/docs.wcl"
+import "./pages/commands/init.wcl"
+import "./pages/commands/list.wcl"
+import "./pages/commands/pkg.wcl"
+import "./pages/commands/secrets.wcl"
+import "./pages/commands/test.wcl"
+import "./pages/commands/validate.wcl"
+import "./pages/commands/version.wcl"
+import "./pages/commands/wscripti.wcl"
+
+// Part V — Appendices.
+import "./pages/appendices/troubleshooting.wcl"
+import "./pages/appendices/not-registered.wcl"
+import "./pages/appendices/glossary.wcl"
+
+// The house theme: the shipped palette, the manual's typography.
+theme house {
+  extends = :forge
+  metrics {
+    body_size   = "15px"
+    line_height = "1.55"
+    measure     = "58rem"
+    h1 = "1.95rem"  h2 = "1.45rem"  h3 = "1.15rem"
+    h4 = "1.05rem"  h5 = "0.95rem"  h6 = "0.85rem"
+  }
+}
+
+site manual {
+  default_template = :book
+  title            = "config-weave Manual"
+  theme            = :house
+  theme_toggle     = true
+  search           = true
+
+  toc {
+    chapter "Introduction" { page = intro }
+
+    chapter "Getting started" {
+      chapter "Install"             { page = gs_install }
+      chapter "Your first playbook" { page = gs_first_playbook }
+    }
+
+    chapter "The guide" {
+      chapter "The convergence contract"                   { page = guide_convergence }
+      chapter "Playbooks, plays and steps"                 { page = guide_playbooks }
+      chapter "Packages, resources and gatherers"          { page = guide_packages }
+      chapter "Variables and secrets"                      { page = guide_variables }
+      chapter "Scheduling and concurrency"                 { page = guide_scheduling }
+      chapter "wscript: values, types and functions"       { page = guide_wscript_basics }
+      chapter "wscript: structs, enums and matching"       { page = guide_wscript_data }
+      chapter "wscript: containers, loops, traits and faults" { page = guide_wscript_flow }
+      chapter "The host API"                               { page = guide_host_api }
+      chapter "The testlab"                                { page = guide_testlab }
+      chapter "Add a resource to a package"                { page = howto_add_resource }
+      chapter "Check, then apply"                          { page = howto_check_apply }
+      chapter "Encrypt secrets in a playbook"              { page = howto_encrypt_secrets }
+      chapter "Test a package"                             { page = howto_test_package }
+    }
+
+    chapter "Reference" {
+      chapter "playbook.wcl"             { page = ref_playbook }
+      chapter "package.wcl"              { page = ref_package }
+      chapter "Script entry points"      { page = ref_scripts }
+      chapter "The test block"           { page = ref_test_block }
+      chapter "wscript prelude"          { page = ref_wscript_prelude }
+      chapter "wscript built-in methods" { page = ref_wscript_methods }
+      chapter "The Value type"           { page = ref_value }
+      chapter "log module"               { page = ref_mod_log }
+      chapter "fs module"                { page = ref_mod_fs }
+      chapter "path module"              { page = ref_mod_path }
+      chapter "shell module"             { page = ref_mod_shell }
+      chapter "http module"              { page = ref_mod_http }
+      chapter "hash module"              { page = ref_mod_hash }
+      chapter "archive module"           { page = ref_mod_archive }
+      chapter "env module"               { page = ref_mod_env }
+      chapter "sys module"               { page = ref_mod_sys }
+      chapter "data module"              { page = ref_mod_data }
+      chapter "template module"          { page = ref_mod_template }
+      chapter "time module"              { page = ref_mod_time }
+      chapter "json module"              { page = ref_mod_json }
+      chapter "toml module"              { page = ref_mod_toml }
+      chapter "xml module"               { page = ref_mod_xml }
+      chapter "regex module"             { page = ref_mod_regex }
+      chapter "registry module (Windows)" { page = ref_mod_registry }
+      chapter "service module (Windows)" { page = ref_mod_service }
+      chapter "com module (Windows)"     { page = ref_mod_com }
+      chapter "testlab module"           { page = ref_mod_testlab }
+    }
+
+    chapter "Commands" {
+      chapter "config-weave"          { page = cmd_root }
+      chapter "config-weave apply"    { page = cmd_apply }
+      chapter "config-weave check"    { page = cmd_check }
+      chapter "config-weave docs"     { page = cmd_docs }
+      chapter "config-weave init"     { page = cmd_init }
+      chapter "config-weave list"     { page = cmd_list }
+      chapter "config-weave pkg"      { page = cmd_pkg }
+      chapter "config-weave secrets"  { page = cmd_secrets }
+      chapter "config-weave test"     { page = cmd_test }
+      chapter "config-weave validate" { page = cmd_validate }
+      chapter "config-weave version"  { page = cmd_version }
+      chapter "config-weave wscripti" { page = cmd_wscripti }
+    }
+
+    chapter "Appendices" {
+      chapter "Troubleshooting"         { page = apx_troubleshooting }
+      chapter "What scripts cannot use" { page = apx_not_registered }
+      chapter "Glossary"                { page = apx_glossary }
+    }
+  }
+}

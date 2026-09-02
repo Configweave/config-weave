@@ -1,0 +1,77 @@
+// Part V — Appendices. Declared mode: reference.
+page apx_not_registered {
+  sites = [:manual]
+  title = "What scripts cannot use"
+
+  chapter_header "What scripts cannot use" {
+    kicker       = "Appendices · reference"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+Two lists follow. The first names the wscript standard library modules that config-weave does not register, so a `use` line for one of them fails to compile. The second names the language features wscript leaves out by design, so a script cannot reach for them at all. Every host module config-weave does register is listed in [The host API](guide_host_api).
+PROSE
+
+  h2 "Standard library modules that are not registered"
+
+  code rust {
+    source = <<'SRC'
+use math      // error: unknown module
+use process   // error: unknown module
+SRC
+  }
+
+  p <<'PROSE'
+The wscript standard library ships `math`, `process` and `fs` modules. config-weave registers none of these three. A `use` line naming one is a compile error at `config-weave validate` time, and a bare `fs` in a script means the config-weave module, not the standard library one. The standard library's `value`, `json`, `toml`, `xml`, `regex` and `time` modules are registered as they are.
+PROSE
+
+  table {
+    rows:
+      | "Module" | "Why it is absent" | "Use instead" |
+      | "`math`" | "Scripts converge configuration; the arithmetic they need is `+ - * / %` and comparisons." | "Plain operators. `int()` truncates and `float()` widens." |
+      | "`process`" | "Direct process spawning would bypass config-weave's output capture and logging." | "[shell module](ref_mod_shell) for `run`, `bash` and `powershell`; [env module](ref_mod_env) for environment variables." |
+      | "`fs` (standard library)" | "config-weave's own `fs` adds metadata, glob, temp files and directories, and symlinks." | "[fs module](ref_mod_fs), which is what `use fs` resolves to." |
+  }
+
+  p <<'PROSE'
+The config-weave `fs` module wins the name because a registered host module always takes precedence over anything else called `fs`. There is nothing to migrate: a script written for the standard library `fs` keeps its `use fs` line and gains the extra functions. Structured data has its own homes. JSON and TOML are the standard library modules, documented as [json module](ref_mod_json) and [toml module](ref_mod_toml). XML is the standard library module, documented as [xml module](ref_mod_xml). INI is not in the standard library and lives in the config-weave [data module](ref_mod_data).
+PROSE
+
+  h2 "Language features wscript leaves out"
+
+  code rust {
+    source = <<'SRC'
+let r = &x                 // error: no references
+if 1 { }                   // error: condition must be bool
+let n = 1 + 2.0            // error: no implicit conversion
+let mask = flags & 0x04    // error: no bitwise operators
+SRC
+  }
+
+  p <<'PROSE'
+These absences are deliberate. Each row names the feature and what a script writes instead.
+PROSE
+
+  table {
+    rows:
+      | "Absent" | "Instead" |
+      | "Borrow checker, `&` and `&mut`, lifetimes" | "Reference counting. Reference types alias on assignment and `self` is by reference. See [reference semantics](guide_wscript_basics)." |
+      | "Generic structs, enums and traits" | "Generic functions with the bounds `Eq`, `Ord` and `Clone`, plus the built-in `List[T]` and `Map[K, V]`." |
+      | "Exceptions" | "`Result` and `?`. A fault is delivered to config-weave and ends the step; see [faults](guide_wscript_flow)." |
+      | "Async, threads sharing values" | "Each step runs in its own VM. Parallelism is the scheduler's job; see [Scheduling and concurrency](guide_scheduling)." |
+      | "Implicit conversions, truthiness" | "`int(x)` and `float(x)`; a `bool` condition." |
+      | "A cycle collector" | "A reference cycle leaks until the step ends. Use `weak[T]` for back-references." |
+      | "Bitwise operators" | "Write the arithmetic out with `*`, `/` and `%`." |
+      | "Dimensional analysis across unit families" | "A `units` family checks within itself. Declare one family per dimension." |
+      | "Format specs inside interpolation holes" | "`\"{expr}\"` only. Use `fmt(\"{:.2}\", x)` for formatting; see the [prelude](ref_wscript_prelude)." |
+      | "Range values outside a `for` header" | "Write `0..n` in a `for` header only." |
+      | "Bindings inside an or-pattern" | "Split the arms, or bind in a single pattern and test with a guard." |
+      | "Default method bodies and trait inheritance" | "Implement every trait method on every type." |
+  }
+
+  p <<'PROSE'
+Some restrictions from wscript's first release have since lifted, and a script may use them freely: `use` of another script file from `lib/`, `{expr}` interpolation in every string literal, compound assignment such as `+=`, associated functions called as `Type::func(...)`, generic functions, and unit families on numeric types.
+PROSE
+}

@@ -1,0 +1,62 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_hash {
+  sites = [:manual]
+  title = "hash module"
+
+  chapter_header "hash module" {
+    kicker       = "Reference · reference"
+    reading_time = "1 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use hash` computes cryptographic digests of strings and files. Every
+function returns the digest as a lowercase hexadecimal string. The string
+variants cannot fail. The file variants return `Result[string, string]` and
+fail when the file cannot be opened or read. MD5 is provided for
+interoperability with legacy checksums only.
+PROSE
+
+  h2 "sha256 and sha256_file"
+
+  code rust {
+    source = <<'SRC'
+hash::sha256(s: string) -> string
+hash::sha256_file(path: string) -> Result[string, string]
+SRC
+  }
+
+  p "SHA-256 of a string, or of a file's contents."
+
+  h2 "sha512 and sha512_file"
+
+  code rust {
+    source = <<'SRC'
+hash::sha512(s: string) -> string
+hash::sha512_file(path: string) -> Result[string, string]
+SRC
+  }
+
+  p "SHA-512 of a string, or of a file's contents."
+
+  h2 "md5 and md5_file"
+
+  code rust {
+    source = <<'SRC'
+hash::md5(s: string) -> string
+hash::md5_file(path: string) -> Result[string, string]
+SRC
+  }
+
+  p "MD5 of a string, or of a file's contents. Use it only to compare against a checksum that was published as MD5."
+
+  code rust {
+    source = <<'SRC'
+use hash
+
+let digest = hash::sha256_file("/tmp/tool.tar.gz")?
+if digest != expected { return Err("checksum mismatch") }
+SRC
+  }
+}

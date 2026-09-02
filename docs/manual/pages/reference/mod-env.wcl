@@ -1,0 +1,93 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_env {
+  sites = [:manual]
+  title = "env module"
+
+  chapter_header "env module" {
+    kicker       = "Reference · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use env` reads and changes the process environment and reports who and
+where the process is. Changes made with `set` and `unset` affect the
+config-weave process and every child it spawns afterwards, including
+commands run through the [shell module](ref_mod_shell). Only `path_join`
+can fail; it returns `Result[string, string]`. For facts about the
+operating system and hardware, see the [sys module](ref_mod_sys).
+PROSE
+
+  h2 "get"
+
+  code rust {
+    source = <<'SRC'
+env::get(name: string) -> Option[string]
+SRC
+  }
+
+  p "Reads an environment variable. It returns `None` when the variable is unset."
+
+  h2 "set and unset"
+
+  code rust {
+    source = <<'SRC'
+env::set(name: string, value: string)
+env::unset(name: string)
+SRC
+  }
+
+  p "`set` assigns a variable for this process and its children. `unset` removes it."
+
+  h2 "path_split and path_join"
+
+  code rust {
+    source = <<'SRC'
+env::path_split(value: string) -> List[string]
+env::path_join(parts: List[string]) -> Result[string, string]
+SRC
+  }
+
+  p "`path_split` splits a PATH-style list on the platform separator. `path_join` builds one from a list of paths, and fails when a part contains the separator."
+
+  h2 "hostname"
+
+  code rust {
+    source = <<'SRC'
+env::hostname() -> string
+SRC
+  }
+
+  p "The hostname of this machine."
+
+  h2 "current_user and home_dir"
+
+  code rust {
+    source = <<'SRC'
+env::current_user() -> string
+env::home_dir() -> string
+SRC
+  }
+
+  p "The name of the user running the process, and that user's home directory."
+
+  h2 "is_elevated"
+
+  code rust {
+    source = <<'SRC'
+env::is_elevated() -> bool
+SRC
+  }
+
+  p "Whether the process runs as root on Unix or as an Administrator on Windows."
+
+  code rust {
+    source = <<'SRC'
+use env
+
+if !env::is_elevated() { return Err("this resource needs root") }
+let editor = match env::get("EDITOR") { Some(e) => e, None => "vi" }
+SRC
+  }
+}

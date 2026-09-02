@@ -1,0 +1,58 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_log {
+  sites = [:manual]
+  title = "log module"
+
+  chapter_header "log module" {
+    kicker       = "Reference · reference"
+    reading_time = "1 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use log` gives a script structured logging. Every message carries the
+context of the step that emitted it into the terminal output and the NDJSON
+file log. Raw `print` and `println` calls are redirected into `log::info`, so
+stdout stays clean for `--json`. `shell::run_streaming` in the
+[shell module](ref_mod_shell) pipes a long command's output through this
+module live. All four functions are available on every platform and none of
+them fails.
+PROSE
+
+  h2 "debug, info, warn and error"
+
+  code rust {
+    source = <<'SRC'
+log::debug(message: string)
+log::info(message: string)
+log::warn(message: string)
+log::error(message: string)
+SRC
+  }
+
+  p <<'PROSE'
+Each function emits one message at its level. The terminal shows messages at
+or above the verbosity selected with `-v`. The file log uses its own level,
+set with `--log-level`, so a debug message can reach the file without
+reaching the terminal.
+PROSE
+
+  table {
+    rows:
+      | "Function" | "Level" | "Typical use" |
+      | "`debug`" | "debug" | "values a script inspected while deciding" |
+      | "`info`" | "info" | "progress a reader wants to see" |
+      | "`warn`" | "warn" | "something unexpected that the step tolerated" |
+      | "`error`" | "error" | "a failure the step is about to report" |
+  }
+
+  code rust {
+    source = <<'SRC'
+use log
+
+log::info("package cache refreshed")
+log::warn("config file was regenerated")
+SRC
+  }
+}

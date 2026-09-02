@@ -1,0 +1,209 @@
+// Part III — Reference. Declared mode: reference.
+page ref_wscript_methods {
+  sites = [:manual]
+  title = "wscript built-in methods"
+
+  chapter_header "wscript built-in methods" {
+    kicker       = "Reference · reference"
+    reading_time = "8 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+The compiler knows the methods of `string`, `List[T]`, `Map[K, V]`, `Option[T]`, `Result[T, E]` and `weak[T]` internally. They need no `use` line and cannot be extended from a script. In the signatures below `T`, `K`, `V` and `E` are the receiver's type arguments and `U` is inferred at the call site. How the containers behave is explained in [wscript: containers, loops, traits and faults](guide_wscript_flow).
+PROSE
+
+  h2 "string"
+
+  code rust {
+    source = <<'SRC'
+let parts = "a,b,c".split(",")          // ["a", "b", "c"]
+let n     = "x7".slice(1, 2)            // "7", character-indexed
+let maybe = "42".parse_int()            // Some(42)
+SRC
+  }
+
+  p <<'PROSE'
+A string is immutable and every method returns a new value. `len`, `slice` and `find` count characters; `bytes_len` counts bytes. Concatenate with `+`.
+PROSE
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Notes" |
+      | "`len`" | "`() -> int`" | "character count" |
+      | "`bytes_len`" | "`() -> int`" | "UTF-8 byte count" |
+      | "`is_empty`" | "`() -> bool`" | "" |
+      | "`split`" | "`(sep: string) -> List[string]`" | "" |
+      | "`trim`" | "`() -> string`" | "both ends" |
+      | "`trim_start`" | "`() -> string`" | "" |
+      | "`trim_end`" | "`() -> string`" | "" |
+      | "`to_upper`" | "`() -> string`" | "" |
+      | "`to_lower`" | "`() -> string`" | "" |
+      | "`starts_with`" | "`(prefix: string) -> bool`" | "" |
+      | "`ends_with`" | "`(suffix: string) -> bool`" | "" |
+      | "`contains`" | "`(needle: string) -> bool`" | "" |
+      | "`find`" | "`(needle: string) -> Option[int]`" | "character index of the first match" |
+      | "`replace`" | "`(from: string, to: string) -> string`" | "every occurrence" |
+      | "`repeat`" | "`(times: int) -> string`" | "" |
+      | "`pad_left`" | "`(width: int, fill: string) -> string`" | "" |
+      | "`pad_right`" | "`(width: int, fill: string) -> string`" | "" |
+      | "`chars`" | "`() -> List[char]`" | "" |
+      | "`slice`" | "`(start: int, end: int) -> string`" | "character indices, end exclusive" |
+      | "`parse_int`" | "`() -> Option[int]`" | "`None` on a malformed number" |
+      | "`parse_float`" | "`() -> Option[float]`" | "`None` on a malformed number" |
+  }
+
+  h2 "List[T]"
+
+  code rust {
+    source = <<'SRC'
+let xs = [3, 1, 2]
+xs.sort()
+let doubled = xs.map(|x| x * 2)         // [2, 4, 6]
+let total = xs.fold(0, |acc, x| acc + x) // 6
+let big = xs.find(|x| x > 1)            // Some(2)
+SRC
+  }
+
+  p <<'PROSE'
+`xs[i]` faults when out of bounds; `get` returns an `Option` instead. Methods marked with a constraint compile only when the element type meets it: `Eq` for `contains` and `index_of`, `Ord` for `sort`, `min` and `max`, `string` elements for `join`, and `int` or `float` elements for `sum`. A comparator for `sort_by` returns a negative, zero or positive `int`.
+PROSE
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Notes" |
+      | "`len`" | "`() -> int`" | "" |
+      | "`is_empty`" | "`() -> bool`" | "" |
+      | "`clear`" | "`() -> unit`" | "" |
+      | "`push`" | "`(x: T) -> unit`" | "append" |
+      | "`pop`" | "`() -> Option[T]`" | "remove and return the last element" |
+      | "`insert`" | "`(i: int, x: T) -> unit`" | "" |
+      | "`remove`" | "`(i: int) -> T`" | "faults when out of bounds" |
+      | "`get`" | "`(i: int) -> Option[T]`" | "never faults" |
+      | "`set`" | "`(i: int, x: T) -> unit`" | "" |
+      | "`first`" | "`() -> Option[T]`" | "" |
+      | "`last`" | "`() -> Option[T]`" | "" |
+      | "`contains`" | "`(x: T) -> bool`" | "`T: Eq`" |
+      | "`index_of`" | "`(x: T) -> Option[int]`" | "`T: Eq`" |
+      | "`any`" | "`(f: fn(T) -> bool) -> bool`" | "" |
+      | "`all`" | "`(f: fn(T) -> bool) -> bool`" | "" |
+      | "`count`" | "`(f: fn(T) -> bool) -> int`" | "" |
+      | "`find`" | "`(f: fn(T) -> bool) -> Option[T]`" | "first match" |
+      | "`position`" | "`(f: fn(T) -> bool) -> Option[int]`" | "index of the first match" |
+      | "`reverse`" | "`() -> unit`" | "in place" |
+      | "`sort`" | "`() -> unit`" | "in place; `T: Ord`" |
+      | "`sort_by`" | "`(cmp: fn(T, T) -> int) -> unit`" | "in place" |
+      | "`map`" | "`(f: fn(T) -> U) -> List[U]`" | "" |
+      | "`map_indexed`" | "`(f: fn(int, T) -> U) -> List[U]`" | "" |
+      | "`filter`" | "`(f: fn(T) -> bool) -> List[T]`" | "" |
+      | "`fold`" | "`(init: U, f: fn(U, T) -> U) -> U`" | "" |
+      | "`zip_with`" | "`(other: List[U], f: fn(T, U) -> R) -> List[R]`" | "stops at the shorter list" |
+      | "`join`" | "`(sep: string) -> string`" | "`List[string]` only" |
+      | "`slice`" | "`(start: int, end: int) -> List[T]`" | "end exclusive" |
+      | "`concat`" | "`(other: List[T]) -> List[T]`" | "new list" |
+      | "`sum`" | "`() -> T`" | "`int` or `float` elements" |
+      | "`min`" | "`() -> Option[T]`" | "`T: Ord`; `None` when empty" |
+      | "`max`" | "`() -> Option[T]`" | "`T: Ord`; `None` when empty" |
+      | "`clone`" | "`() -> List[T]`" | "deep copy" |
+  }
+
+  h2 "Map[K, V]"
+
+  code rust {
+    source = <<'SRC'
+let ages = #{ "alice": 30, "bob": 25 }
+ages.insert("carol", 22)
+let names = ages.keys()                  // List[string]
+let adults = ages.filter(|k, v| v >= 18) // Map[string, int]
+ages.each(|k, v| println("{k}: {v}"))
+SRC
+  }
+
+  p <<'PROSE'
+A key is an `int`, `bool`, `char` or `string`. Reading `m[k]` faults when the key is missing; `get` returns an `Option`. Assigning `m[k] = v` inserts or overwrites. The closures passed to `each`, `map` and `filter` take the key and the value as two parameters.
+PROSE
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Notes" |
+      | "`len`" | "`() -> int`" | "" |
+      | "`is_empty`" | "`() -> bool`" | "" |
+      | "`clear`" | "`() -> unit`" | "" |
+      | "`insert`" | "`(k: K, v: V) -> unit`" | "insert or overwrite" |
+      | "`remove`" | "`(k: K) -> Option[V]`" | "the removed value" |
+      | "`get`" | "`(k: K) -> Option[V]`" | "never faults" |
+      | "`contains_key`" | "`(k: K) -> bool`" | "" |
+      | "`keys`" | "`() -> List[K]`" | "" |
+      | "`values`" | "`() -> List[V]`" | "" |
+      | "`each`" | "`(f: fn(K, V) -> unit) -> unit`" | "" |
+      | "`map`" | "`(f: fn(K, V) -> U) -> List[U]`" | "one element per entry" |
+      | "`filter`" | "`(f: fn(K, V) -> bool) -> Map[K, V]`" | "new map" |
+      | "`clone`" | "`() -> Map[K, V]`" | "deep copy" |
+  }
+
+  h2 "Option[T]"
+
+  code rust {
+    source = <<'SRC'
+let port = params.get("port").unwrap_or(Value::Int(8080))
+if xs.first().is_some() { }
+SRC
+  }
+
+  p <<'PROSE'
+`unwrap` and `expect` on `None` raise a fault, which ends the step in Error. Prefer `unwrap_or`, `if let`, `let-else` or `match` where `None` is a normal outcome. The `?` operator returns `None` from the enclosing function when it is applied to a `None`.
+PROSE
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Notes" |
+      | "`is_some`" | "`() -> bool`" | "" |
+      | "`is_none`" | "`() -> bool`" | "" |
+      | "`unwrap`" | "`() -> T`" | "faults on `None`" |
+      | "`unwrap_or`" | "`(default: T) -> T`" | "" |
+      | "`expect`" | "`(msg: string) -> T`" | "faults on `None` with `msg`" |
+  }
+
+  h2 "Result[T, E]"
+
+  code rust {
+    source = <<'SRC'
+let text = fs::read(p)?                  // Err propagates out of the function
+let text = fs::read(p).unwrap_or("")     // or supply a fallback
+if shell::run("which git", Value::Null).is_err() { }
+SRC
+  }
+
+  p <<'PROSE'
+Every host function that can fail returns `Result[T, string]`. `unwrap` and `expect` on an `Err` raise a fault. The `?` operator returns the `Err` from the enclosing function, which must itself return a `Result` with a compatible error type; a resource's fallible entry point signature exists for this purpose. See [Script entry points](ref_scripts).
+PROSE
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Notes" |
+      | "`is_ok`" | "`() -> bool`" | "" |
+      | "`is_err`" | "`() -> bool`" | "" |
+      | "`unwrap`" | "`() -> T`" | "faults on `Err`" |
+      | "`unwrap_or`" | "`(default: T) -> T`" | "" |
+      | "`unwrap_err`" | "`() -> E`" | "faults on `Ok`" |
+      | "`expect`" | "`(msg: string) -> T`" | "faults on `Err` with `msg`" |
+  }
+
+  h2 "weak[T]"
+
+  code rust {
+    source = <<'SRC'
+let w = weak(parent)
+if let Some(p) = w.upgrade() { println(p.name) }
+SRC
+  }
+
+  p "A weak reference has one method. `upgrade` returns `Some` while a strong reference to the object still exists and `None` after."
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Notes" |
+      | "`upgrade`" | "`() -> Option[T]`" | "" |
+  }
+}

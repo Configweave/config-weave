@@ -1,0 +1,313 @@
+// Part III — Reference. Declared mode: reference.
+page ref_playbook {
+  sites = [:manual]
+  title = "playbook.wcl"
+
+  chapter_header "playbook.wcl" {
+    kicker       = "Reference · reference"
+    reading_time = "11 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`playbook.wcl` is the WCL document at the root of a playbook directory. It holds one `playbook` block, which declares the playbook's gathers, its variables, any playbook-local composites, and its plays of steps. The engine appends the system import `<weave/playbook.wcl>` to the file when it opens the playbook, so you never write an import line. How the pieces fit together is explained in [Playbooks, plays and steps](guide_playbooks); this chapter lists every block and field.
+PROSE
+
+  table {
+    rows:
+      | "Item" | "Value" |
+      | "Location" | "`<playbook>/playbook.wcl`" |
+      | "System import" | "`<weave/playbook.wcl>`, appended by the engine" |
+      | "Top-level block" | "`playbook \"name\" { … }`, exactly one per file" |
+  }
+
+  p <<'PROSE'
+Every field marked required below is enforced by the loader, including each block's `description`. A `condition` field is a WCL expression that must evaluate to a bool; it is evaluated lazily at run time against the variable scope described under [Variable precedence](ref_playbook). A property or parameter field shadows an outer variable of the same name, so `url = url` is a self-reference cycle. Feed a same-named parameter from a variable with a distinct name.
+PROSE
+
+  h2 "playbook"
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+playbook "Sample" {
+  description = "What this playbook converges"
+  version = "1.2.0"
+
+  gather "os" { … }
+  vars { … }
+  composite "site" { … }
+  play "default" { … }
+}
+SRC
+  }
+
+  p "The root block. Its child blocks may appear in any order, but a `gather` result is only visible to `vars`, conditions and properties, never to other gather `params`. A playbook may declare any number of plays; `check` and `apply` target one play by name."
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The playbook name, reported in every run." |
+      | "`description`" | "string" | "yes" | "One-line summary, rendered by `config-weave docs`." |
+      | "`version`" | "string" | "no, default `\"0.0.0\"`" | "A free-form version string, reported with the name." |
+      | "`gather`" | "block, repeatable" | "no" | "Gatherer invocations. See [gather](ref_playbook)." |
+      | "`vars`" | "block, at most one" | "no" | "Variable declarations. See [vars](ref_playbook)." |
+      | "`composite`" | "block, repeatable" | "no" | "Playbook-local composites. See [composite](ref_playbook)." |
+      | "`play`" | "block, repeatable" | "no" | "The plays. See [play](ref_playbook)." |
+  }
+
+  h2 "gather"
+
+  code wcl {
+    source = <<'SRC'
+gather "os" {
+  description = "Operating system facts"
+  from = "core.os_info"
+  params {
+    detail = :full
+  }
+}
+SRC
+  }
+
+  p "Runs a gatherer declared in a package and binds the returned value to a variable named by the label. All gathers in a playbook run concurrently before any step, and two gathers with the same gatherer and the same canonicalised params run once and share the result. A gather that fails aborts the run before any step executes."
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The variable that receives the gathered value, for example `os.family`." |
+      | "`description`" | "string" | "no" | "One-line summary for the docs." |
+      | "`from`" | "string" | "yes" | "The gatherer as `package.gatherer`." |
+      | "`params`" | "block, at most one" | "no" | "Parameters, validated against the gatherer's `param` declarations. See [properties and params](ref_playbook)." |
+  }
+
+  h2 "vars"
+
+  code wcl {
+    source = <<'SRC'
+vars {
+  config_dir = "/etc/sample"
+  is_debian = os.family == "linux" && os.distro == "debian"
+  db_password = secret("CWENC1.…")
+}
+SRC
+  }
+
+  p <<'PROSE'
+A free-form block whose every field declares one variable. A value is any WCL expression. It may reference gatherer results and other variables, and it may wrap a value in `secret("…")` to keep it encrypted in the file. See [Variables and secrets](guide_variables) for how values are resolved and how secrets are handled.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "any name" | "expression" | "no" | "Declares a variable of that name. The block has no fixed fields." |
+  }
+
+  h2 "play"
+
+  code wcl {
+    source = <<'SRC'
+play "default" {
+  description = "Base configuration"
+  parallel = true
+
+  step "motd" { … }
+  container "web" { … }
+}
+SRC
+  }
+
+  p "A named group of steps. With `parallel = true` the scheduler runs steps in dependency order, as many at once as the concurrency classes allow. With `parallel = false` steps run one at a time in declaration order. Each step and container inside a play may carry its own condition. See [Scheduling and concurrency](guide_scheduling)."
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The play name, passed to `check` and `apply`." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`parallel`" | "bool" | "no, default `true`" | "`false` forces strict declaration order." |
+      | "`step`" | "block, repeatable" | "no" | "Steps directly under the play. See [step](ref_playbook)." |
+      | "`container`" | "block, repeatable" | "no" | "Groups of steps. See [container](ref_playbook)." |
+  }
+
+  h2 "container"
+
+  code wcl {
+    source = <<'SRC'
+container "web" {
+  description = "Everything the web tier needs"
+  condition = os.family == "linux"
+
+  step "nginx" { … }
+  container "tls" { … }
+}
+SRC
+  }
+
+  p "Groups steps for organisation and for the generated docs. Containers nest. A `condition` on a container applies to every step beneath it. A container does not change scheduling: the play's dependency graph is flat across containers, and a `requires` entry names a step by its own name regardless of the container it sits in."
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The container name, one segment of a step's report path." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`condition`" | "bool expression" | "no" | "When false, every child step reports *skipped*." |
+      | "`step`" | "block, repeatable" | "no" | "Child steps." |
+      | "`container`" | "block, repeatable" | "no" | "Nested containers." |
+  }
+
+  h2 "step"
+
+  code wcl {
+    source = <<'SRC'
+step "nginx" {
+  description = "Install nginx"
+  resource = "linux_apt.package"
+  condition = is_debian
+  requires = ["update_cache"]
+  concurrency = "exclusive"
+  properties {
+    name = "nginx"
+    ensure = :present
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+One unit of work. A step names a resource or a composite and supplies its properties. The engine runs the resource's script through the check, apply and re-check lifecycle described in [The convergence contract](guide_convergence). The `resource` field takes a package-qualified name (`pkg.resource` or `pkg.composite`) or the bare name of a composite declared in this playbook.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The step name. Unique within the play; the target of `requires`." |
+      | "`description`" | "string" | "yes" | "One-line summary, shown in reports and docs." |
+      | "`resource`" | "string" | "yes" | "The resource or composite to run." |
+      | "`condition`" | "bool expression" | "no" | "When false the step reports *skipped* and its dependents still run." |
+      | "`requires`" | "list of strings" | "no" | "Step names that must finish first. Ordering only, not a success demand: an errored or unrun dependency blocks its dependents, a skipped one does not." |
+      | "`concurrency`" | "string" | "no" | "`parallel`, `exclusive` or `global`. May tighten the resource's declared class, never loosen it; a looser value is a validation error. See [Concurrency classes](ref_package)." |
+      | "`properties`" | "block, at most one" | "no" | "The resource's parameters. See below." |
+  }
+
+  h2 "properties and params"
+
+  code wcl {
+    source = <<'SRC'
+properties {
+  path = "/etc/motd"
+  content = $"Welcome to ${os.hostname}"
+  mode = :strict
+  max_age = 30min
+}
+SRC
+  }
+
+  p <<'PROSE'
+Both are free-form maps. A step's `properties` block is validated against the resource's `param` declarations; a gather's `params` block against the gatherer's. Validation applies declared defaults, rejects unknown names, checks required names are present, and checks each value against its coarse type. A `symbol` parameter must be written as `:name`; the quoted spelling is an error. A `duration` parameter is written as a bare WCL unit literal (`30min`, `4h`), never quoted. Values may be any WCL expression over the variable scope, and are evaluated lazily when the step is planned.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "any declared name" | "per the `param` type" | "per the `param`" | "One parameter value. Names not declared by the resource or gatherer are rejected." |
+  }
+
+  h2 "composite"
+
+  code wcl {
+    source = <<'SRC'
+composite "site" {
+  description = "A static site: directory plus index page"
+  arg "root" {
+    description = "Directory that holds the site"
+    type = "string"
+    required = true
+  }
+  arg "body" {
+    description = "Contents of index.html"
+    type = "string"
+    default = "<h1>hello</h1>"
+  }
+
+  step "dir" {
+    description = "Site directory"
+    resource = "core.directory"
+    properties { path = args.root }
+  }
+  step "index" {
+    description = "Index page"
+    resource = "core.file"
+    requires = ["dir"]
+    properties {
+      path = $"${args.root}/index.html"
+      content = args.body
+    }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A named, parameterised block of steps, invoked from a step exactly like a resource. Declared in a playbook it is local to that playbook and referenced by bare name (`resource = "site"`). The same block in a `package.wcl` is shared and referenced qualified. The loader expands each invocation statically into a container of ordinary steps, so reports show the inner steps under a path of `container/…/invocation/inner`. A body sees only its own arguments, never gatherer results, `vars` or `--var` overrides; a fact the body needs is passed in as a property. Inside the body a `requires` entry reaches only sibling steps of the same invocation, and from the playbook a `requires` entry naming the invocation waits for every step it expanded into. Nesting is capped at eight levels and a cycle of invocations is rejected by name.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The composite name. Shares a namespace with resources." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`arg`" | "block, repeatable" | "no" | "Declared arguments. See [arg](ref_playbook)." |
+      | "`step`" | "block, repeatable" | "no" | "The body. Each step has the fields of a playbook [step](ref_playbook), and an invocation's own `concurrency` tightens every step of the body." |
+  }
+
+  h2 "arg"
+
+  code wcl {
+    source = <<'SRC'
+arg "ensure" {
+  description = "Whether the site should exist"
+  type = "symbol"
+  default = :present
+  symbol "present" { description = "Create or update the site" }
+  symbol "absent"  { description = "Remove the site" }
+}
+SRC
+  }
+
+  p <<'PROSE'
+One declared argument of a composite. It has the shape of a resource `param`, under its own block kind so the body can read the value as `args.name`. Each argument binds twice inside the body: bare (`ensure`) and under the `args` map (`args.ensure`). Prefer `args.`: a property field shadows a bare outer variable of the same name, so `properties { path = path }` is a self-reference cycle while `properties { path = args.path }` always works. A `symbol` argument may enumerate its legal values with `symbol` child blocks; declaring any closes the set.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The argument name." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`type`" | "string" | "yes" | "One of `string`, `int`, `float`, `bool`, `list`, `map`, `symbol`, `duration`." |
+      | "`required`" | "bool" | "no, default `false`" | "Whether an invocation must supply the argument." |
+      | "`default`" | "value of `type`" | "no" | "Used when the invocation omits the argument." |
+      | "`symbol`" | "block, repeatable" | "no" | "For `type = \"symbol\"` only: one legal value, with a required `description`." |
+  }
+
+  h2 "Variable precedence"
+
+  code console {
+    source = <<'SRC'
+config-weave apply ./my-playbook baseline --var-file ./site.wcl --var count=3
+SRC
+  }
+
+  p "Each source of a variable's value overrides the ones above it in this table."
+
+  table {
+    rows:
+      | "Source" | "Precedence" | "Notes" |
+      | "`vars` declaration" | "lowest" | "Expressions may reference gatherer results and other variables." |
+      | "gatherer result" | "second" | "Bound under the gather label. All gathers run concurrently before steps." |
+      | "`--var-file file.wcl`" | "third" | "A flat `name = value` file. Each expression evaluates standalone and cannot reference other variables." |
+      | "`--var KEY=VALUE`" | "highest" | "Repeatable. VALUE parses as a WCL expression when it can, so `--var count=3` is an int; otherwise it is a plain string." |
+  }
+
+  p "Gather `params` evaluate before variables resolve. They may reference `--var` and `--var-file` overrides, but not gatherer results or any variable that depends on them. Conditions and properties evaluate lazily at run time against the full scope. See [Variables and secrets](guide_variables) for the model behind these rules."
+}

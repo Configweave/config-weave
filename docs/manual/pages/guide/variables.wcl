@@ -1,0 +1,111 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_variables {
+  sites = [:manual]
+  title = "Variables and secrets"
+
+  chapter_header "Variables and secrets" {
+    kicker       = "The guide · explanation"
+    reading_time = "6 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+A playbook's values come from four places: gatherer results, the `vars` block, a `--var-file`, and `--var` flags on the command line. This chapter explains how those sources combine into one scope, when each expression is evaluated, and how a value that must not sit in git in the clear is encrypted in place with `secret()`. The precedence table is in [playbook.wcl](ref_playbook).
+PROSE
+
+  h2 "Where variables come from"
+
+  list {
+    li "A `gather` block binds a gatherer's result to the variable named by its label, so `gather \"os\"` gives you `os.family`."
+    li "The `vars` block holds free-form `name = expr` bindings. An expression may reference gatherer results and other vars."
+    li "`--var-file file.wcl` supplies a flat `name = value` collection. Each expression evaluates standalone and cannot reference other variables."
+    li "`--var KEY=VALUE` supplies one value. VALUE is parsed as a WCL expression when possible, so `--var count=3` is an int, and falls back to a plain string otherwise. The flag repeats."
+  }
+
+  p <<'PROSE'
+When the same name is bound in more than one place, the later source wins, in this order from lowest to highest: the `vars` declaration, then the gatherer result, then `--var-file`, then `--var`. The engine binds all of them by generating an in-memory system import of `let` declarations, so every expression in the playbook sees one flat scope.
+PROSE
+
+  h2 "When expressions evaluate"
+
+  p <<'PROSE'
+Gatherers run first, and their `params` blocks evaluate before any variable resolves. A gather's params may therefore reference `--var` and `--var-file` overrides, but not gatherer results or vars that depend on them. Once every gatherer has returned, the scope is complete. Conditions and properties then evaluate lazily, at run time, against that full scope. A var that no step references is never evaluated at all.
+PROSE
+
+  callout "Property names shadow variables" {
+    kind = :warning
+    body = "The fields of a `properties` or `params` block are in scope and shadow outer variables of the same name. `url = url` is a self-reference and fails with a cycle error. Use a distinct name, `tool_url = ...` in `vars`, then `url = tool_url` in the property."
+  }
+
+  h2 "Encrypted values"
+
+  p <<'PROSE'
+A value that must not be committed in the clear is written as `secret("...")`. It is a WCL builtin rather than a block, so it works anywhere an expression does: a `vars` entry, a step's `properties`, a gather's `params`, a `condition`.
+PROSE
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+vars {
+  db_password = secret("hunter2")
+}
+SRC
+  }
+
+  p <<'PROSE'
+`config-weave secrets encrypt` rewrites each call in place, replacing the literal with a blob that starts with `CWENC1`. The blob carries a salt, a nonce and the ciphertext; the key is derived from your password with Argon2id and the value is sealed with XChaCha20-Poly1305. Only the call's own bytes change. Comments, indentation and everything else in the file are left byte-for-byte alone, because the tool splices the new call over the old span rather than reprinting the document.
+PROSE
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+vars {
+  db_password = secret("CWENC1.a1B2....Zx....Qm...")
+}
+SRC
+  }
+
+  h3 "Supplying the password"
+
+  p <<'PROSE'
+`check`, `apply` and `test` take the password from exactly one of `$CONFIG_WEAVE_PASSWORD`, `--password-stdin`, or `--password-file PATH`. There is never a prompt. A missing password is exit status 2, so an automated run fails loudly instead of blocking on a terminal that is not there. A playbook with no `secret()` calls never asks for one. One trailing newline is stripped from the password.
+PROSE
+
+  p <<'PROSE'
+A run decrypts every secret up front, before any step executes, rather than leaving it to lazy evaluation. WCL is lazy, so a secret no step references would otherwise never be evaluated, and a wrong password would produce a clean run that only failed later when some other step began using the value.
+PROSE
+
+  h3 "What validation enforces"
+
+  callout "An un-encrypted secret fails validation" {
+    kind = :error
+    body = "`secret(\"plaintext\")` is a hard error from `check`, `apply`, `validate`, `test` and `docs`. You cannot run a playbook whose secrets were never encrypted. The message names `config-weave secrets encrypt` as the fix. Whether a value is encrypted is decided by a syntactic scan of the file, so the error needs no password."
+  }
+
+  p <<'PROSE'
+`validate` and `docs` never need a password. During loading the builtin returns an empty string placeholder, which is enough to type-check a secret as the string it always is.
+PROSE
+
+  p <<'PROSE'
+`secret()` is playbook-only. Using it in a `package.wcl` is a validation error, because packages are shared through git and cannot hold a value encrypted under one playbook's password. That rule also covers `test` and `scenario` blocks, which live in packages and run in disposable instances with no password.
+PROSE
+
+  h3 "One password per playbook"
+
+  p <<'PROSE'
+Every secret in a file is encrypted under the same password. `secrets encrypt` decrypts every already-encrypted value before it writes anything, so a new secret can only be added by someone who can already read the existing ones. There is no stored verifier: "same password" is proven by the authenticated decryption itself. To change the password, run `config-weave secrets rekey`. It decrypts with the old password, mints a fresh salt, and re-encrypts every value, sweeping up any still-plaintext calls in the same pass. `secrets decrypt` restores the plaintext calls when you need to edit them.
+PROSE
+
+  h3 "Decrypted values are scrubbed from output"
+
+  p <<'PROSE'
+Every plaintext a run decrypts is masked to `***` in diagnostics, in the NDJSON log, in step messages, and in a script's `log` and `print` output. A resource that echoes its own password parameter does not leak it. Values shorter than four bytes are not masked, because masking them would corrupt unrelated output more than it protects. Generated docs show `secret(...)` and never the blob.
+PROSE
+
+  h2 "Where to go next"
+
+  p <<'PROSE'
+The step-by-step task is [Encrypt secrets in a playbook](howto_encrypt_secrets), and the three subcommands with their options are in [config-weave secrets](cmd_secrets). The precedence table and the `vars` and `gather` block fields are in [playbook.wcl](ref_playbook).
+PROSE
+}

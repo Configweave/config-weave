@@ -1,0 +1,173 @@
+// Part III — Reference. Declared mode: reference.
+page ref_test_block {
+  sites = [:manual]
+  title = "The test block"
+
+  chapter_header "The test block" {
+    kicker       = "Reference · reference"
+    reading_time = "7 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+A `test` block in a `package.wcl` declares one isolated convergence test. `config-weave test` provisions a disposable vmlab instance for it, copies in a config-weave binary and a synthesized one-play playbook, and runs the three-run protocol: `check`, `apply`, `apply`. Each step's status after each run is compared with the step's expectation, each gather's result with its `expect` block, and an optional verify script makes further assertions. How the testlab works and when to choose a container over a VM is in [The testlab](guide_testlab); the command's flags and exit statuses are in [config-weave test](cmd_test).
+PROSE
+
+  h2 "test"
+
+  code wcl {
+    filename = "pkgs/core/package.wcl"
+    source = <<'SRC'
+test "file_present_converges" {
+  description = "file_present creates the file and is idempotent"
+  image = "debian:12"
+  memory = "512MiB"
+  group = "files"
+  setup = "mkdir -p /var/tmp/weave"
+  verify = "tests/file_present_verify.ws"
+
+  step "create" {
+    description = "Create a marker file"
+    resource = "file_present"
+    expect = "converge"
+    properties {
+      path = "/var/tmp/weave/sample.txt"
+      content = "hello"
+    }
+  }
+
+  gather "os" {
+    description = "OS facts inside the instance"
+    from = "os_info"
+    expect {
+      family = "linux"
+    }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+Exactly one of `image` and `template` is required; neither or both is a validation error. Every value in a test is static. Tests run against a synthesized playbook with no variables, so a variable reference in a property or condition is a validation error. An unqualified `resource` or `from` reference resolves to the declaring package. A `secret()` call is a validation error anywhere in a package, so a test cannot carry one.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The test name, unique within the package. Selectable on the command line as `package:test`." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs and the report." |
+      | "`image`" | "string" | "one of `image`, `template`" | "An OCI image reference such as `debian:12`. The test runs in a vmlab container: Linux only, seconds to start." |
+      | "`template`" | "string" | "one of `image`, `template`" | "A vmlab template reference such as `x86_64/ubuntu-24.04`. The test runs in a full VM: Linux or Windows, with a real init system, kernel and reboots." |
+      | "`memory`" | "string" | "no" | "Guest RAM as a WCL byte size, for example `\"4GiB\"`. Omitted, a container gets vmlab's default of 256MiB and a VM gets its template's sizing. Tests in one group must agree." |
+      | "`group`" | "string" | "no" | "Tests in the same package with the same non-empty group run sequentially inside one shared instance. They must agree on `image` or `template`, and they share OS state with no reset between them. Absent or empty, the test gets its own instance." |
+      | "`setup`" | "string" | "no" | "A shell command run inside the instance before the three runs, through `sh -c` on Linux or `cmd /C` on Windows, with the test's working directory as the current directory." |
+      | "`verify`" | "string" | "no" | "Path of a verify script relative to the package directory. Exports `verify(facts: Value) -> bool`; see [Script entry points](ref_scripts)." |
+      | "`step`" | "block, repeatable" | "no" | "Resource invocations with an expectation. See [step](ref_test_block)." |
+      | "`gather`" | "block, repeatable" | "no" | "Gatherer invocations with equality assertions. See [gather](ref_test_block)." |
+  }
+
+  h2 "step"
+
+  code wcl {
+    source = <<'SRC'
+step "remove" {
+  description = "Remove the marker file"
+  resource = "file_present"
+  expect = "converge"
+  requires = ["create"]
+  properties {
+    path = "/var/tmp/weave/sample.txt"
+    ensure = :absent
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A step of the synthesized playbook, with the fields of a playbook [step](ref_playbook) plus `expect`. The steps run under one play in dependency order with the ordinary scheduler, so `requires` orders them exactly as it does in a playbook. Validation rejects a step whose expectation is `converge` or `already_configured` when it requires a step expecting `error` or `reboot_required`, because the dependent could never run. A test step may not declare `concurrency`; that field belongs to playbook and composite steps.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The step name, unique within the test." |
+      | "`description`" | "string" | "yes" | "One-line summary." |
+      | "`resource`" | "string" | "yes" | "The resource or composite to run. Unqualified names resolve to this package." |
+      | "`expect`" | "string" | "no, default `\"converge\"`" | "The expected status after each run. See [Step expectations](ref_test_block)." |
+      | "`condition`" | "bool expression" | "no" | "A static condition. False makes the step report *skipped* in every run." |
+      | "`requires`" | "list of strings" | "no" | "Step names in this test that must finish first." |
+      | "`properties`" | "block, at most one" | "no" | "Static property values, validated against the resource's `param` declarations." |
+  }
+
+  h2 "gather"
+
+  code wcl {
+    source = <<'SRC'
+gather "os" {
+  description = "OS facts inside the instance"
+  from = "os_info"
+  params {
+    detail = :full
+  }
+  expect {
+    family = "linux"
+    init = :systemd
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+Runs a gatherer inside the instance and asserts on its result. Each field of the `expect` block names a top-level key of the returned map and the exact value it must hold; a key that is missing or holds a different value fails the test. A key the gatherer declares as `type = "symbol"` is asserted with the symbol spelling (`init = :systemd`), and validation checks the value against the declared set. A gatherer that returns `Err` fails the test. Every gather's result is also passed to the verify script as `facts`, keyed by the gather label.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The gather name. The key of this result in the verify script's `facts` map." |
+      | "`description`" | "string" | "yes" | "One-line summary." |
+      | "`from`" | "string" | "yes" | "The gatherer to run. Unqualified names resolve to this package." |
+      | "`params`" | "block, at most one" | "no" | "Static parameters, validated against the gatherer's `param` declarations." |
+      | "`expect`" | "block, at most one" | "no" | "Equality assertions over top-level keys of the gathered value." |
+  }
+
+  h2 "Step expectations"
+
+  code wcl {
+    source = <<'SRC'
+expect = "converge" | "already_configured" | "error" | "skip" | "reboot_required"
+SRC
+  }
+
+  p "The `expect` field names the status a step must report after each of the three runs. A dash means the run's status is not asserted. Run 2's internal re-check proves convergence within one process; run 3 proves that a fresh process also finds the resource converged, so a resource that only remembers its state in memory fails with *configured* on run 3."
+
+  table {
+    rows:
+      | "`expect`" | "Run 1: check" | "Run 2: apply" | "Run 3: apply again" |
+      | "`converge` (default)" | "`not_configured`" | "`configured`" | "`already_configured`" |
+      | "`already_configured`" | "`already_configured`" | "`already_configured`" | "`already_configured`" |
+      | "`error`" | "—" | "`error`" | "—" |
+      | "`skip`" | "`skipped`" | "`skipped`" | "`skipped`" |
+      | "`reboot_required`" | "—" | "`reboot_required`" | "—" |
+  }
+
+  h2 "Backend requirements"
+
+  code console {
+    source = <<'SRC'
+vmlab --version
+CONFIG_WEAVE_VMLAB_CMD=/opt/vmlab/bin/vmlab config-weave test ./my-playbook
+SRC
+  }
+
+  p "`config-weave test` shells out to the `vmlab` command for every instance. vmlab and its virtualisation support are the only host requirements; there is no container runtime to install. The command is found on the path as `vmlab`, or at the path in `$CONFIG_WEAVE_VMLAB_CMD`, and is probed once before any test runs."
+
+  table {
+    rows:
+      | "Instance" | "Requirement" |
+      | "container (`image`)" | "An OCI image with a shell. vmlab pulls it and runs it in a micro-VM as root, with the test payload mounted at `/weave`." |
+      | "VM (`template`)" | "The template must ship the vmlab guest agent, which the runner polls for readiness. Each group gets a throwaway one-VM lab." |
+      | "VM (Windows)" | "The guest agent must report `windows`, and `setup` is written for `cmd /C`. The runner copies a Windows build of config-weave, found through `--binary-windows` or `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`." |
+  }
+}

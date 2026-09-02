@@ -1,0 +1,67 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_init {
+  sites = [:manual]
+  title = "config-weave init"
+
+  chapter_header "config-weave init" {
+    kicker       = "Commands · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`init` scaffolds a skeleton playbook that validates as written. It creates one package named `example` with a resource, a gatherer and a verify script, so every kind of file has a working starting point. [Your first playbook](gs_first_playbook) walks through the result.
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave init [OPTIONS] <DIR>
+SRC
+  }
+
+  h2 "Arguments"
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`DIR`" | "Destination directory for the new playbook. Created when missing. The command refuses to run when `DIR/playbook.wcl` already exists." |
+  }
+
+  h2 "Options"
+
+  p "Only the [global options](cmd_root) apply. None of them change what `init` writes."
+
+  h2 "What it writes"
+
+  table {
+    rows:
+      | "File" | "Purpose" |
+      | "`playbook.wcl`" | "A playbook with one play that uses the example package." |
+      | "`pkgs/example/package.wcl`" | "A package declaring the `file_present` resource, the `os_info` gatherer and a test." |
+      | "`pkgs/example/resources/file_present.ws`" | "A resource script with `check` and `apply` entry points." |
+      | "`pkgs/example/gatherers/os_info.ws`" | "A gatherer script with a `gather` entry point." |
+      | "`pkgs/example/tests/greeting_verify.ws`" | "A verify script for the package's test." |
+      | "`lib/README.md`, `pkgs/example/lib/README.md`" | "Placeholders explaining the playbook-level and package-level `lib/` import roots." |
+      | "`.gitignore`" | "Ignores `.repo-cache/`, the clone cache used by `config-weave pkg`." |
+  }
+
+  h2 "Examples"
+
+  code console {
+    source = <<'SRC'
+config-weave init ./my-playbook
+scaffolded a playbook in ./my-playbook — next: edit, then `config-weave validate ./my-playbook`
+config-weave validate ./my-playbook
+ok: playbook 'My Playbook' v0.1.0 — 2 package(s), 1 play(s), 3 step(s)
+SRC
+  }
+
+  p "The second package is the built-in `weave` package, which ships inside the binary. The three steps are the `greeting` step plus the two steps the `greeting_pair` composite expands into."
+
+  h2 "Exit status"
+
+  p "0 when every file was written. 2 when `playbook.wcl` already exists in the target directory or a file could not be written."
+}

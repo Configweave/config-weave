@@ -1,0 +1,315 @@
+// Part III — Reference. Declared mode: reference.
+page ref_package {
+  sites = [:manual]
+  title = "package.wcl"
+
+  chapter_header "package.wcl" {
+    kicker       = "Reference · reference"
+    reading_time = "11 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`package.wcl` is the WCL document under `pkgs/<name>/` inside a playbook directory. It holds one `package` block, which declares the package's gatherers, resources, composites, tests and scenarios. The engine appends the system import `<weave/package.wcl>` when it opens the package, so you never write an import line. The package name qualifies every reference from a playbook: a resource `file_present` in package `core` is `core.file_present`. What a package is for is explained in [Packages, resources and gatherers](guide_packages); this chapter lists every block and field.
+PROSE
+
+  table {
+    rows:
+      | "Item" | "Value" |
+      | "Location" | "`<playbook>/pkgs/<name>/package.wcl`" |
+      | "System import" | "`<weave/package.wcl>`, appended by the engine" |
+      | "Top-level block" | "`package \"name\" { … }`, exactly one per file" |
+      | "Scripts" | "`*.ws` files, referenced by path relative to the package directory" |
+      | "Shared helpers" | "`lib/*.ws`, importable with `use name` from this package's scripts" |
+  }
+
+  p <<'PROSE'
+Every field marked required is enforced by the loader, including each block's `description`. The name `weave` is reserved for the built-in package that ships inside the binary, so a `pkgs/weave/` directory is rejected. A `secret()` call anywhere in a package is a validation error: packages are shared through git and cannot hold a value encrypted under one playbook's password.
+PROSE
+
+  h2 "package"
+
+  code wcl {
+    filename = "pkgs/core/package.wcl"
+    source = <<'SRC'
+package "core" {
+  description = "Files, directories and OS facts"
+
+  gatherer "os_info" { … }
+  resource "file_present" { … }
+  composite "site" { … }
+  test "file_present_converges" { … }
+  scenario "reboot_survives" { … }
+}
+SRC
+  }
+
+  p "The root block. Resources and composites share one namespace, so a package may not declare both under the same name."
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The package name. Must match the directory name under `pkgs/`." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`gatherer`" | "block, repeatable" | "no" | "Fact collectors. See [gatherer](ref_package)." |
+      | "`resource`" | "block, repeatable" | "no" | "Units of desired state. See [resource](ref_package)." |
+      | "`composite`" | "block, repeatable" | "no" | "Reusable blocks of steps. See [composite](ref_package)." |
+      | "`test`" | "block, repeatable" | "no" | "Convergence tests. See [The test block](ref_test_block)." |
+      | "`scenario`" | "block, repeatable" | "no" | "Scripted multi-machine tests. See [scenario](ref_package)." |
+  }
+
+  h2 "gatherer"
+
+  code wcl {
+    source = <<'SRC'
+gatherer "os_info" {
+  description = "Operating system facts"
+  script = "gatherers/os_info.ws"
+
+  param "detail" {
+    description = "How much to collect"
+    type = "symbol"
+    default = :basic
+  }
+  returns "family" {
+    description = "The OS family"
+    type = "string"
+  }
+  returns "init" {
+    description = "The init system"
+    type = "symbol"
+    symbol "systemd" { description = "systemd" }
+    symbol "openrc"  { description = "OpenRC" }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A fact collector. Its script exports `gather(params: Value) -> Value` (or the `Result` form, see [Script entry points](ref_scripts)). A playbook `gather` block runs it and binds the returned value to a variable. The `returns` blocks document the keys of the returned map. The engine does not require a gathered map to carry those keys, or only those keys, because a gathered map may hold dynamic ones. The exception is a key declared `type = "symbol"`: its value binds into the playbook as a WCL symbol, so a playbook compares it as `init.init == :systemd`, and if the key enumerates `symbol` blocks the script's returned value must be one of them.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The gatherer name, referenced as `package.gatherer`." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`script`" | "string" | "yes" | "Path of the wscript file, relative to the package directory." |
+      | "`param`" | "block, repeatable" | "no" | "Declared parameters. See [param](ref_package)." |
+      | "`returns`" | "block, repeatable" | "no" | "Documented keys of the returned map. See [returns](ref_package)." |
+  }
+
+  h2 "resource"
+
+  code wcl {
+    source = <<'SRC'
+resource "file_present" {
+  description = "A file with the given content"
+  script = "resources/file_present.ws"
+  concurrency = "parallel"
+
+  param "path" {
+    description = "Absolute path of the file"
+    type = "string"
+    required = true
+  }
+  param "content" {
+    description = "The file's contents"
+    type = "string"
+    default = ""
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A unit of desired state. Its script exports `check(params: Value) -> CheckResult` and `apply(params: Value) -> ApplyResult`, and must honour the [convergence contract](guide_convergence): `check` never mutates, and after a successful `apply` a re-check returns `AlreadyConfigured`. A step invokes the resource as `package.resource` and supplies its parameters in a `properties` block.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The resource name, referenced as `package.resource`." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`script`" | "string" | "yes" | "Path of the wscript file, relative to the package directory." |
+      | "`concurrency`" | "string" | "no, default `\"parallel\"`" | "The scheduling class. See [Concurrency classes](ref_package)." |
+      | "`param`" | "block, repeatable" | "no" | "Declared parameters. See [param](ref_package)." |
+  }
+
+  h2 "param"
+
+  code wcl {
+    source = <<'SRC'
+param "max_age" {
+  description = "Refresh when the last update is older than this span"
+  type = "duration"
+  default = 24h
+}
+
+param "ensure" {
+  description = "Whether the file should exist"
+  type = "symbol"
+  default = :present
+  symbol "present" { description = "Create or update the file" }
+  symbol "absent"  { description = "Delete the file" }
+}
+SRC
+  }
+
+  p <<'PROSE'
+One declared parameter of a resource or gatherer. Validation checks each supplied value against the coarse type, applies the default when the value is absent, and rejects a missing required parameter or an undeclared name. Two types have a fixed spelling. A `symbol` value is written `:name` wherever it appears; the quoted spelling is an error, because both reach the script as the same text. A `duration` value is a bare WCL unit literal with suffix `ns`, `us`, `ms`, `s`, `min`, `h` or `d` (minutes are `min`, because `m` is metres), and the script receives a plain `Int` of nanoseconds.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The parameter name, the key in the script's `params` map." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`type`" | "string" | "yes" | "One of `string`, `int`, `float`, `bool`, `list`, `map`, `symbol`, `duration`." |
+      | "`required`" | "bool" | "no, default `false`" | "Whether a step or gather must supply the parameter." |
+      | "`default`" | "value of `type`" | "no" | "Used when the parameter is omitted." |
+      | "`symbol`" | "block, repeatable" | "no" | "For `type = \"symbol\"` only. See [symbol](ref_package)." |
+  }
+
+  h2 "symbol"
+
+  code wcl {
+    source = <<'SRC'
+symbol "on_demand" { description = "Start when first requested" }
+SRC
+  }
+
+  p <<'PROSE'
+One legal value of a `symbol` parameter or `returns` key. Declaring any closes the set: the declared `default`, every step property or gather param, every value that only resolves at run time, and a test `expect` value are checked against it, and the generated docs list the values. Declaring none leaves the parameter open to any token. The block is an error on any other coarse type. Name a symbol in its WCL-spellable form (`on_demand`, not `on-demand`); a script that needs another spelling translates it itself.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The value, without the leading colon." |
+      | "`description`" | "string" | "yes" | "What choosing this value means." |
+  }
+
+  h2 "returns"
+
+  code wcl {
+    source = <<'SRC'
+returns "init" {
+  description = "The init system in use"
+  type = "symbol"
+  symbol "systemd" { description = "systemd" }
+  symbol "openrc"  { description = "OpenRC" }
+}
+SRC
+  }
+
+  p "Documents one top-level key of the map a gatherer returns. The docs render the keys as a table. Only a key of type `symbol` is enforced: its returned value binds as a WCL symbol and must be one of the declared `symbol` values when any are declared. Only top-level keys are typed; nested maps stay plain data."
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The key name in the returned map." |
+      | "`description`" | "string" | "yes" | "What the key holds." |
+      | "`type`" | "string" | "yes" | "The same coarse types as `param`." |
+      | "`symbol`" | "block, repeatable" | "no" | "For `type = \"symbol\"` only: the legal values." |
+  }
+
+  h2 "composite"
+
+  code wcl {
+    source = <<'SRC'
+composite "site" {
+  description = "A directory with an index page"
+  arg "root" {
+    description = "Directory that holds the site"
+    type = "string"
+    required = true
+  }
+
+  step "dir" {
+    description = "Site directory"
+    resource = "directory"
+    properties { path = args.root }
+  }
+  step "index" {
+    description = "Index page"
+    resource = "file_present"
+    requires = ["dir"]
+    properties { path = $"${args.root}/index.html" }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A named, parameterised block of steps, invoked from a playbook step as `package.composite`. It has the same shape and rules as a playbook composite, described under [composite in playbook.wcl](ref_playbook): the loader expands each invocation into a container of ordinary steps, the body sees only its own arguments through `args.name`, and `requires` inside the body reaches only sibling steps. Inside a package body an unqualified `resource` names this package's own resource or composite. A body step may not carry `expect`; that field belongs to a test step.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The composite name. Shares a namespace with this package's resources." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`arg`" | "block, repeatable" | "no" | "Declared arguments, with the fields of [arg](ref_playbook)." |
+      | "`step`" | "block, repeatable" | "no" | "The body. Each step takes `description`, `resource`, `condition`, `requires`, `concurrency` and `properties`." |
+  }
+
+  h2 "test"
+
+  code wcl {
+    source = <<'SRC'
+test "file_present_converges" {
+  description = "file_present creates the file and is idempotent"
+  image = "debian:12"
+  step "create" { … }
+  gather "os" { … }
+}
+SRC
+  }
+
+  p "An isolated convergence test, run by `config-weave test` inside a disposable vmlab instance with the three-run protocol. Every field, the nested `step` and `gather` blocks, and the expectation table are in [The test block](ref_test_block)."
+
+  h2 "scenario"
+
+  code wcl {
+    source = <<'SRC'
+scenario "ad_matrix" {
+  description = "Forest root, member join and a second DC over real reboots"
+  lab = "labs/ad"
+  script = "scenarios/ad_matrix.ws"
+}
+SRC
+  }
+
+  p <<'PROSE'
+A scripted, multi-stage test over a declared vmlab lab, for flows the three-run protocol cannot express: a reboot in the middle of convergence, or several machines that talk to each other. The `lab` directory holds a `vmlab.wcl` declaring every VM up front. The `script` exports `run(lab: Lab) -> bool` (or `Result[bool, string]`) and runs on the host against the live lab through the [testlab module](ref_mod_testlab). It compiles during validation and runs after the parallel test groups, one scenario at a time. See [The testlab](guide_testlab).
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The scenario name." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`lab`" | "string" | "yes" | "Directory holding the `vmlab.wcl`, relative to the package directory." |
+      | "`script`" | "string" | "yes" | "Path of the driver script, relative to the package directory." |
+  }
+
+  h2 "Concurrency classes"
+
+  code wcl {
+    source = <<'SRC'
+concurrency = "parallel" | "exclusive" | "global"
+SRC
+  }
+
+  p "A resource declares its class in the `concurrency` field. A step may tighten the class of the resource it invokes, and an invocation of a composite tightens every step of the body, but nothing may loosen a class: a step declaring a looser class than its resource fails validation. The built-in `weave.execute` resource is `parallel` for this reason; a script that touches a shared lock declares `concurrency = \"exclusive\"` on the step. How the scheduler applies the classes is in [Scheduling and concurrency](guide_scheduling)."
+
+  table {
+    rows:
+      | "Class" | "Meaning" |
+      | "`parallel` (default)" | "No restriction. Any number of steps of this resource run alongside any other step." |
+      | "`exclusive`" | "At most one step of this resource type runs at a time. Steps of other resources continue. The package-manager lock case." |
+      | "`global`" | "The step runs completely alone. The scheduler drains every in-flight step, runs this one, then resumes." |
+  }
+}

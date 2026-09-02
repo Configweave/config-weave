@@ -1,0 +1,261 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_wscript_basics {
+  sites = [:manual]
+  title = "wscript: values, types and functions"
+
+  chapter_header "wscript: values, types and functions" {
+    kicker       = "The guide · explanation"
+    reading_time = "10 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+wscript is the language you write resources, gatherers, verify scripts and scenario drivers in. It is statically typed and Rust-flavoured: Rust syntax without the borrow checker, lifetimes or user-defined generic types. This chapter covers the parts you use in every script: the primitive and reference types, how bindings and inference work, how strings are built, what assignment means for a reference type, and how functions and closures are declared. The next two chapters cover [structs, enums and matching](guide_wscript_data) and [containers, loops, traits and faults](guide_wscript_flow).
+PROSE
+
+  h2 "How config-weave runs a script"
+
+  p <<'PROSE'
+Every script is a `.ws` file compiled against the config-weave host API. Type errors, including a misuse of a host function such as passing a string where `fs::write` expects a path and content in the other order, are reported when the script compiles. `config-weave validate` compiles every script in the playbook, so a script that does not typecheck never reaches a host. The host modules and the `use` line that imports them are described in [The host API](guide_host_api).
+PROSE
+
+  p <<'PROSE'
+A script exposes entry points by name: `check` and `apply` in a resource, `gather` in a gatherer, `verify` in a test. The exact signatures are listed in [Script entry points](ref_scripts). A script can import helpers from a `lib/` folder with `use helpers`, where `helpers.ws` sits in the declaring package's `lib/` or the playbook's. A registered host module always wins over a file of the same name, so `use fs` means the host module even when `lib/fs.ws` exists. Only the entry file's functions are callable by config-weave; a helper file's functions are reached as `helpers::name`.
+PROSE
+
+  p <<'PROSE'
+The prelude functions `print`, `println`, `str`, `fmt`, `same`, `weak`, `int` and `float` are available without an import. In config-weave, `print` and `println` do not write to standard output. Each line they produce becomes a `log::info` line, so the CLI's output modes stay intact. Their signatures are in the [prelude reference](ref_wscript_prelude).
+PROSE
+
+  h2 "Primitives and reference types"
+
+  p <<'PROSE'
+wscript has five primitive types. They are value types: assignment copies the value.
+PROSE
+
+  list {
+    li "`int`: a 64-bit signed integer with wrapping arithmetic. Literals include `42`, `-7`, `0xFF` and `1_000_000`."
+    li "`float`: a 64-bit IEEE 754 number. Literals include `3.14` and `1e9`."
+    li "`bool`: `true` or `false`."
+    li "`char`: one Unicode scalar value, written `'a'`, `'\\n'` or `'\\u{1F600}'`."
+    li "`unit`: the empty type, written `()`. A function with no return type returns `unit`."
+  }
+
+  p <<'PROSE'
+Everything else is a reference type: `string`, structs, enums, `List[T]`, `Map[K, V]`, function values and `weak[T]`. Assigning, passing or returning a reference type copies the reference, never the data. The consequences are covered under reference semantics below.
+PROSE
+
+  h2 "Bindings and inference"
+
+  p <<'PROSE'
+`let` introduces a binding. Inference is local: a type annotation is allowed on any `let` and required on none. Annotations are required on function signatures, which is what keeps inference local and compile errors readable. There is no `let mut`. Every binding is mutable, and a reference type is mutable through any alias.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+let x = 5                  // inferred: int
+let name: string = "wil"   // annotation allowed
+let pi = 3.14              // inferred: float
+x = x + 1                  // any binding can be reassigned
+SRC
+  }
+
+  h2 "No implicit conversion, no truthiness"
+
+  p <<'PROSE'
+There is no implicit numeric widening: `1 + 2.0` is a type error. Convert explicitly with the prelude functions `int(x)`, which truncates a float and returns the code point of a char, and `float(x)`. A condition must be a `bool`. An `int`, a `string` or an `Option` in an `if` is a compile error.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+let total = 1 + int(2.0)   // ok: int(2.0) == 2
+let r = float(3) / 2.0     // ok
+// if 1 { }                // error: condition must be bool
+if xs.len() > 0 { }        // write the comparison out
+SRC
+  }
+
+  h2 "Strings"
+
+  p <<'PROSE'
+A `string` is immutable UTF-8 text. Every string operation is a method that returns a new string. `len`, `slice` and `find` count characters, not bytes; `bytes_len` gives the byte count. The full method list is in [built-in methods](ref_wscript_methods).
+PROSE
+
+  p "There are three ways to build a string."
+
+  code rust {
+    source = <<'SRC'
+let log = "hp: {99}"                     // interpolation: {expr} embeds any expression
+let who = "player {p.name} at {x + 1}"   // rendered like str()
+let cat = "hp: " + str(99)               // + concatenates; str() converts
+let msg = fmt("{} of {}", 3, 10)         // fmt: placeholders filled in order
+let hex = fmt("{:>8} {:.2} {:x}", "hi", 3.14159, 255)  // format specs
+SRC
+  }
+
+  p <<'PROSE'
+Every string literal may hold `{expr}` holes. Each hole is one full expression, including field access, calls, arithmetic and nested strings, and it renders the way `str` would. A hole is real code, so an inner string inside it uses plain quotes. Write `{{` and `}}` for literal braces. A bare `{}` or a `{:spec}` stays literal text so that `fmt` templates are unchanged, which means a regex quantifier such as `[0-9]{4}` in a literal needs `{{4}}`. A format spec inside a hole is rejected; use `fmt` when you need padding, precision or hex.
+PROSE
+
+  p <<'PROSE'
+`fmt` fills `{}` placeholders from its remaining arguments. For a literal template the compiler checks that the placeholder count matches the argument count. The format spec grammar is given in the [prelude reference](ref_wscript_prelude).
+PROSE
+
+  h2 "Reference semantics"
+
+  p <<'PROSE'
+Assignment, argument passing and returns copy the reference for a reference type. Two bindings to the same struct see each other's mutations. There is no `&` anywhere in the language, and `self` in a method is always by reference.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+let p = Player { name: "wil", hp: 100 }
+let alias = p              // same object, not a copy
+alias.hp = 70
+p.hp                       // 70: the mutation is visible through both
+same(p, alias)             // true: reference identity
+SRC
+  }
+
+  p <<'PROSE'
+`same(a, b)` tests whether two references point at the same object. It is not `==`, which compares values and requires an `Eq` implementation on a struct or enum. Plain assignment never clones. A deep copy is opt-in: derive `Clone` and call `.clone()`.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+#[derive(Clone)]
+struct Config { values: List[int] }
+
+let copy = config.clone()  // deep copy, independent of the original
+SRC
+  }
+
+  callout "Primitives are values" {
+    kind = :note
+    body = "`int`, `float`, `bool`, `char` and `unit` are copied on assignment. Only reference types alias."
+  }
+
+  h2 "Functions"
+
+  p <<'PROSE'
+A function signature carries a type on every parameter and, when it returns something, on the return. A block evaluates to its last expression, so the body of `area` below has no `return`. An omitted return type means `unit`. A trailing semicolon discards a block's tail value. A function with no return type must not end on a non-unit expression, so write `f();` to discard a result.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+fn area(w: int, h: int) -> int {
+    w * h                  // the block's value is the function's result
+}
+
+fn log_line(msg: string) {  // no return type: unit
+    println(msg)
+}
+SRC
+  }
+
+  p <<'PROSE'
+An early exit uses `return`. In config-weave scripts the common shape is a fallible entry point that returns `Result[CheckResult, string]`, so `return Err("missing 'path' parameter")` ends the script with the step in the Error status. The `?` operator, described in the [Option and Result section](guide_wscript_data), propagates a host error the same way.
+PROSE
+
+  p <<'PROSE'
+A top-level function can take type parameters with the built-in bounds `Eq`, `Ord` and `Clone`, for example `fn max_of[T: Ord](a: T, b: T) -> T`. Instantiation is inferred at the call site. Generic functions are erased at runtime and cannot be entry points: config-weave calls only monomorphic functions. Generic structs, enums and traits do not exist; `List[T]` and `Map[K, V]` are built in.
+PROSE
+
+  h2 "Function values and closures"
+
+  p <<'PROSE'
+Functions are first-class. The type `fn(T1, T2) -> R` describes a callable and is how you declare a callback parameter. A closure is written `|params| body` and captures its environment by reference, so a closure that assigns to a captured variable changes the variable the caller sees. Closure parameter types are inferred where the context determines them.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+fn apply(f: fn(int) -> int, x: int) -> int { f(x) }
+
+fn make_counter() -> fn() -> int {
+    let n = 0
+    || { n = n + 1; n }    // captures n by reference
+}
+
+let double = |x| x * 2
+apply(double, 21)          // 42
+SRC
+  }
+
+  p <<'PROSE'
+The list and map combinators such as `map`, `filter`, `fold` and `each` take closures. They are the usual way to transform a list of lines from `shell::run` or the entries of a `Value` map.
+PROSE
+
+  h2 "Statements end at newlines"
+
+  p <<'PROSE'
+Semicolons are permitted and never required. A statement continues across a newline only when the line cannot end: inside an unclosed `(` or `[`, after a token that cannot end an expression such as a binary operator, a comma or `=`, when the next line starts with `.`, or when the next token is `else`.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+let total = add(1,
+    2, 3)              // an open ( continues the statement
+
+let s = "hello"
+    .to_upper()        // a line starting with . continues the chain
+
+if total > 5 { println("big") }
+else { println("small") }   // else may start a line
+SRC
+  }
+
+  h2 "A resource script, read top to bottom"
+
+  p <<'PROSE'
+The script below is the `file_present` resource from the sample playbook. It uses most of what this chapter covers: `use` lines, a helper function, `if let` on an `Option`, string comparison, `return Err`, the `?` operator on host calls, and `+` for a log line.
+PROSE
+
+  code rust {
+    filename = "resources/file_present.ws"
+    source = <<'SRC'
+use value
+use fs
+use path
+use log
+
+fn param_str(params: Value, key: string, fallback: string) -> string {
+    if let Some(v) = params.get(key) {
+        if let Some(s) = v.as_string() {
+            return s
+        }
+    }
+    fallback
+}
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let p = param_str(params, "path", "")
+    if p == "" {
+        return Err("missing 'path' parameter")
+    }
+    if !fs::exists(p) {
+        return Ok(CheckResult::NotConfigured)
+    }
+    let want = param_str(params, "content", "")
+    let have = fs::read(p)?
+    if have == want {
+        Ok(CheckResult::AlreadyConfigured)
+    } else {
+        Ok(CheckResult::NotConfigured)
+    }
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    let p = param_str(params, "path", "")
+    log::info("writing " + p)
+    fs::mkdir(path::parent(p))?
+    fs::write(p, param_str(params, "content", ""))?
+    Ok(ApplyResult::Success)
+}
+SRC
+  }
+
+  p <<'PROSE'
+`params` is a `Value`, the one dynamically typed value in a script. Its accessors are described in [The Value type](ref_value). `CheckResult` and `ApplyResult` are host-registered enums, and registered types are ambient: no `use` is needed to name them.
+PROSE
+}

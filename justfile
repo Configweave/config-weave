@@ -92,8 +92,8 @@ serve-pkgs-docs: build
 	test -d {{pkgs_dir}}
 	target/debug/config-weave docs {{pkgs_dir}} {{pkgs_dir}}/docs --pkg-only --serve --addr {{pkgs_docs_addr}}
 
-# Serve config-weave's own documentation site (landing at /, the config-weave
-# reference book under /wskills/config-weave/). Watches for `.wcl` changes but
+# Serve config-weave's own documentation site (landing at /, the manual under
+# /manual/; docs/manual/main.wcl also builds on its own). Watches for `.wcl` changes but
 # does not rebuild on its own — press Enter in the console. Needs `wcl` on PATH.
 [group('docs'), doc("Serve config-weave's documentation site (needs wcl)")]
 docs-serve *ARGS:
@@ -103,6 +103,18 @@ docs-serve *ARGS:
 [group('docs')]
 docs-build *ARGS:
 	wcl wdoc build docs/main.wcl --out docs/_site {{ARGS}}
+
+# Serve the manual on its own (docs/manual/main.wcl), without the landing
+# site. Watches for `.wcl` changes but does not rebuild on its own — press
+# Enter in the console. Needs `wcl` on PATH.
+[group('docs'), doc("Serve the manual on its own (needs wcl)")]
+manual-serve *ARGS:
+	wcl wdoc serve docs/manual/main.wcl --addr {{docs_addr}} {{ARGS}}
+
+# Build the manual on its own into docs/manual/_site/ (gitignored). Needs `wcl`.
+[group('docs')]
+manual-build *ARGS:
+	wcl wdoc build docs/manual/main.wcl --out docs/manual/_site {{ARGS}}
 
 # Serve config-weave's documentation site and open the landing page in the
 # browser once the server responds. Needs `wcl` on PATH.
@@ -114,14 +126,6 @@ docs-open *ARGS: (browser-open "http://" + docs_addr + "/") (docs-serve ARGS)
 [private]
 browser-open url:
 	@( for _ in $(seq 1 60); do curl -sf -o /dev/null '{{url}}' && break; sleep 0.5; done; xdg-open '{{url}}' ) >/dev/null 2>&1 &
-
-# Regenerate the committed Claude Code skill (.claude/skills/config-weave/) from the
-# config-weave wskill (docs/wskills/config-weave/). Cleans first — `wcl wdoc skill`
-# only writes the pages it generates, so stale pages would otherwise linger.
-[group('docs'), doc("Regenerate the committed Claude Code skill from the config-weave wskill")]
-skill-build *ARGS:
-	rm -rf .claude/skills/config-weave
-	wcl wdoc skill docs/wskills/config-weave/wdoc/skill/main.wcl --out .claude/skills/config-weave {{ARGS}}
 
 # Release artifacts for both PRD targets plus a checksums file.
 # Requires `cross` and a container runtime; the cross-repo deps are fetched

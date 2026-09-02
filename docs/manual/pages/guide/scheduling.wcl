@@ -1,0 +1,89 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_scheduling {
+  sites = [:manual]
+  title = "Scheduling and concurrency"
+
+  chapter_header "Scheduling and concurrency" {
+    kicker       = "The guide · explanation"
+    reading_time = "5 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+A play runs its steps in parallel by default. The engine builds a directed acyclic graph from each step's `requires` edges, dispatches a step as soon as everything it requires has finished, and bounds the overlap with each resource's concurrency class. This chapter explains how those two mechanisms interact and what happens when a step fails or a run halts. The class table is in [package.wcl](ref_package).
+PROSE
+
+  h2 "The dependency graph"
+
+  p <<'PROSE'
+Every step in a play is a node. Each name in a step's `requires` list adds an edge from the named step to this one. The names are sibling step names within the play, and the scope is flat: a step inside a container may name a step outside it. The loader rejects a name that does not exist and a set of edges that forms a cycle. When a play sets `parallel = false` the graph is ignored and the steps run in declaration order.
+PROSE
+
+  p <<'PROSE'
+The scheduler hands ready steps to a pool of workers. `--jobs` sets the pool size. A step becomes ready when every step it requires has reached a final status, and the scheduler keeps dispatching as long as the concurrency classes allow.
+PROSE
+
+  diagram {
+    layout = :layered
+    layer_gap = 56
+    node_gap = 40
+    process "install"   { id = "install"  width = 110 }
+    process "config"    { id = "config"    width = 110 }
+    process "user"      { id = "user"        width = 110 }
+    process "service"   { id = "service"  width = 110 }
+    edges = [
+      { source: "install", destination: "config",  kind: :flow },
+      { source: "install", destination: "user",    kind: :flow },
+      { source: "config",  destination: "service", kind: :flow },
+      { source: "user",    destination: "service", kind: :flow }
+    ]
+  }
+
+  p <<'PROSE'
+In this graph `config` and `user` both require `install` and run concurrently once it finishes. `service` requires both and waits for the slower of the two.
+PROSE
+
+  h2 "Ordering is not a success demand"
+
+  p <<'PROSE'
+`requires` says "after", not "only if that succeeded". The distinction shows in how the scheduler treats each final status of a dependency.
+PROSE
+
+  list {
+    li "A dependency that reports Already Configured or Configured releases its dependents normally."
+    li "A dependency that was Skipped, because its `condition` was false, also releases its dependents. A skipped step is not a failure."
+    li "In apply mode, a dependency that reports Error or Not Run blocks its dependents. They report Not Run with a message naming the dependency."
+  }
+
+  p <<'PROSE'
+When a run halts, because a step errored without `--continue-on-error` or because a step reported Reboot Required in apply mode, every step that was never dispatched reports Not Run. A halted run still reports every step deterministically, so the output always accounts for the whole play.
+PROSE
+
+  h2 "Concurrency classes"
+
+  p <<'PROSE'
+A resource declares a concurrency class, and the scheduler honours it for every step that uses the resource. `parallel`, the default, places no restriction: the step overlaps freely with any other. `exclusive` prevents two steps of the same resource from running at the same time, while steps of other resources continue. `global` runs the step completely alone: the scheduler drains every in-flight step, runs the global step solo, then resumes dispatching. A package manager that holds a system-wide lock is the typical `exclusive` resource; a reboot or a kernel update is the typical `global` one.
+PROSE
+
+  p <<'PROSE'
+A step may tighten the class its resource declares, never loosen it. Setting `concurrency = "exclusive"` on a step whose resource is `parallel` serialises that one step without changing the resource definition. Setting `parallel` on a step whose resource is `exclusive` is a validation error. Tightening is what lets a playbook resolve a race the package author did not anticipate, for example two `weave.execute` steps that both write the same lock file.
+PROSE
+
+  callout "Choose the loosest class that is correct" {
+    kind = :tip
+    body = "Because a step can only tighten, a resource that defaults to `exclusive` can never run two unrelated instances at once. Declare `parallel` unless the resource really does contend for one host-wide lock, and let the playbook tighten where it must."
+  }
+
+  h2 "Gatherers run first"
+
+  p <<'PROSE'
+Before any step is dispatched, every `gather` in the playbook runs concurrently. Invocations are deduplicated by gatherer and canonicalised parameters, and any gatherer failure aborts the run before the first step. The step graph therefore never waits on a gatherer, and no step can run against an incomplete scope. [Variables and secrets](guide_variables) explains how the results enter scope.
+PROSE
+
+  h2 "Where to go next"
+
+  p <<'PROSE'
+The three classes with their exact rules are tabulated in [package.wcl](ref_package). The `requires`, `condition` and `concurrency` fields on a step are in [playbook.wcl](ref_playbook). The `--jobs` and `--continue-on-error` flags are in [config-weave apply](cmd_apply).
+PROSE
+}

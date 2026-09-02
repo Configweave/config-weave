@@ -1,0 +1,137 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_testlab {
+  sites = [:manual]
+  title = "testlab module"
+
+  chapter_header "testlab module" {
+    kicker       = "Reference · reference"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use testlab` is the driver API a scenario script runs against a live vmlab
+lab. A scenario runs host-side, not inside an instance. Its script exports
+`fn run(lab: Lab) -> bool` or `fn run(lab: Lab) -> Result[bool, string]`
+and compiles in stage-5 validation against the full host API plus this
+module, so `validate` catches a broken driver. The module exposes no free
+functions. It registers the handle types `Lab`, `Machine` and `RunReport`
+and the plain structs `StepResult` and `ExecOut`. Every method that touches
+a machine returns `Result[…, string]`. See [The testlab](guide_testlab) for
+how scenarios fit into a package's tests.
+PROSE
+
+  h2 "Lab"
+
+  code rust {
+    source = <<'SRC'
+#[opaque]
+struct Lab {}
+SRC
+  }
+
+  p "The handle `run` receives. It owns the vmlab lab declared by the scenario's `lab` directory and hands out machine handles. The runner tears the lab down after `run` returns."
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Summary" |
+      | "`machine`" | "`(name: string) -> Result[Machine, string]`" | "bring the declared VM up on first reference and return its handle" |
+      | "`log`" | "`(message: string)`" | "print a scenario progress line to the terminal" |
+  }
+
+  h2 "Machine"
+
+  code rust {
+    source = <<'SRC'
+#[opaque]
+struct Machine {}
+SRC
+  }
+
+  p "A provisioned machine. The config-weave binary is copied into a machine and smoke-tested the first time a method needs it, so a machine that is only ever used through `exec` never pays for that copy. Resource keys are `package.resource`, and `props` is a `Value::Map` of the resource's properties. Playbook directories are resolved relative to the scenario's package."
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Summary" |
+      | "`name`" | "`() -> string`" | "the machine's declared name" |
+      | "`exec`" | "`(cmd: string, args: List[string]) -> Result[ExecOut, string]`" | "run a program in the guest" |
+      | "`powershell`" | "`(script: string) -> Result[ExecOut, string]`" | "run a script with `powershell -NoProfile -NonInteractive -Command`" |
+      | "`copy_in`" | "`(host_path: string, dest: string) -> Result[unit, string]`" | "copy a host file or directory into the guest" |
+      | "`reboot`" | "`() -> Result[unit, string]`" | "reboot the machine" |
+      | "`wait_ready`" | "`(secs: int) -> Result[unit, string]`" | "wait up to `secs` seconds for the guest to answer" |
+      | "`apply_resource`" | "`(key: string, props: Value) -> Result[StepResult, string]`" | "apply one resource in the guest" |
+      | "`check_resource`" | "`(key: string, props: Value) -> Result[StepResult, string]`" | "check one resource in the guest" |
+      | "`gather`" | "`(key: string, params: Value) -> Result[Value, string]`" | "run one gatherer in the guest and return its value; a refusal is an `Err`" |
+      | "`apply`" | "`(dir: string) -> Result[RunReport, string]`" | "apply a whole playbook directory in the guest" |
+      | "`check`" | "`(dir: string) -> Result[RunReport, string]`" | "check a whole playbook directory in the guest" |
+  }
+
+  h2 "RunReport"
+
+  code rust {
+    source = <<'SRC'
+#[opaque]
+struct RunReport {}
+SRC
+  }
+
+  p "The report of a whole-playbook `apply` or `check`, queried by step name."
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Summary" |
+      | "`ok`" | "`() -> bool`" | "the run exited zero" |
+      | "`step`" | "`(name: string) -> Result[StepResult, string]`" | "the result of one step; an unknown name is an `Err`" |
+  }
+
+  h2 "StepResult"
+
+  code rust {
+    source = <<'SRC'
+struct StepResult {
+    status: string,
+    message: string,
+    ok: bool,
+}
+SRC
+  }
+
+  p "The outcome of one step. `status` is one of `not_configured`, `configured`, `already_configured`, `reboot_required`, `error`, `skipped` or `not_run`. `ok` is `false` only when the step errored, or when the step was missing from the report."
+
+  h2 "ExecOut"
+
+  code rust {
+    source = <<'SRC'
+struct ExecOut {
+    exit_code: int,
+    stdout: string,
+    stderr: string,
+}
+SRC
+  }
+
+  p "The result of `exec` and `powershell`."
+
+  code rust {
+    source = <<'SRC'
+use testlab
+use value
+
+fn run(lab: Lab) -> Result[bool, string] {
+    let dc = lab.machine("dc")?
+    let first = dc.apply_resource("windows_domain.forest", Value::Map(#{
+        "name": Value::String("corp.example")
+    }))?
+    if first.status != "reboot_required" { return Ok(false) }
+    dc.reboot()?
+    dc.wait_ready(600)?
+    let second = dc.apply_resource("windows_domain.forest", Value::Map(#{
+        "name": Value::String("corp.example")
+    }))?
+    lab.log("forest converged")
+    Ok(second.status == "already_configured")
+}
+SRC
+  }
+}

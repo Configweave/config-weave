@@ -1,0 +1,113 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_host_api {
+  sites = [:manual]
+  title = "The host API"
+
+  chapter_header "The host API" {
+    kicker       = "The guide · explanation"
+    reading_time = "6 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+The host API is the set of wscript modules config-weave registers for every script it runs: resources, gatherers, verify scripts and scenario drivers. A script reaches the host through these modules and nothing else. This chapter explains what is registered, why the surface is the same on every platform, how scripts import shared helpers, and how to get your editor to type-check against the exact surface. Each module has its own reference chapter.
+PROSE
+
+  h2 "One surface on every platform"
+
+  p <<'PROSE'
+Every module is registered on every platform. A Windows-only function such as `registry::read` exists on Linux too, and returns a runtime error there. The reason is that compilation, validation and interface emission must be identical everywhere: a playbook validated on a Linux workstation is the same playbook that runs on a Windows host, and a script that references a foreign-platform function still compiles. Guard platform-specific calls with a step `condition`, for example `os.family == "windows"`, or inside the script with `sys::family()`.
+PROSE
+
+  p <<'PROSE'
+Import a module with `use <module>`. Every fallible function returns `Result[..., string]` and composes with `?`, so a resource whose entry point returns `Result[CheckResult, string]` can propagate a host error as the step's Error status with one character. The registered types `Value`, `CheckResult`, `ApplyResult`, `CmdOutput`, `HttpResponse` and `ComObject` are ambient, so they need no `use`.
+PROSE
+
+  h2 "The modules"
+
+  p "Cross-platform modules, available to every script."
+
+  list {
+    li "[log](ref_mod_log) writes structured output at a level. `print` and `println` in a script are routed into `log::info` so stdout stays clean for the JSON report."
+    li "[fs](ref_mod_fs) reads, writes, copies and removes files and directories."
+    li "[path](ref_mod_path) joins, splits and normalises paths."
+    li "[shell](ref_mod_shell) runs commands. `shell::run` splits its command with shell-words and executes the program directly, with no shell interpretation. `bash` and `powershell` are the escape hatches for shell features; `powershell` tries `powershell` and then `pwsh`, so it also works on Linux with PowerShell Core."
+    li "[http](ref_mod_http) fetches and downloads over HTTP."
+    li "[hash](ref_mod_hash) computes digests of strings and files."
+    li "[archive](ref_mod_archive) extracts archives."
+    li "[env](ref_mod_env) reads and writes environment variables."
+    li "[sys](ref_mod_sys) reports the platform: family, OS name, CPU count and similar facts."
+    li "[data](ref_mod_data) parses and writes INI."
+    li "[template](ref_mod_template) renders a Tera template against a map of variables, with autoescape off because the output is config files, not HTML."
+    li "[time](ref_mod_time) reads the clock and formats timestamps."
+    li "[json](ref_mod_json), [toml](ref_mod_toml) and [xml](ref_mod_xml) parse and emit those formats. They are wscript-std modules registered as they are."
+    li "[regex](ref_mod_regex) matches patterns. Every function takes `(pattern, text)` in that order; swapping them compiles and then silently never matches. An invalid pattern is a fault, not an `Err`, and surfaces as the step's Error status."
+  }
+
+  p "Windows-only modules, registered everywhere and functional only on Windows."
+
+  list {
+    li "[registry](ref_mod_registry) reads and writes registry keys and values."
+    li "[service](ref_mod_service) queries and controls Windows services."
+    li "[com](ref_mod_com) drives COM objects through IDispatch and runs WMI queries. Each WMI row is flattened into a property map host-side, so scripts never touch enumerators."
+  }
+
+  p <<'PROSE'
+One further module, [testlab](ref_mod_testlab), is registered only for scenario driver scripts. It provides the `Lab` and `Machine` handles a scenario uses to bring VMs up, apply config-weave and reboot them. See [The testlab](guide_testlab).
+PROSE
+
+  callout "Templates and WCL interpolation" {
+    kind = :tip
+    body = "Author a Tera template body as a raw WCL heredoc, `<<'TMPL'`, so WCL's own `$\"...${}\"` interpolation leaves Tera's `{{ }}` and `{% %}` untouched, and feed dynamic data through the `vars` map."
+  }
+
+  h2 "Shared helpers in lib/"
+
+  p <<'PROSE'
+Common code lives in a `lib/` directory, either a package's own `pkgs/<pkg>/lib/` or the playbook's `lib/`, which every package can see. A script imports a helper by its file stem, or by a relative path.
+PROSE
+
+  code rust {
+    filename = "resources/example.ws"
+    source = <<'SRC'
+use helpers            // pkgs/<pkg>/lib/helpers.ws, then <playbook>/lib/helpers.ws
+use "./shared.ws"      // relative to the importing script
+SRC
+  }
+
+  p "A bare `use name` resolves in this order, and the first match wins."
+
+  list {
+    style = :numbered
+    li "A registered host module. `use fs` always means the host API, even when a `lib/fs.ws` exists."
+    li "The importing script's own directory, as `<dir>/name.ws`."
+    li "The declaring package's `lib/`. A package can shadow a playbook-wide helper."
+    li "The playbook's `lib/`, shared across every package."
+  }
+
+  p <<'PROSE'
+Helper files are ordinary `.ws` scripts and may import each other. The whole import graph compiles into one unit, and only the entry file exports functions. A resource with helpers therefore satisfies the `check` and `apply` contract exactly as a single-file one does, and a helper cannot accidentally supply `check`. The bare form resolves `helpers.ws`; a path import carries its own extension, so write `use "./shared.ws"` in full.
+PROSE
+
+  p <<'PROSE'
+`config-weave validate` compiles every `lib/*.ws`, imported or not. A broken helper fails validation on its own, and an error inside a helper is reported against that helper's file and line, not against the script that imported it.
+PROSE
+
+  h2 "Editor support"
+
+  p <<'PROSE'
+`config-weave wscripti [outdir]` emits `weave.wscripti`, the full host interface, plus a starter `wscript.toml`. The interface file is generated from the same Rust modules the binary registers, so it is the authoritative description of the host surface. With both files next to your scripts, `wscript check` and the wscript language server type-check against the exact config-weave surface instead of wscript's own standard library. A misuse of the host API becomes an error in the editor, and the same error is caught by `config-weave validate`. See [config-weave wscripti](cmd_wscripti).
+PROSE
+
+  callout "The interface names keep their upstream spelling" {
+    kind = :info
+    body = "Scripts use the `.ws` extension, but the two interface files are named `weave.wscripti` and `wscript.toml`, matching the wscript command-line tools that read them."
+  }
+
+  h2 "Where to go next"
+
+  p <<'PROSE'
+The language itself is covered in [wscript: values, types and functions](guide_wscript_basics). The dynamic `Value` type every entry point receives is in [The Value type](ref_value), and the functions a script cannot use are listed in [What scripts cannot use](apx_not_registered).
+PROSE
+}

@@ -1,0 +1,70 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_docs {
+  sites = [:manual]
+  title = "config-weave docs"
+
+  chapter_header "config-weave docs" {
+    kicker       = "Commands · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`docs` renders a static wdoc site from the playbook's own metadata: the descriptions on plays, steps, variables, packages, resources, composites and gatherers. It walks the validated model, writes a wdoc source file named `_weave_docs.wcl` into the output directory, and shells out to the `wcl` CLI to build the HTML next to it. config-weave does not embed a renderer, so `wcl` must be installed. A playbook that does not validate does not document.
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave docs [OPTIONS] <PLAYBOOK_DIR> [OUTDIR]
+SRC
+  }
+
+  h2 "Arguments"
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PLAYBOOK_DIR`" | "The playbook directory." |
+      | "`OUTDIR`" | "Where to write the site. Optional. Defaults to `docs/` inside the playbook directory. Created when missing." |
+  }
+
+  h2 "Options"
+
+  p "The [global options](cmd_root) are accepted, and none changes what is documented: `docs` reads the playbook's declarations, not the values a run would bind."
+
+  table {
+    rows:
+      | "Option" | "Value" | "Meaning" |
+      | "`--serve`" | "" | "After rendering, hand the output directory to `wcl wdoc serve`, a development server that rebuilds on demand from its console. The command does not return until the server stops." |
+      | "`--addr`" | "`ADDR`" | "Listen address for `--serve`. Default `127.0.0.1:8080`. Requires `--serve`." |
+      | "`--pkg-only`" | "" | "Document only the packages. The playbook's plays, variables and gathered facts are skipped. Use it for a package repository whose playbook exists only as a validation harness." |
+  }
+
+  p "Set `CONFIG_WEAVE_WCL` to the path of a specific `wcl` binary when the one on `PATH` is not the one you want."
+
+  h2 "Examples"
+
+  p "Render the site into the default location."
+
+  code console {
+    source = <<'SRC'
+config-weave docs ./my-playbook
+rendered 7 page(s) to ./my-playbook/docs
+SRC
+  }
+
+  p "Render a package repository's docs into a build directory and preview them."
+
+  code console {
+    source = <<'SRC'
+config-weave docs ./config-weave-pkgs ./site --pkg-only --serve --addr 0.0.0.0:9000
+SRC
+  }
+
+  h2 "Exit status"
+
+  p "0 when the site rendered, and when `--serve` was given, once the server has stopped. 2 when the playbook did not validate, the output directory could not be created, or the `wcl` CLI could not be run."
+}

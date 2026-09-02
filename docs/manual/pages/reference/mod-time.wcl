@@ -1,0 +1,79 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_time {
+  sites = [:manual]
+  title = "time module"
+
+  chapter_header "time module" {
+    kicker       = "Reference · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use time` reads the wall clock and the monotonic clock, sleeps, and formats
+timestamps. config-weave registers it from wscript-std. No function in this
+module fails. Its common use is a resource that converges on an age rather
+than on a state, such as a package cache refreshed within the last N
+minutes: compare the `modified` field of `fs::metadata` against now.
+PROSE
+
+  h2 "now_unix and now_millis"
+
+  code rust {
+    source = <<'SRC'
+time::now_unix() -> float
+time::now_millis() -> int
+SRC
+  }
+
+  p "The wall-clock time since the Unix epoch, as seconds with sub-second precision or as whole milliseconds. Prefer `now_millis() / 1000` when the other side of a comparison is an integer, so the comparison stays in integers."
+
+  h2 "instant and elapsed"
+
+  code rust {
+    source = <<'SRC'
+time::instant() -> float
+time::elapsed(start: float) -> float
+SRC
+  }
+
+  p "`instant` reads the monotonic clock as seconds since a process-wide anchor. `elapsed` returns the seconds since an earlier `instant`. Use these for durations rather than a difference of `now_unix` calls, because the wall clock can step backwards when NTP corrects it or a VM resumes from a snapshot."
+
+  h2 "sleep"
+
+  code rust {
+    source = <<'SRC'
+time::sleep(millis: int)
+SRC
+  }
+
+  p "Blocks the script's thread for the given milliseconds. A negative value is treated as zero."
+
+  h2 "format_iso"
+
+  code rust {
+    source = <<'SRC'
+time::format_iso(unix_seconds: float) -> string
+SRC
+  }
+
+  p "Formats a Unix timestamp as an ISO 8601 string in UTC."
+
+  code rust {
+    source = <<'SRC'
+use fs
+use time
+
+// Refresh when the stamp file is missing or older than max_age seconds.
+fn stale(stamp: string, max_age: int) -> Result[bool, string] {
+    if !fs::is_file(stamp) { return Ok(true) }
+    let meta = fs::metadata(stamp)?
+    let modified = if let Some(m) = meta.get("modified") {
+        if let Some(ts) = m.as_int() { ts } else { 0 }
+    } else { 0 }
+    Ok(time::now_millis() / 1000 - modified > max_age)
+}
+SRC
+  }
+}

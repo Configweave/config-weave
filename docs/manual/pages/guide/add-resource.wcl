@@ -1,0 +1,145 @@
+// Part II — The guide. Declared mode: how-to.
+page howto_add_resource {
+  sites = [:manual]
+  title = "Add a resource to a package"
+
+  chapter_header "Add a resource to a package" {
+    kicker       = "The guide · how-to"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  h2 "Goal"
+
+  p <<'PROSE'
+Declare a new resource in an existing package and implement its `check` and
+`apply` functions in wscript against the host API, so a playbook step can
+invoke it. You need a playbook that already has a `pkgs/<name>/package.wcl`.
+The example adds a `file_present` resource; substitute your own name, params
+and script body.
+PROSE
+
+  h2 "1. Declare the resource and its params"
+
+  p <<'PROSE'
+Add a `resource` block to `package.wcl`. `script` is a path relative to the
+package directory. Declare one `param` block per input the resource accepts.
+Every param carries a `description` and a `type`, and is either `required`
+or has a `default`. The engine validates each step's properties against
+these params, so a step that passes an unknown or mistyped property fails
+validation before anything runs.
+PROSE
+
+  code wcl {
+    filename = "pkgs/core/package.wcl"
+    source = <<'SRC'
+resource "file_present" {
+  description = "Ensure a file exists with the given content"
+  script = "resources/file_present.ws"
+  concurrency = "parallel"
+  param "path"    { description = "Absolute path"  type = "string"  required = true }
+  param "content" { description = "File content"   type = "string"  default = "" }
+}
+SRC
+  }
+
+  p <<'PROSE'
+`concurrency` names the class the scheduler uses for this resource. The
+classes and what they allow to run alongside each other are in
+[package.wcl](ref_package), and the reasoning is in
+[Scheduling and concurrency](guide_scheduling).
+PROSE
+
+  h2 "2. Implement check and apply"
+
+  p <<'PROSE'
+Write the script at the path you declared. It exports `check(params)` and
+`apply(params)`. Import each host module you use with `use`. The `params`
+value is a map of the step's properties, with defaults filled in.
+PROSE
+
+  code rust {
+    filename = "pkgs/core/resources/file_present.ws"
+    source = <<'SRC'
+use value
+use fs
+use path
+
+// A missing or non-string property is an error the engine reports against the step.
+fn param_str(params: Value, key: string) -> Result[string, string] {
+    match params.get(key) {
+        Some(v) => match v.as_string() {
+            Some(s) => Ok(s),
+            None => Err(fmt("property '{}' is not a string", key)),
+        },
+        None => Err(fmt("missing property '{}'", key)),
+    }
+}
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let p = param_str(params, "path")?
+    if !fs::exists(p) { return Ok(CheckResult::NotConfigured) }
+    if fs::read(p)? == param_str(params, "content")? {
+        Ok(CheckResult::AlreadyConfigured)
+    } else { Ok(CheckResult::NotConfigured) }
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    let p = param_str(params, "path")?
+    fs::mkdir(path::parent(p))?
+    fs::write(p, param_str(params, "content")?)?
+    Ok(ApplyResult::Success)
+}
+SRC
+  }
+
+  callout "The contract" {
+    kind = :warning
+    body = "`check` must never mutate the machine. `apply` must converge, so that a re-check returns `AlreadyConfigured` even in a fresh process. A resource that breaks either rule passes validation and fails at the second apply, or in the testlab."
+  }
+
+  p <<'PROSE'
+The exact signatures, and the other variants of `CheckResult` and
+`ApplyResult`, are in [Script entry points](ref_scripts). Every fallible
+host function returns a `Result`, so propagate errors with `?` and let the
+engine report them against the step.
+PROSE
+
+  p <<'PROSE'
+To have your editor type-check the script against the real host surface, run
+`config-weave wscripti` in the playbook directory. It writes `weave.wscripti`
+and a `wscript.toml` that the wscript language server reads, so a misspelled
+host function is flagged as you type. [config-weave wscripti](cmd_wscripti)
+describes the output.
+PROSE
+
+  h2 "3. Validate that the script compiles"
+
+  p <<'PROSE'
+Run validation. Its final stage compiles every script against the host API,
+so a wrong signature, an unknown host function or a type error is a hard
+error here.
+PROSE
+
+  code console {
+    source = <<'SRC'
+$ config-weave validate ./my-playbook
+ok: playbook 'My Playbook' v0.1.0 — 2 package(s), 1 play(s), 3 step(s)
+SRC
+  }
+
+  callout "Done" {
+    kind = :success
+    body = "`config-weave validate` exits 0 with the new resource's script compiled. A step can now name it as `core.file_present`, or as `file_present` from inside the same package's tests."
+  }
+
+  h2 "Next steps"
+
+  list {
+    li "Invoke the resource from a step and converge it: [Check, then apply](howto_check_apply)."
+    li "Prove it converges and stays converged in a disposable instance: [Test a package](howto_test_package)."
+    li "The host modules a script can import: [The host API](guide_host_api), with one reference chapter per module starting at [fs module](ref_mod_fs)."
+    li "The full `resource` and `param` field list: [package.wcl](ref_package). The background on packages: [Packages, resources and gatherers](guide_packages)."
+  }
+}

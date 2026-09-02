@@ -1,0 +1,162 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_wscript_data {
+  sites = [:manual]
+  title = "wscript: structs, enums and matching"
+
+  chapter_header "wscript: structs, enums and matching" {
+    kicker       = "The guide · explanation"
+    reading_time = "6 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+This chapter covers the data-modelling half of wscript: structs with methods, enums with payloads, `match` with compile-time exhaustiveness checking, and the two built-in enums `Option[T]` and `Result[T, E]` with the `?` operator. Resource scripts lean on the last two constantly, because every host call that can fail returns a `Result` and every lookup that can miss returns an `Option`. The basics of values and functions are in [wscript: values, types and functions](guide_wscript_basics).
+PROSE
+
+  h2 "Structs and methods"
+
+  p <<'PROSE'
+A `struct` is a named record of typed fields. Construct one with `Type { field: value, ... }`. Methods live in an `impl` block. `self` is implicit in type and always by reference, so a method that assigns to `self.hp` changes the struct every alias sees. Compound assignment such as `+=` works on any assignable place: a variable, a field, or a list or map element.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+struct Player { name: string, hp: int }
+
+impl Player {
+    fn new(name: string) -> Player {          // associated function: no self
+        Player { name: name, hp: 100 }        // called as Player::new("wil")
+    }
+    fn heal(self, amount: int) {
+        self.hp += amount
+    }
+}
+
+let p = Player::new("wil")
+p.heal(20)                 // p.hp == 120
+SRC
+  }
+
+  p <<'PROSE'
+A function in an `impl` block without `self` is an associated function, called as `Type::func(...)`. That is the constructor idiom. Because a struct is a reference type, mutating a field in place is visible through every alias, as described under [reference semantics](guide_wscript_basics).
+PROSE
+
+  h2 "Enums"
+
+  p <<'PROSE'
+An `enum` is a tagged union. A variant is one of three shapes: unit, tuple, or struct. Construct a variant as `Enum::Variant`, with a payload where the variant has one.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+enum Event {
+    Quit,                        // unit variant
+    Key(char),                   // tuple variant
+    Click { x: int, y: int },    // struct variant
+}
+
+let e = Event::Click { x: 10, y: 20 }
+SRC
+  }
+
+  p <<'PROSE'
+An enum takes an `impl` block too, with methods and associated functions. Where a variant and an associated function share a name, the variant wins. The host-registered `CheckResult` and `ApplyResult` enums that entry points return are ordinary enums of this kind; their variants are listed in [Script entry points](ref_scripts).
+PROSE
+
+  h2 "Pattern matching"
+
+  p <<'PROSE'
+`match` is an expression. It is exhaustiveness-checked at compile time: a missing variant is a compile error that names a witness the arms do not cover. The analysis is exact for nested variant, struct, `bool` and literal patterns.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+fn handle(e: Event) -> bool {
+    match e {
+        Event::Quit => false,
+        Event::Key(c) if c == 'q' => false,            // guard
+        Event::Key('h') | Event::Key('?') => help(),   // or-pattern with literals
+        Event::Key(_) => true,
+        Event::Click { x, y } => x >= 0 && y >= 0,     // struct destructuring
+    }
+}
+SRC
+  }
+
+  p <<'PROSE'
+An arm with an `if` guard never counts toward exhaustiveness, so a guarded arm needs an unguarded arm after it that covers the same variant. An or-pattern `pat1 | pat2` cannot bind names. The pattern forms are:
+PROSE
+
+  list {
+    li "`_` matches anything."
+    li "`name` matches anything and binds it to `name`."
+    li "A literal such as `42`, `'q'` or `\"hi\"` matches by equality."
+    li "`Enum::Variant(x)` matches a tuple variant and binds its payload."
+    li "`Enum::Variant { x, y }` matches a struct variant and destructures its fields."
+    li "`pat1 | pat2` matches either pattern, with no bindings."
+  }
+
+  p <<'PROSE'
+`if let` and `let ... else` work as in Rust. A `let-else` block must diverge with `return`, `break` or an endless `loop`.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+if let Some(task) = store.find(id) { task.done = true }
+
+let Some(n) = s.parse_int() else { return Err("not a number") }
+SRC
+  }
+
+  p <<'PROSE'
+`if` is also an expression, and both branches must agree on a type: `let sign = if x < 0 { -1 } else { 1 }`.
+PROSE
+
+  h2 "Option and Result"
+
+  p <<'PROSE'
+`Option[T]` and `Result[T, E]` are always available without an import. An `Option` is `Some(value)` or `None`. A `Result` is `Ok(value)` or `Err(error)`. Both are enums, so `match`, `if let` and `let-else` all apply to them. The methods are listed under [built-in methods](ref_wscript_methods): `is_some`, `is_none`, `unwrap`, `unwrap_or` and `expect` on an `Option`, and `is_ok`, `is_err`, `unwrap`, `unwrap_or`, `unwrap_err` and `expect` on a `Result`.
+PROSE
+
+  p <<'PROSE'
+The `?` operator early-returns the `None` or `Err` from the enclosing function, as in Rust. It composes across the host boundary: a host function that can fail, such as `fs::read`, returns a `Result[T, string]`, and `?` on it hands the host's error message straight back as the function's `Err`.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+fn parse_double(s: string) -> Result[int, string] {
+    let Some(n) = s.parse_int() else { return Err("bad number") }
+    Ok(n * 2)
+}
+
+fn sum(a: string, b: string) -> Result[int, string] {
+    Ok(parse_double(a)? + parse_double(b)?)
+}
+SRC
+  }
+
+  p <<'PROSE'
+`?` needs a function whose return type is a `Result` or an `Option`. That is why config-weave accepts a fallible signature for every entry point: `fn check(params: Value) -> Result[CheckResult, string]` lets a resource write `let have = fs::read(p)?` and let a read failure end the step in the Error status. The plain signature `fn check(params: Value) -> CheckResult` has nowhere for `?` to send an error. Both forms are in [Script entry points](ref_scripts).
+PROSE
+
+  callout "unwrap faults" {
+    kind = :warning
+    body = "`unwrap()` on `None` or on `Err` raises a VM fault. In config-weave a fault ends the step with the Error status and a stack trace in the log. Where absence is expected, use `xs.get(i)`, `m.get(k)`, `unwrap_or`, or a `match`. See [faults](guide_wscript_flow)."
+  }
+
+  h2 "Matching on Value"
+
+  p <<'PROSE'
+`Value`, the type of `params` and of every gatherer result, is itself an enum with the variants `Null`, `Bool`, `Int`, `Float`, `String`, `List` and `Map`. You can match on it like any other enum, or use the accessor methods `get`, `at`, `as_string` and their siblings, each of which returns an `Option`. Both routes are described in [The Value type](ref_value). The accessor route reads best when a script wants one field with a fallback:
+PROSE
+
+  code rust {
+    source = <<'SRC'
+let mode = params.get("mode")
+    .unwrap_or(Value::String("0644"))
+    .as_string()
+    .unwrap_or("0644")
+SRC
+  }
+}

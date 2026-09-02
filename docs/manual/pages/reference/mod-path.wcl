@@ -1,0 +1,90 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_path {
+  sites = [:manual]
+  title = "path module"
+
+  chapter_header "path module" {
+    kicker       = "Reference · reference"
+    reading_time = "1 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use path` manipulates path strings without touching the filesystem. Every
+function is pure and uses the separator of the platform the script runs on.
+Only `absolutize` can fail, because it reads the current directory; it
+returns `Result[string, string]`. Use the [fs module](ref_mod_fs) to read or
+write what a path names.
+PROSE
+
+  h2 "join"
+
+  code rust {
+    source = <<'SRC'
+path::join(a: string, b: string) -> string
+SRC
+  }
+
+  p "Joins two segments with the platform separator."
+
+  h2 "parent"
+
+  code rust {
+    source = <<'SRC'
+path::parent(p: string) -> string
+SRC
+  }
+
+  p "Returns the parent directory of a path. At the root it returns the empty string."
+
+  h2 "filename"
+
+  code rust {
+    source = <<'SRC'
+path::filename(p: string) -> string
+SRC
+  }
+
+  p "Returns the final component of a path."
+
+  h2 "extension"
+
+  code rust {
+    source = <<'SRC'
+path::extension(p: string) -> string
+SRC
+  }
+
+  p "Returns the extension of the final component without the dot, or the empty string when there is none."
+
+  h2 "normalize"
+
+  code rust {
+    source = <<'SRC'
+path::normalize(p: string) -> string
+SRC
+  }
+
+  p "Resolves `.` and `..` components lexically. It does not consult the filesystem, so symlinks are not followed."
+
+  h2 "absolutize"
+
+  code rust {
+    source = <<'SRC'
+path::absolutize(p: string) -> Result[string, string]
+SRC
+  }
+
+  p "Makes a path absolute against the current directory, then normalizes it."
+
+  code rust {
+    source = <<'SRC'
+use path
+
+let conf = path::join("/etc/app", "app.conf")
+let ext = path::extension(conf)   // "conf"
+let dir = path::parent(conf)      // "/etc/app"
+SRC
+  }
+}

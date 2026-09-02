@@ -1,0 +1,118 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_root {
+  sites = [:manual]
+  title = "config-weave"
+
+  chapter_header "config-weave" {
+    kicker       = "Commands · reference"
+    reading_time = "7 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`config-weave` is a single binary. Every command takes a playbook directory (the directory holding `playbook.wcl`) and a set of global options. The global options are accepted after any subcommand as well as before it. This chapter covers the global options, the three output modes, the exit codes and the environment variables. Each subcommand has its own chapter.
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave [OPTIONS] <COMMAND>
+
+Commands:
+  check     Report configuration status of all steps (never mutates)
+  apply     Apply all unconfigured steps in a play
+  list      List all plays defined in the playbook
+  validate  Full validation pipeline, no execution
+  test      Run package convergence tests in disposable instances
+  docs      Generate wdoc documentation (default outdir: <dir>/docs/)
+  wscripti  Emit .wscripti interface files for the host API plus a starter wscript.toml
+  init      Scaffold a skeleton playbook
+  pkg       Manage packages installed from git package repositories
+  secrets   Encrypt, decrypt or re-key the secret("…") values in playbook.wcl
+  version   Print version information
+SRC
+  }
+
+  h2 "Global options"
+
+  p "Every option in this table is global. It is accepted by every subcommand, though only the commands that run scripts read the execution and password options."
+
+  table {
+    rows:
+      | "Option" | "Value" | "Meaning" |
+      | "`--var`" | "`KEY=VALUE`" | "Override a playbook variable. Repeatable. `KEY` must be an identifier. `VALUE` is parsed as a WCL expression when it is one, otherwise it is taken as a plain string. See [Variables and secrets](guide_variables)." |
+      | "`--var-file`" | "`PATH`" | "Merge a WCL file's top-level `name = value` fields into scope. Each field is evaluated on its own and cannot reference other variables. `--var` wins over `--var-file`." |
+      | "`--password-stdin`" | "" | "Read the secrets password from stdin. Trailing newline is stripped." |
+      | "`--password-file`" | "`PATH`" | "Read the secrets password from a file. Trailing newline is stripped." |
+      | "`--jobs`" | "`N`" | "Worker pool size for step execution. Default is the smaller of the CPU count and 8. `test` forwards it into the instances." |
+      | "`--continue-on-error`" | "" | "Keep dispatching steps after a step reports Error. Without it the scheduler stops dispatching, lets in-flight steps finish and halts." |
+      | "`--json`" | "" | "JSON output mode: one object on stdout at completion and nothing else on stdout." |
+      | "`--no-color`" | "" | "Plain ASCII output. Also selected automatically when stdout is not a terminal." |
+      | "`--log-file`" | "`PATH`" | "Write an NDJSON log file. The file is created with the parent directory as given. Independent of the terminal mode." |
+      | "`--log-level`" | "`LEVEL`" | "Level for the log file: `trace`, `debug`, `info`, `warn` or `error`. Default `info`. An unknown level exits with code 2 before the command runs." |
+      | "`-v`, `--verbose`" | "" | "Increase terminal verbosity. Repeatable. At `-v` and above, script `log::debug` lines reach the terminal." |
+      | "`-h`, `--help`" | "" | "Print help for the command." |
+      | "`-V`, `--version`" | "" | "Print the version and exit." |
+  }
+
+  p <<'PROSE'
+The password options and `$CONFIG_WEAVE_PASSWORD` are three sources for one password. Give exactly one. Giving two is an error, and giving none while the playbook holds encrypted values is also an error. There is no prompt, so an unattended run fails with exit code 2 instead of waiting on a terminal. A playbook with no `secret()` calls never asks for a password.
+PROSE
+
+  h2 "Output modes"
+
+  p "Terminal output has three mutually exclusive modes. The mode is chosen once per run from `--json`, `--no-color` and whether stdout is a terminal."
+
+  table {
+    rows:
+      | "Mode" | "Selected by" | "Behaviour" |
+      | "Rich" | "Default when stdout is a terminal" | "Colour, Unicode icons, a live progress line on stderr with phase detail, and per-step timing. The final report repeats only the summary." |
+      | "Plain" | "`--no-color`, or stdout is not a terminal" | "ASCII, one line per step in declaration order, then a summary. No cursor movement." |
+      | "JSON" | "`--json`" | "One complete JSON object on stdout at completion. Nothing else is written to stdout. Script log output goes to stderr or the log file." |
+  }
+
+  p <<'PROSE'
+The JSON object for `check` and `apply` is schema-stable. It carries `playbook`, `version`, `play`, `mode`, `exit_code`, `duration_secs`, the `gathered` list (name and gatherer) and the `steps` list. Each step has `name`, `container_path`, `resource`, `status` (for example `already_configured`), `message` and `duration_secs`. Steps appear in declaration order whatever order they finished in, so two reports diff cleanly.
+PROSE
+
+  p <<'PROSE'
+File logging is separate from the terminal mode. `--log-file PATH` installs an NDJSON subscriber at `--log-level`. Every script `log::*` call becomes one line with the step and resource attached, alongside the engine's own events. The file is buffered and flushed when the process exits. `check`, `apply` and `test` also accept `--events-ndjson`, which streams one JSON event per line to stderr while the run is in progress. That stream replaces the live progress line and leaves stdout to the final report.
+PROSE
+
+  h2 "Exit status"
+
+  p "All commands share one exit code table. The reboot code is only produced by `apply`."
+
+  table {
+    rows:
+      | "Code" | "Meaning" |
+      | "0" | "Success. For `apply`, every step converged; for `check`, every step reported without error; for `test`, every test passed." |
+      | "1" | "One or more steps ended in Error, or one or more tests failed or errored." |
+      | "2" | "Validation failure, a bad option, a missing password, a missing external tool, or any other problem found before execution started." |
+      | "3" | "Reboot required. An `apply` run halted because a step returned RebootRequired. Reboot and run `apply` again; the converged steps report AlreadyConfigured and execution resumes through the DAG." |
+  }
+
+  p "A step in Error takes priority over a reboot: when both occur in one run the exit code is 1. See [The convergence contract](guide_convergence) for how statuses arise."
+
+  h2 "Environment"
+
+  table {
+    rows:
+      | "Variable" | "Read by" | "Meaning" |
+      | "`CONFIG_WEAVE_PASSWORD`" | "`check`, `apply`, `test`, `secrets`" | "The secrets password. An alternative to `--password-stdin` and `--password-file`. An empty value counts as unset." |
+      | "`CONFIG_WEAVE_NEW_PASSWORD`" | "`secrets rekey`" | "The new password. An alternative to `--new-password-file`." |
+      | "`CONFIG_WEAVE_STATE_DIR`" | "`weave.execute_once` (inside scripts)" | "Root directory for the once records, replacing `/var/lib/config-weave/once` on Linux and the registry key on Windows. On Windows it selects the file form as well." |
+      | "`CONFIG_WEAVE_TEST_BINARY`" | "`test`" | "Static Linux binary to copy into instances. An alternative to `--binary`." |
+      | "`CONFIG_WEAVE_TEST_BINARY_WINDOWS`" | "`test`" | "Windows binary for Windows guests. An alternative to `--binary-windows`." |
+      | "`CONFIG_WEAVE_VMLAB_CMD`" | "`test`" | "Path to the vmlab CLI. When unset, `vmlab` is looked up on `PATH`." |
+      | "`CONFIG_WEAVE_WCL`" | "`docs`" | "Path to the `wcl` CLI used for `wdoc build` and `wdoc serve`. When unset, `wcl` is looked up on `PATH`." |
+  }
+
+  h2 "Internal subcommands"
+
+  p <<'PROSE'
+The binary also has five hidden subcommands: `__gather`, `__verify`, `__wcl-inspect`, `__wcl-render` and `__templates`. The first two are the in-instance half of the test protocol, run by `config-weave test` inside a container or VM. The other three serve external tooling with JSON on stdin and stdout. They do not appear in `--help`, their interfaces can change without notice, and this manual does not document them further.
+PROSE
+}

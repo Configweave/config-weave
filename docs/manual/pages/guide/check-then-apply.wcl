@@ -1,0 +1,114 @@
+// Part II — The guide. Declared mode: how-to.
+page howto_check_apply {
+  sites = [:manual]
+  title = "Check, then apply"
+
+  chapter_header "Check, then apply" {
+    kicker       = "The guide · how-to"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  h2 "Goal"
+
+  p <<'PROSE'
+Preview what a play would change on this machine, converge the machine, and
+confirm the result is idempotent. You need a playbook that validates and
+permission to change the target machine before the apply step. The examples
+use a play named `baseline` with two steps.
+PROSE
+
+  h2 "1. Dry-run with check"
+
+  p <<'PROSE'
+Run the play in check mode. Every step's `check` function runs and reports
+its status. Nothing is written. Pass variables with `--var KEY=VALUE`,
+repeated as needed, or `--var-file PATH`. If the playbook holds encrypted
+values, supply the password as described in
+[Encrypt secrets in a playbook](howto_encrypt_secrets).
+PROSE
+
+  code console {
+    source = <<'SRC'
+$ config-weave check ./my-playbook baseline
+check 'My Playbook' v0.1.0 — play 'baseline'
+steps:
+  [     not configured] make-a (core.file_present)
+  [     not configured] make-b (core.file_present)
+summary: 0 already configured, 0 configured, 2 not configured, 0 reboot required, 0 skipped, 0 error, 0 not run (0.0s)
+SRC
+  }
+
+  p <<'PROSE'
+In check mode a step reports `already configured`, `not configured`,
+`skipped` when its condition is false, or `error` when its script failed.
+The exit code is 0 unless a step reports `error`, so drift alone does not
+fail a check.
+PROSE
+
+  h2 "2. Apply to converge"
+
+  p <<'PROSE'
+Run the same play in apply mode. For each step the engine runs `check`, and
+when the step is not configured it runs `apply` and then `check` again.
+`configured` means apply changed the machine and the re-check confirmed it.
+PROSE
+
+  code console {
+    source = <<'SRC'
+$ config-weave apply ./my-playbook baseline
+apply 'My Playbook' v0.1.0 — play 'baseline'
+steps:
+  [         configured] make-a (core.file_present)
+  [         configured] make-b (core.file_present)
+summary: 0 already configured, 2 configured, 0 not configured, 0 reboot required, 0 skipped, 0 error, 0 not run (0.0s)
+SRC
+  }
+
+  p <<'PROSE'
+A step whose apply reports `reboot required` halts the play, and the run
+exits 3 so a wrapper can reboot and run the play again. A step that reports
+`error` also halts the play: the remaining steps report `not run` and the
+run exits 1. Pass `--continue-on-error` to keep dispatching after an error.
+Steps that require the failed step still report `not run`.
+PROSE
+
+  h2 "3. Confirm idempotence"
+
+  p "Run apply once more, with nothing changed in between."
+
+  code console {
+    source = <<'SRC'
+$ config-weave apply ./my-playbook baseline
+apply 'My Playbook' v0.1.0 — play 'baseline'
+steps:
+  [ already configured] make-a (core.file_present)
+  [ already configured] make-b (core.file_present)
+summary: 2 already configured, 0 configured, 0 not configured, 0 reboot required, 0 skipped, 0 error, 0 not run (0.0s)
+SRC
+  }
+
+  p <<'PROSE'
+Every step reports `already configured`. If a step reports `configured`
+again, its `check` depends on state that existed only in the previous
+process, or its `apply` does not produce the state its `check` looks for.
+Either way the convergence contract is broken and the resource script needs
+fixing before the playbook is trusted.
+PROSE
+
+  callout "Done" {
+    kind = :success
+    body = "A second `apply` reports every step `already configured` and exits 0. A check run from a scheduler now reports drift against this converged state."
+  }
+
+  h2 "Next steps"
+
+  list {
+    li "Why the second apply is the proof: [The convergence contract](guide_convergence)."
+    li "Every option the two commands accept, and the JSON output mode for a wrapper: [config-weave check](cmd_check), [config-weave apply](cmd_apply) and the global options in [config-weave](cmd_root)."
+    li "How `--var` and `--var-file` override playbook variables: [Variables and secrets](guide_variables)."
+    li "How steps are ordered and which run in parallel: [Scheduling and concurrency](guide_scheduling)."
+    li "Prove the same loop in a disposable instance: [Test a package](howto_test_package)."
+  }
+}

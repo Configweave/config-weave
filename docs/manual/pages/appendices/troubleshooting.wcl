@@ -1,0 +1,196 @@
+// Part V — Appendices. Declared mode: explanation.
+page apx_troubleshooting {
+  sites = [:manual]
+  title = "Troubleshooting"
+
+  chapter_header "Troubleshooting" {
+    kicker       = "Appendices · explanation"
+    reading_time = "11 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p "Each section below starts from a symptom you can see on the terminal, explains the cause, and gives the fix. Most symptoms trace back to one of three rules: validation compiles every script before anything runs, the convergence contract is enforced by a re-check, and secrets and the testlab never prompt or guess."
+
+  h2 "validate reports a script compile error"
+
+  p <<'PROSE'
+**Symptom.** `config-weave validate`, `check`, `apply` or `test` stops with a diagnostic that points into a `.ws` file: an unknown module, an unknown function, a type mismatch, or an import that cannot be resolved.
+
+**Cause.** Stage five of validation compiles every resource, gatherer, verify and scenario script, plus every helper under `lib/`, against the full host API before any step runs. The host API is a closed list. A `use` of a module config-weave does not register, or a call to a function a module does not have, is a compile error, not a runtime one. An import is resolved as a registered host module first, then as a `.ws` file in the importing file's directory, the package's `lib/`, and the playbook's `lib/`. The diagnostic is rendered against the file that owns the error, so an error in a helper points at the helper.
+
+**Fix.** Check the module and function names against the reference chapters, starting from [The host API](guide_host_api). Run `config-weave wscripti` to emit the interface file and point your editor's wscript checker at it, so the same errors show up while you type. For an unresolved import, confirm the file has the `.ws` extension and sits in one of the searched directories.
+PROSE
+
+  h2 "validate reports that a script does not satisfy a contract"
+
+  p <<'PROSE'
+**Symptom.** A diagnostic reads `script does not satisfy the 'check' contract` (or `apply`, `gather`, `verify`), or `scenario script does not satisfy the 'run(lab: Lab) -> bool' contract`.
+
+**Cause.** The script compiled, but it does not export the named function with one of the two accepted signatures. Only the entry file's functions are exported, so a function defined in an imported helper does not count.
+
+**Fix.** Match the signature in [Script entry points](ref_scripts) exactly, including the parameter type `Value` and the return type. Use the `Result[…, string]` form only when the body uses `?`.
+PROSE
+
+  h2 "validate rejects a property or parameter value"
+
+  p <<'PROSE'
+**Symptom.** A diagnostic names a step or gather and says a property is unknown, a required one is missing, a value has the wrong type, a symbol must be written with a colon, or a duration must be a unit literal.
+
+**Cause.** Step `properties` and gather `params` are validated against the resource's or gatherer's `param` declarations. A `symbol` value is only accepted in the `:name` spelling, and when the parameter enumerates `symbol` blocks the value must be one of them. A `duration` is only accepted as a bare unit literal such as `30min`.
+
+**Fix.** Look up the parameter table in the package's generated docs or its `package.wcl`, then correct the spelling. The field rules are in [package.wcl](ref_package).
+PROSE
+
+  h2 "a property that references a variable reports a cycle"
+
+  p <<'PROSE'
+**Symptom.** A property such as `url = url` fails with a self-reference or cycle error, or a composite body's `properties { path = path }` does.
+
+**Cause.** A property or parameter field shadows an outer variable of the same name inside its block, so the field refers to itself.
+
+**Fix.** Give the variable a distinct name, such as `tool_url`. Inside a composite body read arguments as `args.path`, which never collides. See [Variables and secrets](guide_variables).
+PROSE
+
+  h2 "a step declares a looser concurrency than its resource"
+
+  p <<'PROSE'
+**Symptom.** Validation fails with `steps may only tighten`.
+
+**Cause.** A resource declares its concurrency class, and a step may tighten that class but never loosen it. A step declaring `parallel` on an `exclusive` resource is the usual case.
+
+**Fix.** Remove the step's `concurrency` field or choose a class at least as strict as the resource's. The classes are listed in [package.wcl](ref_package).
+PROSE
+
+  h2 "apply reports error after a successful apply"
+
+  p <<'PROSE'
+**Symptom.** In apply mode a step reports *error* with the message `apply claimed success but the re-check disagrees`, and the play halts unless you passed `--continue-on-error`.
+
+**Cause.** The resource's `apply` returned `Success`, but the immediate re-check did not return `AlreadyConfigured`. The engine enforces the [convergence contract](guide_convergence) by re-running `check` after every apply. Either `apply` did not finish the work, or `check` tests something `apply` does not set. A variant is `re-check failed:` followed by an error, which means the second `check` call itself returned `Err` or faulted.
+
+**Fix.** Make `check` and `apply` agree on the same definition of converged. If `apply` writes a file, `check` must compare the file's content, not only its existence. If `apply` starts a service, `check` must wait for the state it reads to settle. Test the resource with `config-weave test`, whose three-run protocol catches the same disagreement in a clean instance.
+PROSE
+
+  h2 "a test passes run 2 but fails run 3"
+
+  p <<'PROSE'
+**Symptom.** `config-weave test` reports a step that expected `already_configured` after the second apply but got `configured`.
+
+**Cause.** The resource converges within one process but not across processes. Run 3 is a fresh `config-weave apply`, so state the script kept only in memory, or a check that passes only because the same process just applied, no longer holds.
+
+**Fix.** Make `check` read the state from the host every time. Anything `apply` records must live on disk, in the registry, or in the system being configured, not in the script. See [The testlab](guide_testlab).
+PROSE
+
+  h2 "a step reports error with a stack trace"
+
+  p <<'PROSE'
+**Symptom.** A step reports *error* and the message carries a wscript stack trace: an index out of bounds, a division by zero, `unwrap()` on `None`, or an invalid regular expression.
+
+**Cause.** These are VM faults. wscript delivers them to the host as trappable errors with a stack trace, and config-weave maps a fault in `check` or `apply` to the step's *error* status. An invalid pattern passed to any `regex` function is a fault, not an `Err`, so it cannot be caught with `?`.
+
+**Fix.** Where failure is expected, use the methods that return an `Option` or `Result` instead of the faulting ones: `xs.get(i)` rather than `xs[i]`, `m.get(k)` rather than `m[k]`, and a `match` rather than `unwrap()`. Build regular expressions from literals you have tested. See [wscript: containers, loops, traits and faults](guide_wscript_flow).
+PROSE
+
+  h2 "a script leaks memory across a long apply"
+
+  p <<'PROSE'
+**Symptom.** A script that builds a large linked structure grows without bound.
+
+**Cause.** wscript memory is pure reference counting with no cycle collector. Two values that reference each other are never freed.
+
+**Fix.** Break the cycle with `weak(x)` on one side and `w.upgrade()`, which returns an `Option`, where the reference is read.
+PROSE
+
+  h2 "a Windows function errors on Linux"
+
+  p <<'PROSE'
+**Symptom.** A step calling `registry`, `service` or `com` compiles and validates, then reports *error* at run time on a Linux host.
+
+**Cause.** Every host module is registered on every platform so that a playbook validates the same everywhere. Calling a foreign-platform function at run time returns an error.
+
+**Fix.** Guard the step with a condition fed by a gatherer, such as `condition = os.family == "windows"`, or branch in the script on `sys::family()`. See [The host API](guide_host_api).
+PROSE
+
+  h2 "this secret has not been encrypted yet"
+
+  p <<'PROSE'
+**Symptom.** `validate`, `check`, `apply`, `test` or `docs` fails with `this secret has not been encrypted yet` and the hint `run config-weave secrets encrypt to encrypt it in place`.
+
+**Cause.** A `secret("…")` call in `playbook.wcl` still holds its plaintext. Validation scans for calls that do not carry a `CWENC1` blob, without needing a password, so a playbook whose secrets were never encrypted cannot run.
+
+**Fix.** Run `config-weave secrets encrypt` with a password supplied through `$CONFIG_WEAVE_PASSWORD`, `--password-stdin` or `--password-file`. The call is rewritten in place and nothing else in the file changes. Steps are in [Encrypt secrets in a playbook](howto_encrypt_secrets).
+PROSE
+
+  h2 "a run with secrets exits 2 without a prompt"
+
+  p <<'PROSE'
+**Symptom.** `check`, `apply` or `test` on a playbook with encrypted values exits with status 2 and a message about a missing password, or about a value that could not be decrypted.
+
+**Cause.** config-weave never prompts. A playbook with `secret()` calls needs exactly one of `$CONFIG_WEAVE_PASSWORD`, `--password-stdin` or `--password-file`, and a missing password is always exit 2 so an automated run fails loudly. Every value is decrypted up front, before any step runs, so a wrong password fails the run even when no step reads the secret.
+
+**Fix.** Supply the password through one of the three routes. If the password is right but decryption still fails, the file was encrypted under a different password; `config-weave secrets rekey` needs the old one. See [Variables and secrets](guide_variables).
+PROSE
+
+  h2 "secret() in a package fails validation"
+
+  p <<'PROSE'
+**Symptom.** A `secret("…")` call in a `package.wcl`, including inside a `test` or `scenario` block, is rejected.
+
+**Cause.** Packages are shared through git and cannot hold a value encrypted under one playbook's password. Tests run in disposable instances that have no password at all.
+
+**Fix.** Keep the secret in the playbook's `vars` and pass it to the resource through a property.
+PROSE
+
+  h2 "the testlab cannot start an instance"
+
+  p <<'PROSE'
+**Symptom.** `config-weave test` exits 2 before any test runs, with a message about `vmlab`, or a group errors with a provisioning or smoke-test failure.
+
+**Cause.** The testlab shells out to the `vmlab` command for every instance and probes it once, up front. The command is found on the path, or through `$CONFIG_WEAVE_VMLAB_CMD`. A container test needs an OCI image vmlab can pull. A VM test needs a template that ships the vmlab guest agent, because the runner polls the agent for readiness and gives up after 300 seconds. After provisioning, the runner copies a config-weave binary matched to the guest OS and runs `version` inside it; an architecture or OS mismatch fails there.
+
+**Fix.** Confirm `vmlab --version` works on the host. For a VM, use a template with a working agent; for an apt-family VM test, `x86_64/ubuntu-24.04` is known to work. For a Linux guest the binary comes from `--binary`, `$CONFIG_WEAVE_TEST_BINARY`, the running executable if it is static, or the newest static cross-build; for a Windows guest, from `--binary-windows` or `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`. Pass `--keep` to leave the lab up and inspect it with `vmlab exec` or `vmlab console`. The requirements table is in [The test block](ref_test_block).
+PROSE
+
+  h2 "a test writes to the wrong home directory"
+
+  p <<'PROSE'
+**Symptom.** A resource that defaults a path to `$HOME` converges in a container test but the file lands under `/` instead of `/root`.
+
+**Cause.** The vmlab guest agent runs commands with `HOME=/`, not the target user's home.
+
+**Fix.** Pass the home directory explicitly as a test property rather than relying on the ambient environment.
+PROSE
+
+  h2 "grouped tests interfere with each other"
+
+  p <<'PROSE'
+**Symptom.** A test passes on its own but fails after joining a `group`, or validation rejects the group.
+
+**Cause.** Tests in one group run sequentially in one instance and share its OS state with no reset between them. They must also agree on `image` or `template` and on `memory`; a container member and a VM member cannot share a group.
+
+**Fix.** Only group tests that target distinct state, so each test's resources still start clean. Split tests that touch the same files or services into separate groups.
+PROSE
+
+  h2 "exit code 3"
+
+  p <<'PROSE'
+**Symptom.** `config-weave apply` exits with status 3 and a step reports *reboot required*. Later steps report *not run*.
+
+**Cause.** A resource returned `RebootRequired` from `check` or `apply`. In apply mode that halts the play, because the host must restart before the remaining steps can be trusted. In check mode the same result is an ordinary report status and the run continues with exit 0.
+
+**Fix.** Reboot the host and run `apply` again. Steps that already converged report *already configured* and the run continues from the step that asked for the reboot. Exit statuses are listed in [config-weave](cmd_root).
+PROSE
+
+  h2 "exit codes from config-weave test"
+
+  p "The testlab's exit status summarises the whole run."
+
+  table {
+    rows:
+      | "Exit code" | "Meaning" |
+      | "0" | "Every selected test and scenario passed." |
+      | "1" | "At least one test failed an expectation or errored while running." |
+      | "2" | "Validation failed, or the environment is unusable: vmlab was not found, no test matched the filter, or a password was missing." |
+  }
+}

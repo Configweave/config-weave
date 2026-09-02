@@ -1,0 +1,104 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_shell {
+  sites = [:manual]
+  title = "shell module"
+
+  chapter_header "shell module" {
+    kicker       = "Reference · reference"
+    reading_time = "3 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use shell` runs external commands. It replaces the `process` module of
+wscript-std, which config-weave does not register. Every function takes a
+command or script string and an options `Value`, and returns
+`Result[CmdOutput, string]`. The options argument is required because
+wscript functions have a fixed arity: pass `Value::Null` for the defaults,
+or a `Value::Map` with any of the keys below. A timeout kills the child and
+returns `Err`.
+PROSE
+
+  table {
+    rows:
+      | "Option" | "Type" | "Meaning" |
+      | "`cwd`" | "string" | "working directory for the child" |
+      | "`env`" | "map of string" | "environment variables added to the child" |
+      | "`timeout`" | "int or float" | "seconds before the child is killed" |
+      | "`stdin`" | "string" | "text written to the child's standard input" |
+  }
+
+  callout "A non-zero exit is not an Err" {
+    kind = :note
+    body = "`Err` means the command could not run: the program was not found, the spawn failed or the timeout fired. When the command ran and exited non-zero, the result is `Ok` and `success` is `false`. Inspect `success` or `code`."
+  }
+
+  h2 "CmdOutput"
+
+  code rust {
+    source = <<'SRC'
+struct CmdOutput {
+    stdout: string,
+    stderr: string,
+    code: int,
+    success: bool,
+}
+SRC
+  }
+
+  p "The result of every function in this module. `success` is `true` when `code` is zero."
+
+  h2 "run"
+
+  code rust {
+    source = <<'SRC'
+shell::run(cmd: string, opts: Value) -> Result[CmdOutput, string]
+SRC
+  }
+
+  p "Splits `cmd` into words with shell-words rules and executes the program directly. There is no shell interpretation, so globs, pipes and `$VAR` references are passed to the program as literal text."
+
+  h2 "run_streaming"
+
+  code rust {
+    source = <<'SRC'
+shell::run_streaming(cmd: string, opts: Value) -> Result[CmdOutput, string]
+SRC
+  }
+
+  p "Behaves like `run`, and also streams each output line through the [log module](ref_mod_log) as it arrives. Standard output lines are logged at info and standard error lines at warn. Use it for long installs so the reader sees progress."
+
+  h2 "bash"
+
+  code rust {
+    source = <<'SRC'
+shell::bash(script: string, opts: Value) -> Result[CmdOutput, string]
+SRC
+  }
+
+  p "Runs `script` with `bash -c`, and falls back to `sh` when bash is absent. This is the way to use pipes, globs and variable expansion."
+
+  h2 "powershell"
+
+  code rust {
+    source = <<'SRC'
+shell::powershell(script: string, opts: Value) -> Result[CmdOutput, string]
+SRC
+  }
+
+  p "Runs `script` with `powershell`, and falls back to `pwsh`, passing `-NoProfile -NonInteractive`. It works on Linux when PowerShell Core is installed."
+
+  code rust {
+    source = <<'SRC'
+use shell
+use value
+
+fn check(props: Value) -> Result[CheckResult, string] {
+    let out = shell::run("systemctl is-active nginx", Value::Null)?
+    if !out.success { return Ok(CheckResult::NotConfigured) }
+    Ok(CheckResult::AlreadyConfigured)
+}
+SRC
+  }
+}

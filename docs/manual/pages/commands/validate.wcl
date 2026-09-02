@@ -1,0 +1,74 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_validate {
+  sites = [:manual]
+  title = "config-weave validate"
+
+  chapter_header "config-weave validate" {
+    kicker       = "Commands · reference"
+    reading_time = "3 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`validate` runs the whole validation pipeline and executes nothing. The same pipeline runs implicitly at the start of every `check`, `apply`, `test` and `docs` invocation, so a playbook that passes `validate` will not fail those commands before execution starts. Validation is platform independent: a playbook validates identically on Linux and Windows.
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave validate [OPTIONS] <PLAYBOOK_DIR>
+SRC
+  }
+
+  h2 "Arguments"
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PLAYBOOK_DIR`" | "The playbook directory." |
+  }
+
+  h2 "Options"
+
+  p "All [global options](cmd_root) apply. `--json` switches the summary to a JSON object with `ok`, `playbook`, `version`, `packages`, `plays`, `steps` and a `diags` list. The variable and password options are accepted but not consulted."
+
+  h2 "Pipeline stages"
+
+  p "The stages run in order and all findings are reported together."
+
+  list {
+    style = :numbered
+    li "Parse `playbook.wcl` and every `pkgs/*/package.wcl`. A WCL parse error stops here."
+    li "Structural checks: referenced packages, resources and gatherers exist; every mandatory `description` is present; gatherer invocation names are unique; every script file exists; every `secret()` call is encrypted."
+    li "Schema validation: each step's `properties` and each gatherer invocation's `params` are checked against the declared schema. An unknown key, a missing required key or a coarse type mismatch is an error."
+    li "Build the step DAG for every play, expanding composites, and reject cycles and unknown `requires` targets."
+    li "Compile every wscript script (resources, gatherers, verify scripts, scenarios and `lib/` files) against the full host API. The wscript type checker enforces the entry-point signatures and catches misuse of a host module."
+  }
+
+  p "See [Playbooks, plays and steps](guide_playbooks) for the structure the checks enforce and [Script entry points](ref_scripts) for the signatures stage 5 requires."
+
+  h2 "Examples"
+
+  code console {
+    source = <<'SRC'
+config-weave validate ./my-playbook
+ok: playbook 'my-playbook' v0.1.0 — 2 package(s), 2 play(s), 8 step(s)
+SRC
+  }
+
+  p "A failure lists every diagnostic on stderr and ends with a count."
+
+  code console {
+    source = <<'SRC'
+config-weave validate ./my-playbook
+error: step 'nginx_conf' in play 'web': unknown property 'contents' (did you mean 'content'?)
+validation failed with 1 error
+SRC
+  }
+
+  h2 "Exit status"
+
+  p "0 when the playbook is clean. 2 when any stage reported an error."
+}

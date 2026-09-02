@@ -1,0 +1,203 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_pkg {
+  sites = [:manual]
+  title = "config-weave pkg"
+
+  chapter_header "config-weave pkg" {
+    kicker       = "Commands · reference"
+    reading_time = "7 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`pkg` installs packages into a playbook's `pkgs/` directory from git repositories. The file `pkgs/repo.wcl` records the registered repositories and every installed package with the repository and exact commit it came from. Every subcommand shells out to the `git` binary, so your ambient credentials work against private repositories. Clones are shallow and cached under `.repo-cache/<repo>` in the playbook directory. See [Packages, resources and gatherers](guide_packages) for what a package is.
+PROSE
+
+  p <<'PROSE'
+`repo.wcl` is tooling metadata, not playbook semantics. The playbook loader never reads it, so a broken `repo.wcl` breaks only the `pkg` commands, never `check` or `apply`. The first time the cache directory appears, the command prints a reminder to add `.repo-cache/` to `.gitignore` when it is not already there. It never edits `.gitignore` itself.
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave pkg [--dir <PLAYBOOK>] <COMMAND>
+
+Commands:
+  add     Install a package from a registered repository into pkgs/
+  remove  Delete an installed package and its repo.wcl entry
+  update  Re-sync and re-copy installed packages
+  search  Search package names and descriptions across registered repos
+  repo    Manage the registered package repositories
+SRC
+  }
+
+  h2 "Options"
+
+  p "One option is shared by every `pkg` subcommand. The [global options](cmd_root) are accepted too but have no effect here."
+
+  table {
+    rows:
+      | "Option" | "Value" | "Meaning" |
+      | "`--dir`" | "`PLAYBOOK`" | "The playbook directory. Default `.`. Accepted before or after the subcommand." |
+  }
+
+  h2 "The default repository"
+
+  p <<'PROSE'
+When `pkg add` or `pkg search` runs and no repository is registered, including when `repo.wcl` does not exist yet, the command seeds the public standard library repository and saves it. Its name is `stdlib`, its URL is `https://github.com/Configweave/config-weave-pkgs.git`, and its packages live in the `pkgs` subdirectory of the checkout. A `repo.wcl` that lists at least one repository is always respected as written. The other subcommands operate only on what is already recorded.
+PROSE
+
+  h2 "pkg add"
+
+  code console {
+    source = <<'SRC'
+config-weave pkg add [--dir <PLAYBOOK>] <PACKAGE>
+SRC
+  }
+
+  p <<'PROSE'
+Installs one package. The command syncs every registered repository, finds the first one whose packages root holds `<PACKAGE>/package.wcl`, copies that directory into `pkgs/<PACKAGE>`, and records the package with the repository's head commit in `repo.wcl`. Repositories are searched in registration order. When several hold the package, the first wins and the others are reported as shadowed. The copy skips `.git`, `node_modules`, `target`, `.vmlab` and every other dot-directory.
+PROSE
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PACKAGE`" | "The package name, which is also the directory name under `pkgs/`." |
+  }
+
+  p "The command fails when the package is already recorded as installed, when `pkgs/<PACKAGE>` exists but was not installed by `pkg add`, when the name is not a valid package name, or when no repository holds it. A repository that cannot be synced still participates with its cached checkout when one exists, and the failure is reported as a warning."
+
+  h2 "pkg remove"
+
+  code console {
+    source = <<'SRC'
+config-weave pkg remove [--dir <PLAYBOOK>] <PACKAGE>
+SRC
+  }
+
+  p "Deletes `pkgs/<PACKAGE>` and drops its entry from `repo.wcl`. When the directory is already gone the entry is still removed. A package that was never installed by `pkg add` is refused, with a note to delete the directory by hand. Repositories are not touched."
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PACKAGE`" | "The installed package to remove." |
+  }
+
+  h2 "pkg update"
+
+  code console {
+    source = <<'SRC'
+config-weave pkg update [--dir <PLAYBOOK>] [PACKAGE]
+SRC
+  }
+
+  p <<'PROSE'
+Re-syncs the source repositories and re-copies installed packages, then records the new commit. With no argument every installed package is updated. `pkgs/<name>` is a managed directory: when the source repository has moved, local edits inside it are lost. Keep local changes in a package of your own instead.
+PROSE
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PACKAGE`" | "One installed package to update. Optional. Must already be recorded in `repo.wcl`." |
+  }
+
+  h2 "pkg search"
+
+  code console {
+    source = <<'SRC'
+config-weave pkg search [--dir <PLAYBOOK>] <TERM>
+SRC
+  }
+
+  p "Syncs every registered repository and prints the packages whose name or description contains the term, case-insensitively. Each row shows the repository, the package name and its description. An installed package is marked `[installed]`, or `[installed from <repo>]` when it came from a different repository. Seeds the default repository when none is registered."
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`TERM`" | "Substring to match against names and descriptions." |
+  }
+
+  h2 "pkg repo add"
+
+  code console {
+    source = <<'SRC'
+config-weave pkg repo add [--dir <PLAYBOOK>] [--branch <BRANCH>] [--subdir <SUBDIR>] <NAME> <URL>
+SRC
+  }
+
+  p "Registers a git repository of packages in `repo.wcl` and syncs it into `.repo-cache/<NAME>` at once. The name becomes a directory under the cache, so it must be a valid name."
+
+  table {
+    rows:
+      | "Argument or option" | "Value" | "Meaning" |
+      | "`NAME`" | "" | "The name the repository is known by locally." |
+      | "`URL`" | "" | "Any URL `git clone` accepts, including SSH forms for private repositories." |
+      | "`--branch`" | "`BRANCH`" | "Branch to track. The remote's default branch when unset." |
+      | "`--subdir`" | "`SUBDIR`" | "Subdirectory of the checkout that holds the package directories. The checkout root when unset." |
+  }
+
+  h2 "pkg repo remove"
+
+  code console {
+    source = <<'SRC'
+config-weave pkg repo remove [--dir <PLAYBOOK>] <NAME>
+SRC
+  }
+
+  p "Unregisters a repository. Packages installed from it stay in `pkgs/` and in `repo.wcl`."
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`NAME`" | "The registered repository to remove." |
+  }
+
+  h2 "pkg repo list"
+
+  code console {
+    source = <<'SRC'
+config-weave pkg repo list [--dir <PLAYBOOK>]
+SRC
+  }
+
+  p "Prints a table of the registered repositories with their URL, branch, subdirectory and cache state. The cache state is `not synced` when no clone exists, `dirty` when the clone has local modifications, or the short commit at the clone's head. This command reads local state only and never touches the network."
+
+  h2 "Examples"
+
+  p "Install two packages from the standard library into the current playbook. The first call seeds the repository."
+
+  code console {
+    source = <<'SRC'
+config-weave pkg add core
+seeded package repo 'stdlib' (https://github.com/Configweave/config-weave-pkgs.git)
+note: add '.repo-cache/' to ./.gitignore
+installed 'core' from 'stdlib' @ 3f9c2a1
+config-weave pkg add nginx
+installed 'nginx' from 'stdlib' @ 3f9c2a1
+SRC
+  }
+
+  p "Register a private repository whose packages live under `packages/`, then search it."
+
+  code console {
+    source = <<'SRC'
+config-weave pkg --dir ./my-playbook repo add corp git@github.com:example/weave-pkgs.git --subdir packages
+config-weave pkg --dir ./my-playbook search ldap
+SRC
+  }
+
+  p "Bring every installed package up to date and confirm the state."
+
+  code console {
+    source = <<'SRC'
+config-weave pkg update
+config-weave pkg repo list
+SRC
+  }
+
+  h2 "Exit status"
+
+  p "0 when the operation completed, including a `search` with no matches. 2 on any error: a package or repository that does not exist, an invalid name, a `repo.wcl` that fails its schema, a directory that could not be copied or removed, or a `git` command that failed for the operation to proceed. A repository that fails to sync during `add`, `update` or `search` is a warning, not an error, as long as the operation can still complete."
+}

@@ -1,3 +1,0 @@
-# Local projections — the committed skill lives at .claude/skills/config-weave/
-# (regenerate with `just skill-build`); the book is built into docs/_site/.
-/out/

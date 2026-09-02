@@ -1,0 +1,58 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_archive {
+  sites = [:manual]
+  title = "archive module"
+
+  chapter_header "archive module" {
+    kicker       = "Reference · reference"
+    reading_time = "1 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use archive` extracts archives without an external `tar` or `unzip`
+binary. Every function takes the archive path and a destination directory,
+and returns `Result[int, string]` where the integer is the number of entries
+extracted. Fetch archives with the [http module](ref_mod_http) and verify
+them with the [hash module](ref_mod_hash) before extracting.
+PROSE
+
+  h2 "extract_zip"
+
+  code rust {
+    source = <<'SRC'
+archive::extract_zip(archive: string, dest: string) -> Result[int, string]
+SRC
+  }
+
+  p "Extracts a `.zip` file into `dest`."
+
+  h2 "extract_tar_gz"
+
+  code rust {
+    source = <<'SRC'
+archive::extract_tar_gz(archive: string, dest: string) -> Result[int, string]
+SRC
+  }
+
+  p "Extracts a gzip-compressed tar file into `dest`."
+
+  h2 "extract"
+
+  code rust {
+    source = <<'SRC'
+archive::extract(archive: string, dest: string) -> Result[int, string]
+SRC
+  }
+
+  p "Chooses the format from the file extension and extracts. It accepts `.zip`, `.tar.gz` and `.tgz`, and fails on any other extension."
+
+  code rust {
+    source = <<'SRC'
+use archive
+
+let entries = archive::extract("/tmp/tool.tar.gz", "/opt/tool")?
+SRC
+  }
+}

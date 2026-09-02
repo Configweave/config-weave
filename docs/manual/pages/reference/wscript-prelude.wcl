@@ -1,0 +1,117 @@
+// Part III — Reference. Declared mode: reference.
+page ref_wscript_prelude {
+  sites = [:manual]
+  title = "wscript prelude"
+
+  chapter_header "wscript prelude" {
+    kicker       = "Reference · reference"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+The prelude is the set of functions every script can call without a `use` line. The built-in types `Option[T]`, `Result[T, E]`, `List[T]`, `Map[K, V]` and `weak[T]` are also always in scope, as is every host-registered type such as `Value`, `CheckResult` and `ApplyResult`. The prelude's role in a script is explained in [wscript: values, types and functions](guide_wscript_basics).
+PROSE
+
+  h2 "print and println"
+
+  code rust {
+    source = <<'SRC'
+fn print(value: any)
+fn println(value: any)
+fn println()
+SRC
+  }
+
+  p <<'PROSE'
+Render a value with its `Display` implementation and emit it. `println` appends a newline and, with no argument, emits a bare newline. In config-weave neither writes to standard output: every line is routed to the `log` module at the `info` level, so `println("done")` and `log::info("done")` produce the same log record. See [log module](ref_mod_log).
+PROSE
+
+  h2 "str"
+
+  code rust {
+    source = <<'SRC'
+fn str(value: any) -> string
+SRC
+  }
+
+  p <<'PROSE'
+Convert any value to a string. A struct or enum with a `Display` implementation, derived or hand-written, renders through it. `str` is also the rendering used for a `{expr}` hole inside a string literal.
+PROSE
+
+  h2 "fmt"
+
+  code rust {
+    source = <<'SRC'
+fn fmt(template: string, args: any...) -> string
+SRC
+  }
+
+  p <<'PROSE'
+Substitute the arguments into the `{}` placeholders of the template, in order. Write `{{` and `}}` for a literal brace. When the template is a literal, the compiler checks the placeholder count against the argument count and checks each format spec. A placeholder may carry a spec after a colon.
+PROSE
+
+  table {
+    rows:
+      | "Spec part" | "Form" | "Meaning" |
+      | "fill and align" | "`[fill]<`, `[fill]^`, `[fill]>`" | "left, centre or right in the width, padded with the fill character" |
+      | "zero" | "`0`" | "zero-pad a number, sign-aware" |
+      | "width" | "an integer" | "minimum width in characters" |
+      | "precision" | "`.N`" | "digits after the point for a float; truncation length for a string" |
+      | "type" | "`x`, `X`, `b`, `o`" | "hex, upper hex, binary or octal; integers only" |
+  }
+
+  p <<'PROSE'
+For example `{:>8}` right-aligns in eight characters, `{:.2}` gives two decimals, `{:04}` zero-pads to four, and `{:x}` renders hex. A spec is rejected inside an interpolation hole; only `fmt` formats.
+PROSE
+
+  h2 "same"
+
+  code rust {
+    source = <<'SRC'
+fn same(a: T, b: T) -> bool
+SRC
+  }
+
+  p <<'PROSE'
+Return whether two references point at the same object. This is reference identity, not value equality. `==` compares values and needs an `Eq` implementation on a struct or enum.
+PROSE
+
+  h2 "weak"
+
+  code rust {
+    source = <<'SRC'
+fn weak(value: T) -> weak[T]
+SRC
+  }
+
+  p <<'PROSE'
+Make a weak reference from a reference-typed value. The argument must be a reference type. Call `.upgrade()` on the result to get an `Option[T]`, which is `None` once every strong reference is gone. Use it to break reference cycles, which otherwise leak; see [memory](guide_wscript_flow).
+PROSE
+
+  h2 "int"
+
+  code rust {
+    source = <<'SRC'
+fn int(value: int) -> int
+fn int(value: float) -> int
+fn int(value: char) -> int
+SRC
+  }
+
+  p <<'PROSE'
+Convert to a 64-bit integer. A float truncates toward zero. A char gives its Unicode code point. There is no implicit numeric conversion in wscript, so this is the only way to add a float to an int.
+PROSE
+
+  h2 "float"
+
+  code rust {
+    source = <<'SRC'
+fn float(value: int) -> float
+fn float(value: float) -> float
+SRC
+  }
+
+  p "Convert an integer to a 64-bit float. A float passes through unchanged."
+}

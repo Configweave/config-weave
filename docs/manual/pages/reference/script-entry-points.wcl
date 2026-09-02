@@ -1,0 +1,167 @@
+// Part III — Reference. Declared mode: reference.
+page ref_scripts {
+  sites = [:manual]
+  title = "Script entry points"
+
+  chapter_header "Script entry points" {
+    kicker       = "Reference · reference"
+    reading_time = "6 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+Every wscript file that config-weave runs exports one or two named functions with a fixed signature. Validation compiles each script against the host API and checks that the exported functions exist with an accepted signature before anything runs. A script that does not satisfy its contract fails validation with a message naming the entry point. Each entry point accepts two signatures: a plain one that returns the result directly, and a fallible one that wraps it in `Result[…, string]` so the body can use `?`. An `Err` returned from a resource or gatherer becomes the step's *error* status with the string as its message. A VM fault, such as an index out of bounds or `unwrap()` on `None`, is reported the same way. Where each script lives and what it may import is covered in [The host API](guide_host_api).
+PROSE
+
+  h2 "check"
+
+  code rust {
+    filename = "resources/file_present.ws"
+    source = <<'SRC'
+fn check(params: Value) -> CheckResult
+fn check(params: Value) -> Result[CheckResult, string]
+SRC
+  }
+
+  p <<'PROSE'
+Exported by a resource script. Reports whether the host already matches the desired state and must never change the host. The engine calls it once at the start of every step, and again after a successful `apply` as the re-check. `params` is a `Value::Map` holding the step's properties with declared defaults applied and types validated; see [The Value type](ref_value). The re-check must return `AlreadyConfigured`, or the step reports *error* with the message `apply claimed success but the re-check disagrees`.
+PROSE
+
+  table {
+    rows:
+      | "Parameter" | "Type" | "Meaning" |
+      | "`params`" | "`Value`" | "The step's properties as a map, keyed by parameter name." |
+  }
+
+  h2 "apply"
+
+  code rust {
+    filename = "resources/file_present.ws"
+    source = <<'SRC'
+fn apply(params: Value) -> ApplyResult
+fn apply(params: Value) -> Result[ApplyResult, string]
+SRC
+  }
+
+  p "Exported by a resource script. Brings the host to the desired state. The engine calls it only in apply mode, and only when `check` returned `NotConfigured`. It receives the same `params` map as `check`. After `Success` the engine runs `check` again, so `apply` must converge fully, and it must converge across processes: a later run in a fresh process must also see `AlreadyConfigured`."
+
+  table {
+    rows:
+      | "Parameter" | "Type" | "Meaning" |
+      | "`params`" | "`Value`" | "The step's properties as a map, identical to the map `check` received." |
+  }
+
+  h2 "gather"
+
+  code rust {
+    filename = "gatherers/os_info.ws"
+    source = <<'SRC'
+fn gather(params: Value) -> Value
+fn gather(params: Value) -> Result[Value, string]
+SRC
+  }
+
+  p "Exported by a gatherer script. Collects facts and returns them as a `Value`, normally a map. A playbook `gather` block binds the result to a variable named by its label. `params` is the gather's `params` block with the gatherer's declared defaults applied. A key the gatherer declares with `returns … type = \"symbol\"` must come back as the bare token, such as `\"systemd\"`; the engine binds it into the playbook as the symbol `:systemd`. A failed gather aborts the run before any step executes."
+
+  table {
+    rows:
+      | "Parameter" | "Type" | "Meaning" |
+      | "`params`" | "`Value`" | "The gather's parameters as a map, keyed by parameter name." |
+  }
+
+  h2 "verify"
+
+  code rust {
+    filename = "tests/file_present_verify.ws"
+    source = <<'SRC'
+fn verify(facts: Value) -> bool
+fn verify(facts: Value) -> Result[bool, string]
+SRC
+  }
+
+  p <<'PROSE'
+Exported by a test's `verify` script. Runs inside the test instance after the three engine runs and makes custom assertions about the converged state. `facts` is a map of the test's gather results, keyed by gather label. Returning `false` or `Err` fails the test; the `Err` string becomes the failure message. A verify script compiles during validation on the host but only ever executes inside an instance. It may import helpers from `lib/` like any other script. See [The test block](ref_test_block).
+PROSE
+
+  table {
+    rows:
+      | "Parameter" | "Type" | "Meaning" |
+      | "`facts`" | "`Value`" | "A map from each test `gather` label to the value that gatherer returned inside the instance." |
+  }
+
+  h2 "run"
+
+  code rust {
+    filename = "scenarios/ad_matrix.ws"
+    source = <<'SRC'
+fn run(lab: Lab) -> bool
+fn run(lab: Lab) -> Result[bool, string]
+SRC
+  }
+
+  p "Exported by a scenario driver. Runs on the host, not inside a guest, against the live vmlab lab the scenario declared. `Lab` is an opaque handle from the [testlab module](ref_mod_testlab), the one module available to scenario scripts on top of the host API. The script brings machines up by name, applies resources, reboots, and asserts. Returning `false` or `Err` fails the scenario. Scenarios compile during validation and run one at a time after the test groups."
+
+  table {
+    rows:
+      | "Parameter" | "Type" | "Meaning" |
+      | "`lab`" | "`Lab`" | "The live lab. `lab.machine(name)` starts a declared VM on demand and returns its handle." |
+  }
+
+  h2 "CheckResult"
+
+  code rust {
+    source = <<'SRC'
+enum CheckResult { AlreadyConfigured, NotConfigured, RebootRequired }
+SRC
+  }
+
+  p "The value `check` returns. It is ambient in every resource script; no `use` is needed. Each variant decides what the engine does next, as the table shows. The full lifecycle is in [The convergence contract](guide_convergence)."
+
+  table {
+    rows:
+      | "Variant" | "In check mode" | "In apply mode" |
+      | "`AlreadyConfigured`" | "Step reports *already configured*." | "Step reports *already configured*; `apply` is not called. As the re-check result, the step reports *configured*." |
+      | "`NotConfigured`" | "Step reports *not configured*." | "The engine calls `apply`. As the re-check result, the step reports *error*." |
+      | "`RebootRequired`" | "Step reports *reboot required*; the run continues." | "Step reports *reboot required* and the play halts with exit status 3. As the re-check result, the step reports *error*." |
+  }
+
+  h2 "ApplyResult"
+
+  code rust {
+    source = <<'SRC'
+enum ApplyResult { Success, RebootRequired }
+SRC
+  }
+
+  p "The value `apply` returns. Ambient in every resource script."
+
+  table {
+    rows:
+      | "Variant" | "Effect" |
+      | "`Success`" | "The engine runs `check` again. `AlreadyConfigured` reports *configured*; anything else reports *error*." |
+      | "`RebootRequired`" | "Step reports *reboot required* without a re-check, and the play halts with exit status 3." |
+  }
+
+  h2 "Step statuses"
+
+  code json {
+    source = <<'SRC'
+{ "step": "make-a", "status": "already_configured" }
+SRC
+  }
+
+  p "The statuses a step can report, as printed in human output and as the stable `status` id in `--json` output. The first six are the outcomes of the lifecycle; *not run* marks a step left undispatched when a run halts early, or blocked by a dependency that errored or did not run."
+
+  table {
+    rows:
+      | "Status" | "JSON id" | "Meaning" |
+      | "already configured" | "`already_configured`" | "`check` returned `AlreadyConfigured`; nothing to do." |
+      | "configured" | "`configured`" | "`apply` ran and the re-check returned `AlreadyConfigured`." |
+      | "not configured" | "`not_configured`" | "Check mode only: `check` returned `NotConfigured`." |
+      | "reboot required" | "`reboot_required`" | "`check` or `apply` returned `RebootRequired`." |
+      | "skipped" | "`skipped`" | "The step's or an enclosing container's `condition` was false." |
+      | "error" | "`error`" | "An `Err`, a VM fault, or a re-check that disagreed with `apply`." |
+      | "not run" | "`not_run`" | "The run halted before the step, or a dependency errored or did not run." |
+  }
+}

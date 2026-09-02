@@ -1,0 +1,89 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_regex {
+  sites = [:manual]
+  title = "regex module"
+
+  chapter_header "regex module" {
+    kicker       = "Reference · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use regex` matches regular expressions against strings, so a script does
+not have to shell out to `grep` or `sed`. config-weave registers it from
+wscript-std. Patterns use Rust `regex` syntax: no backreferences, no
+lookaround, and matching runs in linear time. No function returns a
+`Result`. An invalid pattern is a runtime fault that surfaces as the step's
+Error status, because patterns are literals in practice and a script has no
+way to recover from a bad one.
+PROSE
+
+  callout "The pattern comes first" {
+    kind = :warning
+    body = "Every function takes `(pattern, text)`. The two arguments have the same type, so swapping them compiles and then never matches."
+  }
+
+  h2 "is_match"
+
+  code rust {
+    source = <<'SRC'
+regex::is_match(pattern: string, s: string) -> bool
+SRC
+  }
+
+  p "Whether the pattern matches anywhere in `s`."
+
+  h2 "find and find_all"
+
+  code rust {
+    source = <<'SRC'
+regex::find(pattern: string, s: string) -> Option[string]
+regex::find_all(pattern: string, s: string) -> List[string]
+SRC
+  }
+
+  p "`find` returns the first match, or `None`. `find_all` returns every non-overlapping match in order."
+
+  h2 "replace"
+
+  code rust {
+    source = <<'SRC'
+regex::replace(pattern: string, s: string, rep: string) -> string
+SRC
+  }
+
+  p "Replaces every match with `rep`. Inside `rep`, `$1` and `$name` expand to the capture groups of that match."
+
+  h2 "captures"
+
+  code rust {
+    source = <<'SRC'
+regex::captures(pattern: string, s: string) -> Option[List[string]]
+SRC
+  }
+
+  p "Returns the capture groups of the first match, with group 0, the whole match, first. A group that did not participate is the empty string. Returns `None` when nothing matches."
+
+  h2 "split"
+
+  code rust {
+    source = <<'SRC'
+regex::split(pattern: string, s: string) -> List[string]
+SRC
+  }
+
+  p "Splits `s` around every match."
+
+  code rust {
+    source = <<'SRC'
+use regex
+
+let major = match regex::captures("version ([0-9]+)[.]([0-9]+)", out.stdout) {
+    Some(groups) => groups[1],
+    None => "0",
+}
+SRC
+  }
+}

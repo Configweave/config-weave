@@ -1,0 +1,87 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_com {
+  sites = [:manual]
+  title = "com module (Windows)"
+
+  chapter_header "com module (Windows)" {
+    kicker       = "Reference · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use com` drives late-bound COM objects through `IDispatch`, and runs WMI
+queries. The module is registered on every platform so a playbook compiles
+and validates identically everywhere; on Linux and macOS every call returns
+a runtime error. Every function and method returns `Result[…, string]`.
+Worker threads are initialised as single-threaded apartments by the engine,
+so a script never deals with COM lifetime or apartment setup.
+PROSE
+
+  h2 "create"
+
+  code rust {
+    source = <<'SRC'
+com::create(progid: string) -> Result[ComObject, string]
+SRC
+  }
+
+  p "Creates a COM object from a ProgID such as `WScript.Shell`."
+
+  h2 "get_object"
+
+  code rust {
+    source = <<'SRC'
+com::get_object(name: string) -> Result[ComObject, string]
+SRC
+  }
+
+  p "Binds a moniker, such as `winmgmts://./root/cimv2`, or a running object, in the way `GetObject` does."
+
+  h2 "wmi_query"
+
+  code rust {
+    source = <<'SRC'
+com::wmi_query(query: string) -> Result[Value, string]
+SRC
+  }
+
+  p <<'PROSE'
+Runs a WQL query against `root\cimv2` and returns a list of maps, one map
+per result row, keyed by property name.
+PROSE
+
+  h2 "ComObject"
+
+  code rust {
+    source = <<'SRC'
+#[opaque]
+struct ComObject {}
+SRC
+  }
+
+  p "An opaque handle to a COM object. Arguments and results cross as the [Value type](ref_value). A result that is itself an object cannot be held in a `Value`, so fetch it through `get_object`, `call_object` or `items`."
+
+  table {
+    rows:
+      | "Method" | "Signature" | "Summary" |
+      | "`get`" | "`(name: string) -> Result[Value, string]`" | "read a property" |
+      | "`get_object`" | "`(name: string) -> Result[ComObject, string]`" | "read a property that is an object" |
+      | "`set`" | "`(name: string, value: Value) -> Result[unit, string]`" | "write a property" |
+      | "`call`" | "`(name: string, args: List[Value]) -> Result[Value, string]`" | "invoke a method" |
+      | "`call_object`" | "`(name: string, args: List[Value]) -> Result[ComObject, string]`" | "invoke a method that returns an object" |
+      | "`items`" | "`() -> Result[List[ComObject], string]`" | "enumerate a collection" |
+  }
+
+  code rust {
+    source = <<'SRC'
+use com
+use value
+
+fn gather(params: Value) -> Result[Value, string] {
+    com::wmi_query("SELECT Name, State FROM Win32_Service WHERE StartMode='Auto'")
+}
+SRC
+  }
+}

@@ -1,0 +1,253 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_packages {
+  sites = [:manual]
+  title = "Packages, resources and gatherers"
+
+  chapter_header "Packages, resources and gatherers" {
+    kicker       = "The guide · explanation"
+    reading_time = "10 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+A package bundles resources, gatherers, composites and tests under `pkgs/<name>/` inside a playbook directory. Its name qualifies every reference from the playbook, so a step names `core.file_present` and a gather names `core.os_info`. A package is the unit of sharing: it holds no playbook-specific values, so the same directory works in any playbook. This chapter explains what a package declares and how each part reaches the host. The field tables are in [package.wcl](ref_package).
+PROSE
+
+  h2 "Directory layout"
+
+  code text {
+    filename = "layout"
+    source = <<'SRC'
+my-playbook/
+  playbook.wcl
+  lib/                          # playbook-level shared wscript
+  pkgs/
+    core/
+      package.wcl
+      lib/                      # package-level shared wscript
+      resources/
+        file_present.ws         # exports check() and apply()
+      gatherers/
+        os_info.ws              # exports gather()
+      tests/
+        file_present_verify.ws  # optional verify() for tests
+SRC
+  }
+
+  p <<'PROSE'
+`package.wcl` holds one `package` block. The engine appends the system import `<weave/package.wcl>` when it opens the file, so a package never writes an import line. Script paths in the block are relative to the package directory. The `resources/`, `gatherers/` and `tests/` names are a convention; only `lib/` has meaning to the engine, as a root for shared helpers. Scripts use the `.ws` extension.
+PROSE
+
+  h2 "A complete package"
+
+  code wcl {
+    filename = "pkgs/core/package.wcl"
+    source = <<'SRC'
+package "core" {
+  description = "Core sample package"
+
+  gatherer "os_info" {
+    description = "Report basic operating system facts"
+    script = "gatherers/os_info.ws"
+    returns "family" { description = "Kernel family: linux or windows" type = "string" }
+  }
+
+  resource "file_present" {
+    description = "Ensure a file exists with the given content"
+    script = "resources/file_present.ws"
+    concurrency = "parallel"              // parallel (default) | exclusive | global
+
+    param "path" {
+      description = "Absolute path of the file"
+      type = "string"                     // string | int | float | bool | list | map | symbol | duration
+      required = true
+    }
+    param "content" {
+      description = "File content"
+      type = "string"
+      default = ""
+    }
+  }
+
+  test "file_present_converges" {
+    description = "file_present creates the file and is idempotent"
+    image = "debian:12"
+    verify = "tests/file_present_verify.ws"
+    step "create" {
+      description = "Create a marker file"
+      resource = "file_present"
+      properties { path = "/var/tmp/weave-sample.txt"  content = "hello" }
+    }
+  }
+}
+SRC
+  }
+
+  h2 "Resources"
+
+  p <<'PROSE'
+A resource is a declared unit of desired state. It names a wscript script that exports `check` and `apply`, declares its inputs as `param` blocks, and carries a concurrency class. A step supplies the parameters as properties; the engine validates them against the declarations, fills in defaults, and hands the script a single `Value` map. The script then obeys the check, apply, re-check contract from [The convergence contract](guide_convergence). The two accepted signatures for each entry point are in [Script entry points](ref_scripts).
+PROSE
+
+  code rust {
+    filename = "pkgs/core/resources/file_present.ws"
+    source = <<'SRC'
+use value
+use fs
+use path
+use log
+
+fn param_str(params: Value, key: string, fallback: string) -> string {
+    if let Some(v) = params.get(key) {
+        if let Some(s) = v.as_string() { return s }
+    }
+    fallback
+}
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let p = param_str(params, "path", "")
+    if p == "" { return Err("missing 'path' parameter") }
+    if !fs::exists(p) { return Ok(CheckResult::NotConfigured) }
+    let want = param_str(params, "content", "")
+    let have = fs::read(p)?
+    if have == want { Ok(CheckResult::AlreadyConfigured) } else { Ok(CheckResult::NotConfigured) }
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    let p = param_str(params, "path", "")
+    log::info("writing " + p)
+    fs::mkdir(path::parent(p))?
+    fs::write(p, param_str(params, "content", ""))?
+    Ok(ApplyResult::Success)
+}
+SRC
+  }
+
+  h3 "Parameter types"
+
+  p <<'PROSE'
+A `param` has a coarse type: `string`, `int`, `float`, `bool`, `list`, `map`, `symbol` or `duration`. Two of these deserve explanation.
+PROSE
+
+  p <<'PROSE'
+A `symbol` parameter takes an enumerated token, the `ensure = :present` idiom. WCL symbols and strings both reach the script as the same string, so the script sees `"present"`. Because the two spellings are indistinguishable after conversion, validation enforces the symbol form at the source: `ensure = "absent"` is an error that tells you to write `:absent`. A symbol parameter may enumerate its legal values with `symbol "name" { description }` child blocks. Declaring any closes the set, so every property, default and run-time value is checked against it, and the generated docs list the values. Declaring none leaves the parameter open to any token. Name each symbol in its WCL-spellable form, `on_demand` rather than `on-demand`.
+PROSE
+
+  p <<'PROSE'
+A `duration` parameter is written as a bare WCL unit literal, for example `max_age = 30min`, with the suffixes `ns`, `us`, `ms`, `s`, `min`, `h` and `d`. It reaches the script as a plain `Int` of nanoseconds. The quoted spelling `"30m"` is a type error, because parsing durations by hand inside scripts is what the type exists to remove.
+PROSE
+
+  h3 "Concurrency class"
+
+  p <<'PROSE'
+`concurrency` is `parallel` by default. `exclusive` and `global` restrict how the scheduler may overlap the resource's steps with others. A step may tighten the class, never loosen it. The three classes are defined in [package.wcl](ref_package) and their effect on dispatch is explained in [Scheduling and concurrency](guide_scheduling).
+PROSE
+
+  h2 "Gatherers"
+
+  p <<'PROSE'
+A gatherer collects facts. Its script exports `gather(params: Value) -> Value`. A playbook invokes one with a `gather "label" { from = "pkg.gatherer" }` block and binds the returned value to the variable named by the label, so `gather "os"` makes `os.family` available to vars, conditions and properties.
+PROSE
+
+  code rust {
+    filename = "pkgs/core/gatherers/os_info.ws"
+    source = <<'SRC'
+use value
+use sys
+
+fn gather(params: Value) -> Value {
+    Value::Map(#{
+        "family": Value::String(sys::family()),
+        "name": Value::String(sys::os_name()),
+        "cpus": Value::Int(sys::cpu_count())
+    })
+}
+SRC
+  }
+
+  p <<'PROSE'
+All gatherer invocations in a playbook run concurrently before any step starts. Invocations are deduplicated by gatherer and canonicalised parameters, so two gathers of the same gatherer with the same params run once. Any gatherer failure aborts the run before step execution.
+PROSE
+
+  p <<'PROSE'
+A gatherer documents its result with `returns "key" { description type }` child blocks. These are mostly documentation: the generated docs render a Returns table, and the engine does not check that the gathered map carries these keys or only these keys. A key declared `type = "symbol"` is the exception and is typed. Its value binds into the variable space as a real WCL symbol, its declared set is enforced against what the script returned, and a playbook compares it as `init.init == :systemd`. Comparing a symbol fact against the string `"systemd"` is silently false rather than an error, so keep the symbol spelling on both sides. Only top-level keys are typed.
+PROSE
+
+  h2 "Tests and scenarios"
+
+  p <<'PROSE'
+A `test` block declares a convergence test the [testlab](guide_testlab) runs in a disposable instance. A `scenario` block declares a scripted, multi-machine test over a vmlab lab for flows the standard protocol cannot express, such as a reboot in the middle of convergence. Both live in the package, so they ship with the resources they prove.
+PROSE
+
+  h2 "Shared helpers"
+
+  p <<'PROSE'
+Common code lives in `lib/`, either a package's own `pkgs/<pkg>/lib/` or the playbook's `lib/`, which every package can see. A script imports a helper by file stem with `use helpers`. Resolution order and the rules for what a helper may export are in [The host API](guide_host_api).
+PROSE
+
+  h2 "The built-in weave package"
+
+  p <<'PROSE'
+config-weave carries one package inside its own binary. It is named `weave`, the name is reserved, and a `pkgs/weave/` directory is rejected at load rather than allowed to shadow it. It loads through the ordinary package path, so `validate`, `list`, `docs` and the run path treat it like any other package. Both of its resources are escape hatches for imperative work: a real resource models desired state and belongs in a package, and these exist so a playbook can keep shell automation it has not converted yet.
+PROSE
+
+  h3 "weave.execute"
+
+  p <<'PROSE'
+`weave.execute` runs an action guarded by a second script. The `check` parameter is a guard script whose exit status 0 means the host is already in the desired state. The `run` parameter is the action, executed only when the guard says it is needed. After the action, the engine re-runs the guard as the step's re-check. A guard that is still unsatisfied fails the step with "apply claimed success but the re-check disagrees". That is the feature: a fire-and-forget command cannot pass itself off as converged.
+PROSE
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+step "install-tool" {
+  description = "Install the tool if its binary is missing"
+  resource = "weave.execute"
+  properties {
+    check = "test -x /usr/local/bin/tool"
+    run   = "curl -fsSL https://example.com/tool -o /usr/local/bin/tool && chmod +x /usr/local/bin/tool"
+    timeout = 5min
+  }
+}
+SRC
+  }
+
+  list {
+    li "`shell` selects the interpreter: `:auto` (PowerShell on Windows, bash elsewhere), `:bash` (falling back to `sh`) or `:powershell` (with `-NoProfile -NonInteractive`). These are the only two script-body entry points the `shell` host module has."
+    li "`cwd`, `env` and `timeout` apply to both scripts. A zero or omitted timeout means no limit."
+    li "`reboot_on` lists exit statuses from `run` that mean the work succeeded but the host must reboot; the Windows installer convention is `[3010, 1641]`. The play halts and resumes on the next run. Unix truncates an exit status to the range 0 to 255, so only Windows can report the four-digit codes."
+    li "Its concurrency class is `parallel` on purpose. A step can only tighten, so an `exclusive` default would forbid running two unrelated scripts at once. A step that touches a shared lock declares `concurrency = \"exclusive\"` itself."
+  }
+
+  h3 "weave.execute_once"
+
+  p <<'PROSE'
+`weave.execute_once` runs a script exactly once per host and records that it ran. It is a migration aid, and it is labelled as one: it lets a playbook adopt a pile of existing shell scripts without rewriting them first. Each script converted to a real resource, or to `weave.execute` with a genuine guard, is one less step that depends on it.
+PROSE
+
+  p <<'PROSE'
+The record is the only persistent state config-weave owns, a deliberate exception to the otherwise stateless design. It lives at `/var/lib/config-weave/once/<id>` on Linux and macOS, and under the registry key `HKLM\Software\config-weave\Once` on Windows. Setting `$CONFIG_WEAVE_STATE_DIR` overrides the root on either platform and selects the file form on Windows too, which is what makes the resource testable without touching the real machine.
+PROSE
+
+  callout "The record is keyed by id alone" {
+    kind = :warning
+    body = "Editing the `run` script does not run it again; changing `id` does. The record also stores a sha256 of what actually ran, for forensics only. `apply` writes the record before reporting `RebootRequired`, so a reboot cannot cause a second run."
+  }
+
+  p <<'PROSE'
+`execute_once` takes the same `shell`, `cwd`, `env`, `timeout` and `reboot_on` parameters as `execute`. The `id` must be free of path separators, `..`, and the characters a registry value name will not take.
+PROSE
+
+  h2 "Installing packages from git"
+
+  p <<'PROSE'
+`config-weave pkg` installs packages from git repositories into `pkgs/`. It records registered repositories and each installed package's source commit in `pkgs/repo.wcl`, a tooling file the model loader never reads. The commands shell out to the `git` binary, so private repositories work through whatever credentials git already has, and shallow clones are cached under `.repo-cache/` in the playbook directory. See [config-weave pkg](cmd_pkg) for the add, remove, update, search and repo subcommands.
+PROSE
+
+  h2 "Where to go next"
+
+  p <<'PROSE'
+To add a resource to an existing package step by step, follow [Add a resource to a package](howto_add_resource). The modules a script can import are described in [The host API](guide_host_api), and the field tables for every package block are in [package.wcl](ref_package).
+PROSE
+}

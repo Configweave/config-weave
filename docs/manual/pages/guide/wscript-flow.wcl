@@ -1,0 +1,186 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_wscript_flow {
+  sites = [:manual]
+  title = "wscript: containers, loops, traits and faults"
+
+  chapter_header "wscript: containers, loops, traits and faults" {
+    kicker       = "The guide · explanation"
+    reading_time = "7 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+This chapter covers the built-in containers `List[T]` and `Map[K, V]`, the loop forms, traits and operator overloading, the derives, and the two things every script author needs to know about the runtime: memory is reference counted, and a fault ends the step. The earlier chapters cover [values, types and functions](guide_wscript_basics) and [structs, enums and matching](guide_wscript_data).
+PROSE
+
+  h2 "Lists"
+
+  p <<'PROSE'
+`List[T]` is a growable, ordered sequence. A list literal is `[a, b, c]`. Indexing with `xs[i]` faults when the index is out of bounds; `xs.get(i)` returns an `Option[T]` and never faults. The combinators `map`, `filter` and `fold` take closures and chain.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+let xs = [1, 2, 3]                 // List[int]
+xs.push(4)
+xs[0]                              // 1; faults if out of bounds
+xs.get(99)                         // None
+xs.map(|x| x * 2).filter(|x| x > 2).fold(0, |a, x| a + x)
+let lines = out.split("\n").filter(|l| !l.trim().is_empty())
+SRC
+  }
+
+  p <<'PROSE'
+`sort`, `min`, `max` and `contains` need an element type that supports the comparison: primitives, containers of them, or a struct with the relevant impl. `join` needs `List[string]`. `sum` needs numeric elements. The full method list, with signatures, is in [built-in methods](ref_wscript_methods).
+PROSE
+
+  h2 "Maps"
+
+  p <<'PROSE'
+`Map[K, V]` is a hash map. A map literal is written `#{ key: value, ... }`. A key is an `int`, `bool`, `char` or `string`. Reading `m[k]` faults when the key is missing; `m.get(k)` returns an `Option[V]`. Assigning `m[k] = v` inserts or overwrites.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+let ages = #{ "alice": 30, "bob": 25 }   // Map[string, int]
+ages["carol"] = 22                 // insert or overwrite
+ages["nope"]                       // faults
+ages.get("nope")                   // None
+ages.each(|k, v| println("{k} is {v}"))
+SRC
+  }
+
+  p <<'PROSE'
+The map combinators take two-parameter closures over key and value: `each`, `map` (which returns a `List`), and `filter` (which returns a `Map`). Iterating a map with `for` yields its keys.
+PROSE
+
+  callout "Index or get" {
+    kind = :tip
+    body = "`xs[i]` and `m[k]` fault on a missing element. Where absence is expected, and in a resource it almost always is, call `.get(...)` and handle the `Option`."
+  }
+
+  h2 "Strings as containers"
+
+  p <<'PROSE'
+A `string` is immutable. `split` returns a `List[string]`, `chars` returns a `List[char]`, and a `for` loop over a string yields its characters. `slice(start, end)` and `find` count characters, not bytes. `parse_int` and `parse_float` return an `Option`, so a malformed number is a `None` rather than a fault.
+PROSE
+
+  h2 "Loops"
+
+  p <<'PROSE'
+The loop forms are `for x in iterable`, `while cond`, and `loop`. `break` and `continue` work in all three. A `for` loop iterates a range, a list's elements, a map's keys, or a string's characters.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+for i in 0..10 { }        // exclusive; 0..=10 is inclusive
+for x in [1, 2, 3] { }    // list elements
+for k in ages { }         // map keys
+for c in "abc" { }        // chars
+while cond { }
+loop { if done { break } }
+SRC
+  }
+
+  p <<'PROSE'
+A range such as `0..n` is valid only in a `for` header. There is no range value to bind to a variable or pass to a function.
+PROSE
+
+  h2 "Traits"
+
+  p <<'PROSE'
+A trait is an interface with Rust syntax and Go-style satisfaction. Dispatch is static when the concrete type is known. A `dyn Trait` parameter or element selects dynamic dispatch through a vtable, and a concrete type coerces to `dyn Trait` implicitly at such a typed boundary. There are no default method bodies and no trait inheritance.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+trait Shape {
+    fn area(self) -> float
+}
+
+impl Shape for Circle {
+    fn area(self) -> float { 3.14159 * self.r * self.r }
+}
+
+fn describe(s: dyn Shape) -> string { str(s.area()) }
+let shapes: List[dyn Shape] = [Circle { r: 1.0 }, square]
+SRC
+  }
+
+  h2 "Operators and derives"
+
+  p <<'PROSE'
+Operators dispatch through built-in traits. Implement the trait on a struct or enum to overload the operator. Compound assignment such as `+=` evaluates its place once and dispatches through the same trait, so a type with an `Add` impl gets `+=` for free.
+PROSE
+
+  list {
+    li "`Add`, `Sub`, `Mul`, `Div`, `Rem` give `+`, `-`, `*`, `/`, `%`."
+    li "`Neg` gives unary `-`."
+    li "`Eq` gives `==` and `!=`. It is required for `==` on a struct or enum; there is no implicit identity equality. Use `same(a, b)` to compare references."
+    li "`Ord` gives `<`, `<=`, `>`, `>=`. The hand-written form is `fn cmp(self, other: Self) -> int`, returning -1, 0 or 1."
+    li "`Display` gives `str(x)` and string interpolation of `x`."
+    li "`Index` gives `x[i]`, read-only."
+  }
+
+  code rust {
+    source = <<'SRC'
+impl Add for Vec2 {
+    fn add(self, other: Vec2) -> Vec2 {
+        Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+}
+SRC
+  }
+
+  p <<'PROSE'
+`#[derive(...)]` generates the common impls. `Eq` and `Ord` derive structural comparison, `Display` derives a debug-style rendering, and `Clone` derives a deep copy reached with `.clone()`.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+#[derive(Eq, Ord, Display, Clone)]
+struct Vec2 { x: int, y: int }
+SRC
+  }
+
+  p <<'PROSE'
+There are no bitwise operators. Write the arithmetic out. wscript's `units` declaration gives an `int` or `float` a family of named units, such as `500ms` or `4MiB`, stored in a base unit and checked so that two families cannot be added. A unit value is its backing number at runtime, so it reaches a host function, a `List` or a `Value` as a plain number.
+PROSE
+
+  h2 "Memory"
+
+  p <<'PROSE'
+Memory is pure reference counting. There is no cycle collector, so a reference cycle leaks until the VM is dropped at the end of the step. Break a cycle with a weak reference: `weak(x)` makes a `weak[T]` from a reference value, and `w.upgrade()` returns `Option[T]`, `None` once the strong references are gone. Use `weak[T]` for a back-reference from a child to its parent.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+struct Node { kids: List[Node], parent: Option[weak[Node]] }
+
+let child = Node { kids: [], parent: Some(weak(parent)) }
+match child.parent {
+    Some(w) => match w.upgrade() {
+        Some(p) => println(p.name),
+        None => println("parent dropped"),
+    }
+    None => {}
+}
+SRC
+  }
+
+  h2 "Faults"
+
+  p <<'PROSE'
+A fault is a VM-level error: an index out of bounds, a division by zero, `unwrap()` on `None` or `Err`, or an aliasing violation at the host boundary. Script code cannot catch a fault, and a fault never panics config-weave. It is delivered to the host with a message and a stack trace, one frame per call with file, line and column.
+PROSE
+
+  p <<'PROSE'
+In config-weave a fault ends the step with the Error status. The message and trace appear in the step's log output. A step in Error does not run its apply and does not count as converged, as described in [The convergence contract](guide_convergence). The rule for avoiding faults is the same throughout this chapter: reach for the `Option`-returning form wherever a miss is expected, and let a host `Result` flow out through `?` rather than `unwrap()`.
+PROSE
+
+  callout "What a fault looks like" {
+    kind = :info
+    body = "The log shows the fault message, for example `list index 10 out of bounds (len 3)`, a snippet at the fault site, and the script stack trace innermost first. [Troubleshooting](apx_troubleshooting) covers reading it."
+  }
+}

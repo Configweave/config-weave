@@ -1,0 +1,97 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_registry {
+  sites = [:manual]
+  title = "registry module (Windows)"
+
+  chapter_header "registry module (Windows)" {
+    kicker       = "Reference · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use registry` reads and writes the Windows registry. The module is
+registered on every platform, so a playbook compiles and validates
+identically everywhere; on Linux and macOS every call returns a runtime
+error. Guard a call with a step condition on `os.family` or with
+`sys::family()` from the [sys module](ref_mod_sys). Every function returns
+`Result[…, string]`. A key is a hive-prefixed path such as
+`HKLM\Software\Vendor\App`; the hive names are also available as the
+constants `registry::HKLM`, `HKCU`, `HKCR`, `HKU` and `HKCC`.
+PROSE
+
+  h2 "read"
+
+  code rust {
+    source = <<'SRC'
+registry::read(key: string, name: string) -> Result[Option[Value], string]
+SRC
+  }
+
+  p "Reads a value. It returns `None` when the key or the value is absent. The `Value` is typed by the registry kind of the entry."
+
+  table {
+    rows:
+      | "Registry kind" | "Value" |
+      | "REG_SZ, REG_EXPAND_SZ" | "`Value::String`" |
+      | "REG_DWORD, REG_QWORD" | "`Value::Int`" |
+      | "REG_MULTI_SZ" | "`Value::List` of `Value::String`" |
+  }
+
+  h2 "write"
+
+  code rust {
+    source = <<'SRC'
+registry::write(key: string, name: string, value: Value, kind: string) -> Result[unit, string]
+SRC
+  }
+
+  p "Writes a value. `kind` selects the registry type and must match the shape of `value`: `sz` and `expand_sz` take a string, `dword` and `qword` take an int, and `multi_sz` takes a list of strings."
+
+  h2 "delete_value"
+
+  code rust {
+    source = <<'SRC'
+registry::delete_value(key: string, name: string) -> Result[unit, string]
+SRC
+  }
+
+  p "Deletes one value from a key."
+
+  h2 "create_key and delete_key"
+
+  code rust {
+    source = <<'SRC'
+registry::create_key(key: string) -> Result[unit, string]
+registry::delete_key(key: string) -> Result[unit, string]
+SRC
+  }
+
+  p "`create_key` creates a key and any missing parents. `delete_key` deletes a key and its whole subtree."
+
+  h2 "key_exists"
+
+  code rust {
+    source = <<'SRC'
+registry::key_exists(key: string) -> Result[bool, string]
+SRC
+  }
+
+  p "Whether a key exists."
+
+  code rust {
+    source = <<'SRC'
+use registry
+use value
+
+fn check(props: Value) -> Result[CheckResult, string] {
+    let key = "HKLM\\Software\\Vendor\\App"
+    match registry::read(key, "Telemetry")? {
+        Some(v) => if v.as_int() == Some(0) { Ok(CheckResult::AlreadyConfigured) } else { Ok(CheckResult::NotConfigured) },
+        None => Ok(CheckResult::NotConfigured),
+    }
+}
+SRC
+  }
+}

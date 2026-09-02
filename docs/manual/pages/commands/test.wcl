@@ -1,0 +1,111 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_test {
+  sites = [:manual]
+  title = "config-weave test"
+
+  chapter_header "config-weave test" {
+    kicker       = "Commands · reference"
+    reading_time = "5 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`test` runs the `test` and `scenario` blocks declared in the playbook's packages inside disposable vmlab instances. A test that declares `image` runs as a container from an OCI image; a test that declares `template` runs as a full VM from a vmlab template. Each test gets a copy of the playbook and a config-weave binary inside the instance, and the runner drives the three-run protocol: check, apply, then apply again to prove idempotence. vmlab is the only backend and must be installed. See [The testlab](guide_testlab) for the model, [The test block](ref_test_block) for the declaration, and [Test a package](howto_test_package) for the workflow.
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave test [OPTIONS] <PLAYBOOK_DIR> [FILTER]
+SRC
+  }
+
+  h2 "Arguments"
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PLAYBOOK_DIR`" | "The playbook directory. The playbook is validated first." |
+      | "`FILTER`" | "Optional. `pkg` selects every test and scenario in one package. `pkg:name` selects the test or scenario with that name in that package. No filter selects everything." |
+  }
+
+  p "A filter that matches nothing is an error, and the message lists every available `pkg:name`. A playbook in which no package declares a test or scenario is also an error."
+
+  h2 "Options"
+
+  p "All [global options](cmd_root) apply. `--json` selects the JSON report, `--no-color` the plain one, and `--jobs` is forwarded to the config-weave runs inside each instance."
+
+  table {
+    rows:
+      | "Option" | "Value" | "Meaning" |
+      | "`--image`" | "`IMAGE`" | "Run every container test against this OCI image instead of the one it declares. Tests that declare a template are unaffected." |
+      | "`--template`" | "`REF`" | "Run every VM test against this vmlab template instead of the one it declares. Tests that declare an image are unaffected." |
+      | "`--keep`" | "" | "Leave the instances running after the run for post-mortem debugging. You are responsible for removing them." |
+      | "`--binary`" | "`PATH`" | "Static Linux config-weave binary to copy into Linux instances. Alternative to `$CONFIG_WEAVE_TEST_BINARY`." |
+      | "`--binary-windows`" | "`PATH`" | "Windows config-weave binary for Windows guests. Alternative to `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`." |
+      | "`--container-jobs`" | "`N`" | "Maximum container test groups running at once. Default is the smaller of the CPU count and 8." |
+      | "`--vm-jobs`" | "`N`" | "Maximum VM test groups running at once. Default 2, because VMs are heavy." |
+      | "`--events-ndjson`" | "" | "Stream one JSON event per line to stderr: lifecycle, per-phase progress and raw instance attach information. Stdout still carries the final report." |
+  }
+
+  p <<'PROSE'
+Neither `--image` nor `--template` converts a test between kinds. Each replaces the reference only for tests that already declare that field, because an image and a template name different things.
+PROSE
+
+  p <<'PROSE'
+When no binary is given, the runner uses the running executable if it is a static ELF, then looks for the workspace's cross-build artifacts. A dynamically linked binary cannot run inside an arbitrary container, so a development build usually needs `--binary` pointing at the output of `just release`. Windows guests always need an explicit Windows binary or the environment variable.
+PROSE
+
+  h2 "Grouping and ordering"
+
+  p <<'PROSE'
+Tests with the same non-empty `group` in one package share one instance and run in declaration order inside it. Ungrouped tests each get their own instance. Groups run in parallel up to the container and VM limits. Scenarios run after every test group has finished, one at a time, since each may bring up several machines. The final report lists results in selection order regardless of completion order.
+PROSE
+
+  h2 "Events"
+
+  p <<'PROSE'
+With `--events-ndjson`, the first event is `run_started` with the full plan, so a consumer can size a progress view. Each instance announces itself with an `instance_ready` event carrying its id. A supervisor that kills the process must remove those instances itself, because the runner's cleanup does not get a chance to run. The last event is `run_finished` with the exit code and the pass, fail and error counts. It is written before the stdout report.
+PROSE
+
+  h2 "Examples"
+
+  p "Run everything, then narrow to one package and then to one test."
+
+  code console {
+    source = <<'SRC'
+config-weave test ./my-playbook
+config-weave test ./my-playbook core
+config-weave test ./my-playbook core:file_present_converges
+SRC
+  }
+
+  p "Run the container tests against a different base image with a static binary, and keep the instances for inspection."
+
+  code console {
+    source = <<'SRC'
+config-weave test ./my-playbook --image docker.io/library/debian:12 \
+  --binary dist/config-weave-linux-x86_64 --keep
+SRC
+  }
+
+  p "Run the VM tests three at a time and emit a machine-readable report with a live event stream."
+
+  code console {
+    source = <<'SRC'
+config-weave test ./my-playbook --vm-jobs 3 --json --events-ndjson 2> events.ndjson > report.json
+SRC
+  }
+
+  h2 "Exit status"
+
+  table {
+    rows:
+      | "Code" | "Meaning" |
+      | "0" | "Every selected test and scenario passed." |
+      | "1" | "At least one test failed a step expectation or the verify script, or errored while running. A binary that cannot be located or does not run inside the instance errors every test in that group." |
+      | "2" | "A problem before any test ran: the playbook did not validate, the filter matched nothing, no package declares tests, or the vmlab CLI was not found." |
+  }
+}

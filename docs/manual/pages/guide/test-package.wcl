@@ -1,0 +1,137 @@
+// Part II — The guide. Declared mode: how-to.
+page howto_test_package {
+  sites = [:manual]
+  title = "Test a package"
+
+  chapter_header "Test a package" {
+    kicker       = "The guide · how-to"
+    reading_time = "5 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  h2 "Goal"
+
+  p <<'PROSE'
+Prove that a package's resources converge and stay converged by running its
+tests in a disposable instance with the testlab's three-run protocol. You
+need a package with at least one `test` block and the `vmlab` CLI on your
+`PATH`. Tests that declare a `template` run as full virtual machines and
+also need KVM. The example tests the `file_present` resource of a package
+named `core`.
+PROSE
+
+  h2 "1. Declare a test"
+
+  p <<'PROSE'
+Add a `test` block to `package.wcl`. It carries a `description`, exactly one
+of `image` or `template`, and one or more steps. `image` names an OCI image
+and runs the test as a container, which is Linux-only and starts in
+seconds. `template` names a vmlab template and runs the test as a full VM,
+Linux or Windows, with a real init system and the ability to reboot.
+PROSE
+
+  code wcl {
+    filename = "pkgs/core/package.wcl"
+    source = <<'SRC'
+test "file_present_converges" {
+  description = "file_present creates the file and is idempotent"
+  image = "debian:12"
+  step "create" {
+    description = "Create a marker file"
+    resource = "file_present"
+    properties { path = "/var/tmp/weave.txt"  content = "hello" }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+Every value in a test must be static. The test runs against a synthesized
+playbook with no variables, so a variable reference in test properties is a
+validation error. An unqualified `resource` or `from` reference resolves to
+the declaring package, so `file_present` here means `core.file_present`. A
+step defaults to `expect = "converge"`: check must report not configured,
+apply must succeed, and a second apply must change nothing. The other
+expectations, the optional `verify` script, `group` and `memory` fields, and
+the gather assertions are in [The test block](ref_test_block).
+PROSE
+
+  h2 "2. Run the test"
+
+  p <<'PROSE'
+Run the test command on the playbook directory with an optional filter. No
+filter runs every test in every package, `core` runs that package's tests,
+and `core:file_present_converges` runs one test.
+PROSE
+
+  code console {
+    source = <<'SRC'
+$ config-weave test ./my-playbook core:file_present_converges
+⟳ [core:file_present_converges] provisioning (container debian:12)
+⟳ core:file_present_converges — check
+⟳ core:file_present_converges — first apply
+⟳ core:file_present_converges — second apply
+
+test 'My Playbook' — 1 test(s)
+  ✓ core:file_present_converges                passed  container debian:12 4.2s
+summary: 1 passed, 0 failed, 0 error (4.2s)
+SRC
+  }
+
+  p <<'PROSE'
+config-weave probes vmlab once up front, then provisions an instance, copies
+the binary and the synthesized playbook in, and runs `check`, `apply` and
+`apply` again, each as a separate process. The second run's internal
+re-check proves convergence within one process. The third run catches the
+subtler bug: state that only looked converged to the process that created
+it, which shows up as the step reporting `configured` instead of
+`already configured`. A failure lists each failing step under its test line.
+PROSE
+
+  p <<'PROSE'
+The instance runs whatever binary you point it at. When your development
+build is dynamically linked, pass a static Linux binary with `--binary PATH`
+and, for Windows guests, `--binary-windows PATH`. To run every container
+test against a different image, or every VM test against a different
+template, pass `--image REF` or `--template REF`. Neither converts a test
+between the two kinds.
+PROSE
+
+  h2 "3. Debug a failure with --keep"
+
+  p <<'PROSE'
+When a test fails, run it again with `--keep`. The instance stays up after
+the run and its handle is reported, so you can attach with the vmlab CLI and
+inspect what apply wrote.
+PROSE
+
+  code console {
+    source = <<'SRC'
+$ config-weave test ./my-playbook core --keep
+⟳ [core:file_present_converges] kept <handle> — remove it manually when done
+SRC
+  }
+
+  p <<'PROSE'
+A kept instance is not torn down for you. Remove it with vmlab when you are
+finished. The exit code is 0 when every test passed, 1 when any test failed
+or errored, and 2 for a validation problem, a filter that matches nothing,
+or a vmlab environment that fails the up-front probe.
+PROSE
+
+  callout "Done" {
+    kind = :success
+    body = "`config-weave test` reports every selected test `passed` and exits 0. The package's resources converge, and stay converged across processes, on the declared image."
+  }
+
+  h2 "Next steps"
+
+  list {
+    li "What the three runs prove, and how grouped tests and scenarios extend them: [The testlab](guide_testlab)."
+    li "Every field of the `test` block, the expectation table and the instance requirements: [The test block](ref_test_block)."
+    li "All the flags, the JSON report and the exit codes: [config-weave test](cmd_test)."
+    li "The `testlab` host module a verify script can use: [testlab module](ref_mod_testlab)."
+    li "A test that fails on the second or third run points at a broken resource. Fix it by the rules in [The convergence contract](guide_convergence)."
+  }
+}

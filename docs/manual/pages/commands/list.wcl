@@ -1,0 +1,63 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_list {
+  sites = [:manual]
+  title = "config-weave list"
+
+  chapter_header "config-weave list" {
+    kicker       = "Commands · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`list` prints the plays defined in a playbook, with their step counts and descriptions, followed by any playbook-local composites. It loads the playbook and reports load errors, but it does not run the full validation pipeline and never executes a script. With `--json` it prints the complete inventory instead: plays, composites and every package with its resources, gatherers, tests and scenarios.
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave list [OPTIONS] <PLAYBOOK_DIR>
+SRC
+  }
+
+  h2 "Arguments"
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PLAYBOOK_DIR`" | "The playbook directory." |
+  }
+
+  h2 "Options"
+
+  p "All [global options](cmd_root) apply. `--json` changes the output as described below; the others have no effect."
+
+  h2 "Examples"
+
+  p "The human-readable form."
+
+  code console {
+    source = <<'SRC'
+config-weave list ./my-playbook
+my-playbook v0.1.0 — A starter playbook
+  baseline  (3 steps) — Base configuration for every host
+  web  (5 steps) — Web tier
+composites:
+  user_with_home  (2 steps) — A user and its home directory
+SRC
+  }
+
+  p "The JSON inventory. Each package entry carries `name`, `description`, `builtin`, `resources` (with `concurrency` and `params`), `composites`, `gatherers`, `tests` (with `machine_kind`, `source` and `group`) and `scenarios`."
+
+  code console {
+    source = <<'SRC'
+config-weave list ./my-playbook --json | jq '.packages[].tests[] | "\(.name) on \(.source)"'
+SRC
+  }
+
+  h2 "Exit status"
+
+  p "0 when the playbook loaded. 2 when it could not be parsed or failed a load-time check."
+}

@@ -1,0 +1,80 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_apply {
+  sites = [:manual]
+  title = "config-weave apply"
+
+  chapter_header "config-weave apply" {
+    kicker       = "Commands · reference"
+    reading_time = "3 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`apply` converges one play. It validates the playbook, runs the play's gatherers, then walks the step DAG. Each step's `check` runs first. A step that is NotConfigured gets its `apply`, and then `check` runs again to confirm the result. A step whose second check does not report AlreadyConfigured is an Error. See [The convergence contract](guide_convergence) for the full lifecycle and [Check, then apply](howto_check_apply) for the recommended workflow.
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave apply [OPTIONS] <PLAYBOOK_DIR> <PLAY>
+SRC
+  }
+
+  h2 "Arguments"
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`PLAYBOOK_DIR`" | "The playbook directory, containing `playbook.wcl`." |
+      | "`PLAY`" | "The name of the play to apply. `config-weave list` shows the names." |
+  }
+
+  h2 "Options"
+
+  p "All [global options](cmd_root) apply. The variable, password, worker pool, error and output options all take effect here."
+
+  table {
+    rows:
+      | "Option" | "Value" | "Meaning" |
+      | "`--events-ndjson`" | "" | "Stream one JSON event per line to stderr: run and gather lifecycle plus per-step phase progress. Replaces the live progress line. Stdout still carries the final report, so combine with `--json` for a fully machine-readable run." |
+      | "`--continue-on-error`" | "" | "Keep dispatching steps after an Error instead of halting once in-flight steps finish." |
+      | "`--jobs`" | "`N`" | "Worker pool size. See [Scheduling and concurrency](guide_scheduling)." |
+  }
+
+  h2 "Examples"
+
+  p "Converge the `baseline` play."
+
+  code console {
+    source = <<'SRC'
+config-weave apply ./my-playbook baseline
+SRC
+  }
+
+  p "Apply with a variable override and a machine-readable report, then inspect the exit code."
+
+  code console {
+    source = <<'SRC'
+config-weave apply ./my-playbook baseline --var hostname=web01 --json > report.json
+echo $?
+SRC
+  }
+
+  p "Apply a playbook that holds encrypted values, reading the password from a file, and log everything to NDJSON."
+
+  code console {
+    source = <<'SRC'
+config-weave apply ./my-playbook baseline \
+  --password-file /run/secrets/weave \
+  --log-file /var/log/config-weave.ndjson --log-level debug
+SRC
+  }
+
+  h2 "Exit status"
+
+  p <<'PROSE'
+0 when every step is Configured, Already Configured or Skipped. 1 when any step ended in Error, including a step whose apply succeeded but whose re-check disagreed. 2 when validation failed, a variable or password could not be resolved, or the play does not exist. 3 when a step returned RebootRequired and no step errored: the play halted, and running `apply` again after the reboot resumes it.
+PROSE
+}

@@ -1,0 +1,96 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_sys {
+  sites = [:manual]
+  title = "sys module"
+
+  chapter_header "sys module" {
+    kicker       = "Reference · reference"
+    reading_time = "1 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use sys` reports facts about the operating system and hardware. Gatherers
+use it to publish the values that conditions in a playbook test. No function
+in this module fails. For the process environment and the current user, see
+the [env module](ref_mod_env).
+PROSE
+
+  h2 "family"
+
+  code rust {
+    source = <<'SRC'
+sys::family() -> string
+SRC
+  }
+
+  p "The operating system family: `linux`, `windows` or `macos`. Use it to guard a call into a Windows-only module."
+
+  h2 "os_name and os_version"
+
+  code rust {
+    source = <<'SRC'
+sys::os_name() -> string
+sys::os_version() -> string
+SRC
+  }
+
+  p "The name and version of the operating system. On Linux the name is the distribution name."
+
+  h2 "kernel_version"
+
+  code rust {
+    source = <<'SRC'
+sys::kernel_version() -> string
+SRC
+  }
+
+  p "The kernel version string."
+
+  h2 "arch"
+
+  code rust {
+    source = <<'SRC'
+sys::arch() -> string
+SRC
+  }
+
+  p "The CPU architecture, such as `x86_64` or `aarch64`."
+
+  h2 "cpu_count"
+
+  code rust {
+    source = <<'SRC'
+sys::cpu_count() -> int
+SRC
+  }
+
+  p "The number of logical CPUs."
+
+  h2 "total_memory and available_memory"
+
+  code rust {
+    source = <<'SRC'
+sys::total_memory() -> int
+sys::available_memory() -> int
+SRC
+  }
+
+  p "Physical memory in bytes: the total installed, and the amount available now."
+
+  code rust {
+    source = <<'SRC'
+use sys
+use value
+
+fn gather(params: Value) -> Value {
+    Value::Map(#{
+        "family": Value::String(sys::family()),
+        "arch": Value::String(sys::arch()),
+        "cpus": Value::Int(sys::cpu_count())
+    })
+}
+SRC
+  }
+}

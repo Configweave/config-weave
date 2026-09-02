@@ -1,0 +1,142 @@
+// Part I — Getting started. Declared mode: tutorial.
+page gs_install {
+  sites = [:manual]
+  title = "Install"
+
+  chapter_header "Install" {
+    kicker       = "Getting started · tutorial"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+config-weave is one statically linked executable per platform. In this
+tutorial you download it, put it on your `PATH` and confirm it runs. There is
+nothing else to install on any machine that runs it: no interpreter, no
+agent and no shared libraries.
+PROSE
+
+  h2 "Before you start"
+
+  list {
+    li "A Linux x86_64 or Windows x86_64 machine you can write to."
+    li "A terminal. The commands below use a POSIX shell on Linux and PowerShell on Windows."
+    li "Building from source needs a Rust toolchain and network access to fetch the dependencies. Cross-building the release artifacts also needs `cross` and a container runtime."
+  }
+
+  h2 "Download a release"
+
+  p <<'PROSE'
+Every release on the
+[GitHub releases page](https://github.com/Configweave/config-weave/releases)
+carries three files: a Linux binary, a Windows binary and a checksums file.
+PROSE
+
+  table {
+    rows:
+      | "File" | "Target" |
+      | "`config-weave-linux-x86_64`" | "Linux, `x86_64-unknown-linux-musl`, fully static" |
+      | "`config-weave-windows-x86_64.exe`" | "Windows, `x86_64-pc-windows-gnu`, static against the mingw runtime" |
+      | "`SHA256SUMS`" | "SHA-256 checksums of both binaries" |
+  }
+
+  h3 "Linux"
+
+  p <<'PROSE'
+Download the Linux binary and the checksums file into one directory, verify
+the checksum, then move the binary to a directory on your `PATH` under the
+name `config-weave`.
+PROSE
+
+  code sh {
+    source = <<'SRC'
+sha256sum --check --ignore-missing SHA256SUMS
+chmod +x config-weave-linux-x86_64
+mkdir -p ~/.local/bin
+mv config-weave-linux-x86_64 ~/.local/bin/config-weave
+SRC
+  }
+
+  p <<'PROSE'
+The checksum command prints `config-weave-linux-x86_64: OK`. If `~/.local/bin`
+is not on your `PATH`, add it in your shell profile or choose a directory that
+is, such as `/usr/local/bin`.
+PROSE
+
+  h3 "Windows"
+
+  p <<'PROSE'
+Download the Windows binary and the checksums file, verify the hash, then
+place the binary in a directory on your `PATH` under the name
+`config-weave.exe`. The commands below create a directory under your profile
+and add it to the user `PATH`.
+PROSE
+
+  code text {
+    source = <<'SRC'
+Get-FileHash .\config-weave-windows-x86_64.exe -Algorithm SHA256
+Select-String config-weave-windows-x86_64.exe .\SHA256SUMS
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\config-weave"
+Move-Item .\config-weave-windows-x86_64.exe "$env:LOCALAPPDATA\config-weave\config-weave.exe"
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:LOCALAPPDATA\config-weave", "User")
+SRC
+  }
+
+  p <<'PROSE'
+Compare the hash the first command prints with the line the second command
+finds. They match when the download is intact. Open a new terminal so the
+updated `PATH` takes effect.
+PROSE
+
+  h2 "Verify the install"
+
+  p "Run the version command from any directory."
+
+  code console {
+    source = <<'SRC'
+$ config-weave version
+config-weave 0.1.0
+SRC
+  }
+
+  callout "You now have config-weave on your PATH" {
+    kind = :success
+    body = "The command prints the version and exits 0. Every other command in this manual runs from this binary."
+  }
+
+  h2 "Build from source instead"
+
+  p <<'PROSE'
+If you would rather build the binary yourself, clone the repository and build
+with cargo. The build fetches the WCL and wscript crates from GitHub, so it
+needs network access the first time.
+PROSE
+
+  code sh {
+    source = <<'SRC'
+git clone https://github.com/Configweave/config-weave.git
+cd config-weave
+cargo build --release
+./target/release/config-weave version
+SRC
+  }
+
+  p <<'PROSE'
+This produces a binary for your own platform. The repository also ships a
+`justfile` with the release recipes. `just build` makes a debug build.
+`just release` cross-builds both release binaries and the checksums file into
+`dist/`, and `just install` copies those into `~/.local/share/config-weave/bin`
+and links the Linux binary as `~/.local/bin/config-weave`. Both recipes need
+`cross` and a container runtime, because the two targets build inside
+containers.
+PROSE
+
+  h2 "Next steps"
+
+  p <<'PROSE'
+You have a working binary. In [Your first playbook](gs_first_playbook) you
+scaffold a playbook, validate it, and take it through check and apply. The
+full list of subcommands and global options is in [config-weave](cmd_root).
+PROSE
+}

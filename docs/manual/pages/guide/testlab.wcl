@@ -1,0 +1,144 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_testlab {
+  sites = [:manual]
+  title = "The testlab"
+
+  chapter_header "The testlab" {
+    kicker       = "The guide · explanation"
+    reading_time = "8 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+The testlab proves that a package converges. `config-weave test` runs each `test` block a package declares inside a disposable machine, drives the real engine through check and apply, and asserts on every step's status. This chapter explains the protocol, the two kinds of instance, how tests share an instance, and when a scripted scenario is needed instead. The fields of the `test` block are in [The test block](ref_test_block), the flags in [config-weave test](cmd_test), and the walkthrough in [Test a package](howto_test_package).
+PROSE
+
+  h2 "What a test declares"
+
+  code wcl {
+    filename = "pkgs/core/package.wcl"
+    source = <<'SRC'
+test "file_present_converges" {
+  description = "file_present creates the file and is idempotent"
+  image = "debian:12"
+  verify = "tests/file_present_verify.ws"
+
+  step "create" {
+    description = "Create a marker file"
+    resource = "file_present"
+    properties { path = "/var/tmp/weave-sample.txt"  content = "hello" }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A test names its instance with exactly one of `image` or `template`, and holds steps that mirror playbook steps plus an `expect` field, defaulting to `converge`. It may also hold `gather` blocks with static params and an `expect` block of top-level key equality assertions, an optional `setup` command that runs before the protocol, an optional `verify` script that inspects the guest afterwards, a `memory` size, and a `group` name. Every value in a test must be static, because the test runs against a synthesised playbook with no variables. An unqualified `resource` or `from` resolves to the declaring package.
+PROSE
+
+  h2 "The three-run protocol"
+
+  p <<'PROSE'
+Inside the instance the runner executes the synthesised playbook three times, each with `--json` and `--continue-on-error`: `check`, then `apply`, then `apply` again.
+PROSE
+
+  list {
+    style = :numbered
+    li "**Run 1, check.** Reports the initial status and mutates nothing. A step expected to converge must report Not Configured here."
+    li "**Run 2, apply.** Converges. The engine's own re-check after each apply proves convergence within one process."
+    li "**Run 3, apply again.** Proves cross-process idempotence. Every converging step must report Already Configured in a fresh process. A check that only passes on in-process state re-applies here, reports Configured, and fails the test."
+  }
+
+  p <<'PROSE'
+The third run is the one the engine cannot do for itself, and it is the reason the testlab exists. [The convergence contract](guide_convergence) explains why in-process convergence is not enough. The per-step expectation values, `converge`, `already_configured`, `error`, `skip` and `reboot_required`, and the status each demands in each run are tabulated in [The test block](ref_test_block).
+PROSE
+
+  h2 "Containers and VMs"
+
+  p <<'PROSE'
+Every instance is a vmlab machine. vmlab is the only backend, and the test's `image` or `template` field is the whole selection.
+PROSE
+
+  h3 "A container instance"
+
+  p <<'PROSE'
+`image = "debian:12"` runs the named OCI image as a vmlab container, booted inside a micro-VM. It is Linux-only and ready in seconds once the image is cached, which makes it the default choice for anything that is really just a userland: file, package and config resources. Unlike an unprivileged container runtime, the guest holds the full capability set, has its own kernel, and runs as root, so resources that need `NET_ADMIN` or a real kernel, such as nftables, ufw or firewalld, work here too. A container defaults to 256MiB of guest memory; raise it on the test with `memory = "4GiB"` for a heavy image. Guest memory is allocated on demand, so the raise costs the light images nothing.
+PROSE
+
+  p <<'PROSE'
+Two measured limits. `dnf5` loads its repositories fine in a Fedora container but then stalls for many minutes on the transaction itself, so use a VM for real dnf installs. And a test that needs a live init system, a reboot or a Windows guest must use a VM.
+PROSE
+
+  h3 "A VM instance"
+
+  p <<'PROSE'
+`template = "x86_64/ubuntu-24.04"` clones a full QEMU/KVM virtual machine from a vmlab template. It is the only kind with a real init system, the ability to reboot, and the ability to run Windows. The guest OS is detected from the vmlab guest agent, which the template must ship. A Windows `setup` command runs under `cmd /C` rather than `sh -c`. A fresh Windows clone takes several minutes on its first boot, so group Windows tests together.
+PROSE
+
+  callout "The guest agent runs commands with HOME=/" {
+    kind = :warning
+    body = "Inside a testlab instance `$HOME` is `/`, not the target user's home. A resource that defaults a path to the home directory writes somewhere unexpected. Pass `home`, or the equivalent parameter, explicitly in the test."
+  }
+
+  h2 "How the runner talks to the guest"
+
+  p <<'PROSE'
+The host copies a config-weave binary matched to the guest OS into the instance and smoke-tests it with `version`, so an architecture mismatch is one clear diagnostic rather than a mysterious failure later. For Linux the binary comes from `--binary`, then `$CONFIG_WEAVE_TEST_BINARY`, then the running executable if it is statically linked, then the newest static cross-build in the workspace. For Windows it comes from `--binary-windows`, `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, or the newest Windows cross-build.
+PROSE
+
+  p <<'PROSE'
+Each test gets its own working directory under `/weave/t/` in the guest, holding its synthesised playbook, the referenced packages, and the playbook's `lib/`. Gatherers under test and verify scripts run through two hidden subcommands of the copied binary, so they execute against the real host API inside the guest. A verify script exports `verify(facts) -> bool`, or `Result[bool, string]`, and its exit status distinguishes a failed assertion from a script that never ran. Verify scripts compile during validation on the host but only ever execute inside an instance.
+PROSE
+
+  h2 "Grouping tests into one instance"
+
+  p <<'PROSE'
+By default each test provisions its own instance. Give several tests in the same package the same non-empty `group` and they run sequentially inside one shared instance, so the container start or the VM boot is paid once per group rather than once per test. Grouped tests must agree on their target, same kind and same reference, and on `memory`, because a group provisions exactly one machine.
+PROSE
+
+  p <<'PROSE'
+Grouped tests share the instance's OS state with no reset between them, so only group tests that target distinct paths and distinct state. The three-run protocol still needs each test's own resources to start clean. Independent groups run in parallel, throttled by `--container-jobs`, defaulting to the smaller of the CPU count and eight, and `--vm-jobs`, defaulting to two because VMs are heavy. A provisioning or smoke-test failure errors every test in the group; a single test's transport trouble errors only that test, and the rest of the group proceeds. Output stays in declaration order despite the parallel runs.
+PROSE
+
+  h2 "Scenarios"
+
+  p <<'PROSE'
+Some convergence cannot be expressed as check, apply, apply on one machine. Promoting a Windows domain controller needs apply, reboot, apply again. Joining a member server needs a reachable domain controller on a second networked VM. For these a package declares a `scenario`: a vmlab lab plus a wscript driver script.
+PROSE
+
+  code wcl {
+    filename = "pkgs/windows_domain/package.wcl"
+    source = <<'SRC'
+scenario "ad_matrix" {
+  description = "Forest, additional DC and a member join over real reboots"
+  lab    = "tests/ad-lab"          // a directory holding a vmlab.wcl
+  script = "tests/ad_matrix.ws"
+}
+SRC
+  }
+
+  p <<'PROSE'
+`lab` points at a directory holding a `vmlab.wcl` with the full vmlab feature set: segments, static addresses, a DC as DNS, and dependencies between machines. Every VM the scenario will use is declared there up front, because the vmlab daemon loads its lab configuration once and does not see machines added later. The driver exports `run(lab: Lab) -> bool`, or `Result[bool, string]`, and runs host-side against the live lab through the [testlab module](ref_mod_testlab). It brings machines up by name with `lab.machine(name)`, applies a resource with `machine.apply_resource(key, props)`, which synthesises a one-step playbook and runs the real engine in the guest, reboots with `machine.reboot()`, and asserts on the returned status. Scenario machines are always VMs, since reboots and multi-machine topologies are the point.
+PROSE
+
+  p <<'PROSE'
+Scenarios compile during validation against the host API plus the testlab module, so a broken driver fails `config-weave validate`. At run time they execute sequentially after the parallel test groups, each owning its own lab.
+PROSE
+
+  h2 "Environment and reporting"
+
+  p <<'PROSE'
+The runner finds vmlab through `$CONFIG_WEAVE_VMLAB_CMD` or `vmlab` on the path, and probes it once before any test runs, so a broken environment is exit status 2 before a single instance is provisioned. Each instance is a one-machine lab in a temporary directory; teardown destroys the lab and removes the directory. `--keep` leaves the lab running and prints its directory, so `vmlab exec`, `vmlab container exec` and `vmlab console` work for a post-mortem.
+PROSE
+
+  p <<'PROSE'
+Exit status 0 means every test passed, 1 means at least one failed or errored, and 2 means a validation or environment problem. `--json` emits a schema-stable report object. `--image` and `--template` override the reference for every test of the matching kind; neither can convert a test between kinds, because the two references name different things.
+PROSE
+
+  h2 "Where to go next"
+
+  p <<'PROSE'
+Follow [Test a package](howto_test_package) to write and run a first test. The block fields and the expectation table are in [The test block](ref_test_block), and every flag with the exit statuses is in [config-weave test](cmd_test).
+PROSE
+}

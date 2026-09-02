@@ -5,40 +5,26 @@
 // landing-parts.wcl. The same content degrades to the Markdown / PDF
 // backends — no parallel fallback copy needed.
 
-// The wskill registry, discovered from the `include`s in main.wcl: the
-// config-weave reference book, plus the deck / training views.
-let wskill_books   = included_sites({ folder: "wskills", entry: "wdoc/book/main.wcl" })
-let wskill_decks   = included_sites({ folder: "wskills", entry: "wdoc/presentation/main.wcl", prefix: "decks" })
-let wskill_courses = included_sites({ folder: "wskills", entry: "wdoc/training/main.wcl", prefix: "training" })
-
-// Extra ` · [deck](…) · [course](…)` links appended to a member's card
-// when it ships those views.
-let wskill_view_links = fn(n: utf8) -> utf8 {
-  let d = join(map(filter(wskill_decks,   fn(x: IncludeEntry) -> bool { x.name == n }), fn(x: IncludeEntry) -> utf8 { $" · [deck](./${x.href})" }), "");
-  let c = join(map(filter(wskill_courses, fn(x: IncludeEntry) -> bool { x.name == n }), fn(x: IncludeEntry) -> utf8 { $" · [course](./${x.href})" }), "");
-  $"${d}${c}"
-}
-
-// One reference card per wskill book (data for `lp_cards`).
-let ref_cards = map(wskill_books, fn(s: IncludeEntry) -> LpRefCard {
+// The manual, as the one reference card and the footer's reference links.
+// Cross-site links: the manual is the `manual` site imported by main.wcl.
+let ref_cards = [
   {
-    name: s.name,
-    summary: s.summary ?? "",
-    href: $"./${s.href}",
+    name: "config-weave manual",
+    summary: "Getting started, the guide, the playbook/package/host-API reference, every command, and the appendices.",
+    href: "./manual/",
     icon: "lucide.book-open",
-    links: wskill_view_links(s.name),
-  }
-})
+    links: "",
+  },
+]
 
-// Every published view as a footer link (book, then deck, then course).
-let ref_links = flatten([
-  map(wskill_books,   fn(s: IncludeEntry) -> LpFootlink { { label: $"${s.name} reference", href: $"./${s.href}" } }),
-  map(wskill_decks,   fn(s: IncludeEntry) -> LpFootlink { { label: $"${s.name} deck", href: $"./${s.href}" } }),
-  map(wskill_courses, fn(s: IncludeEntry) -> LpFootlink { { label: $"${s.name} course", href: $"./${s.href}" } }),
-])
+let ref_links = [
+  { label: "Manual",    href: "./manual/" },
+  { label: "Reference", href: "./manual/ref_playbook.html" },
+  { label: "Commands",  href: "./manual/cmd_root.html" },
+]
 
 page index { sites = [:config_weave]  title = "config-weave — configuration that ships as a single binary"  start = true
-  region "banner" {
+  banner {
     callout "Alpha software." {
       class = ["warning"]
       body  = "config weave is under heavy active development — the playbook/package vocabulary, host API, and CLI can change without notice."
@@ -201,7 +187,7 @@ SH
     id      = reference
     eyebrow = "Reference"
     title   = "The manual"
-    lede    = "The reference is published as a **wskill** — a self-contained WCL model projected into a readable book, a Claude Code skill, an overview deck, and a hands-on training course."
+    lede    = "The manual is a wdoc book: a tutorial to get started, a guide to the model, and a complete reference for the WCL blocks, the wscript host API, and every command."
     cards   = ref_cards
   }
 
@@ -216,7 +202,7 @@ SH
     lp_step "Verify with no changes"      { command = "config-weave check my-playbook baseline" }
   }
 
-  region "footer" {
+  footer {
     lp_footer {
       brand     = "config weave"
       tagline   = "A Rust configuration tool that ships as a single static binary. apply or check — Linux and Windows."

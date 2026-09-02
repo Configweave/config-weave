@@ -1,0 +1,82 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_wscripti {
+  sites = [:manual]
+  title = "config-weave wscripti"
+
+  chapter_header "config-weave wscripti" {
+    kicker       = "Commands · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`wscripti` writes `weave.wscripti`, the wscript interface file describing the whole host API, plus a starter `wscript.toml` that points at it. With both files next to your scripts, `wscript check` and the wscript language server type-check against the exact surface config-weave provides. See [The host API](guide_host_api).
+PROSE
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave wscripti [OPTIONS] [OUTDIR]
+SRC
+  }
+
+  h2 "Arguments"
+
+  table {
+    rows:
+      | "Argument" | "Meaning" |
+      | "`OUTDIR`" | "Directory to write both files into. Optional. Defaults to the current directory. Created when missing." |
+  }
+
+  h2 "Options"
+
+  p "Only the [global options](cmd_root) are accepted, and none affect the output."
+
+  h2 "The interface file"
+
+  p <<'PROSE'
+`weave.wscripti` is generated from the host modules compiled into the binary, so it is the authoritative description of the host API for the version of config-weave that wrote it. Every module, function, struct and enum a script can use appears in it with its exact signature. Regenerate it after upgrading config-weave. It is the same surface `config-weave validate` compiles scripts against, so a script the editor accepts is one validation accepts.
+PROSE
+
+  p "The starter `wscript.toml` has one line."
+
+  code toml {
+    filename = "wscript.toml"
+    source = <<'SRC'
+interfaces = ["weave.wscripti"]
+SRC
+  }
+
+  p "An existing `wscript.toml` is left untouched, so you can extend it. `weave.wscripti` is always overwritten."
+
+  h2 "Editor and LSP use"
+
+  p <<'PROSE'
+Write the files where your scripts live, or at a directory the editor treats as the workspace root. The wscript LSP reads `wscript.toml`, loads the listed interfaces, and then offers completion, hover types and diagnostics for `fs::`, `shell::`, `log::` and every other host module. `wscript check` uses the same file from the command line.
+PROSE
+
+  h2 "Examples"
+
+  p "Generate the files into a package's resources directory."
+
+  code console {
+    source = <<'SRC'
+config-weave wscripti ./my-playbook/pkgs/core/resources
+wrote ./my-playbook/pkgs/core/resources/weave.wscripti and wscript.toml
+SRC
+  }
+
+  p "Generate them at the playbook root so one workspace covers every package."
+
+  code console {
+    source = <<'SRC'
+cd ./my-playbook && config-weave wscripti
+SRC
+  }
+
+  h2 "Exit status"
+
+  p "0 when both files were written. 2 when the directory or a file could not be written."
+}

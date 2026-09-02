@@ -1,0 +1,466 @@
+// Part I — Getting started. Declared mode: tutorial.
+page gs_first_playbook {
+  sites = [:manual]
+  title = "Your first playbook"
+
+  chapter_header "Your first playbook" {
+    kicker       = "Getting started · tutorial"
+    reading_time = "11 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+In this tutorial you scaffold a playbook with `config-weave init`, read what
+it wrote, validate it, and then run it through the whole convergence loop:
+check, apply, apply again, check. By the end you have seen every status a
+step can report on a converging machine and proven that the scaffolded
+resource is idempotent.
+PROSE
+
+  h2 "Before you start"
+
+  list {
+    li "config-weave is on your `PATH`. [Install](gs_install) covers that."
+    li "A Linux or Windows machine you are allowed to write to. The scaffolded play writes three small files under `/tmp/my-playbook`. Change the `work_root` variable if that path does not suit your machine."
+    li "A terminal in a directory where you can create a folder."
+  }
+
+  h2 "Scaffold a playbook"
+
+  p "Run the init command with the directory you want to create."
+
+  code console {
+    source = <<'SRC'
+$ config-weave init ./my-playbook
+scaffolded a playbook in ./my-playbook — next: edit, then `config-weave validate ./my-playbook`
+SRC
+  }
+
+  p "The command refuses to run if the directory already holds a `playbook.wcl`. It writes these files."
+
+  table {
+    rows:
+      | "File" | "What it is" |
+      | "`playbook.wcl`" | "The playbook: one gatherer invocation, two variables, one composite and one play." |
+      | "`pkgs/example/package.wcl`" | "The `example` package: a gatherer, a resource and a test." |
+      | "`pkgs/example/resources/file_present.ws`" | "The resource script, exporting `check` and `apply`." |
+      | "`pkgs/example/gatherers/os_info.ws`" | "The gatherer script, exporting `gather`." |
+      | "`pkgs/example/tests/greeting_verify.ws`" | "A verify script the testlab runs inside a test instance." |
+      | "`lib/README.md`, `pkgs/example/lib/README.md`" | "Where shared wscript helpers go, with a note on how imports resolve." |
+      | "`weave.wscripti`, `wscript.toml`" | "The host API interface and a manifest, so an editor with the wscript language server type-checks your scripts." |
+      | "`.gitignore`" | "Ignores `.repo-cache/`, where `config-weave pkg` clones package repositories." |
+  }
+
+  p "You now have a complete playbook folder that is ready to validate."
+
+  h2 "Read the playbook"
+
+  p <<'PROSE'
+Open `playbook.wcl`. The listing below is the generated file with its
+explanatory comments removed.
+PROSE
+
+  code wcl {
+    filename = "my-playbook/playbook.wcl"
+    source = <<'SRC'
+playbook "My Playbook" {
+  description = "Describe what this playbook converges"
+  version = "0.1.0"
+
+  gather "os" {
+    description = "Operating system facts"
+    from = "example.os_info"
+  }
+
+  vars {
+    work_root = "/tmp/my-playbook"
+    greeting_file = $"${work_root}/hello.txt"
+  }
+
+  composite "greeting_pair" {
+    description = "Write a matching hello and goodbye into one directory"
+
+    arg "dir" {
+      description = "Directory to write both files into"
+      type = "string"
+      required = true
+    }
+    arg "who" {
+      description = "Who to address"
+      type = "string"
+      default = "world"
+    }
+
+    step "hello" {
+      description = "Write the greeting"
+      resource = "example.file_present"
+      properties {
+        path = $"${args.dir}/pair-hello.txt"
+        content = $"hello ${who}"
+      }
+    }
+
+    step "goodbye" {
+      description = "Write the farewell, after the greeting"
+      resource = "example.file_present"
+      requires = ["hello"]
+      properties {
+        path = $"${args.dir}/pair-goodbye.txt"
+        content = $"goodbye ${who}"
+      }
+    }
+  }
+
+  play "baseline" {
+    description = "A starter play with one step"
+
+    step "greeting" {
+      description = "Ensure the greeting file exists"
+      resource = "example.file_present"
+      condition = os.family != "plan9"
+      properties {
+        path = greeting_file
+        content = "hello from config-weave"
+      }
+    }
+
+    step "pair" {
+      description = "Write the greeting pair"
+      resource = "greeting_pair"
+      requires = ["greeting"]
+      properties {
+        dir = work_root
+        who = "config-weave"
+      }
+    }
+  }
+}
+SRC
+  }
+
+  p "Read it top to bottom."
+
+  list {
+    li "The `gather` block runs the `os_info` gatherer of the `example` package before any step and binds its result to `os`. Any expression can then read `os.family`."
+    li "The `vars` block declares two variables. The second interpolates the first, and both are available to every step."
+    li "The `composite` block is a named group of steps with arguments. A step invokes it like a resource, and the engine expands it into its inner steps. Its arguments are visible inside the body as `args.dir` and bare as `who`."
+    li "The `play` block holds the steps that run. The first step conditions on a gathered fact, and the second requires the first, so they run in that order."
+  }
+
+  p <<'PROSE'
+Now open `pkgs/example/package.wcl`. Comments are removed here as well.
+PROSE
+
+  code wcl {
+    filename = "my-playbook/pkgs/example/package.wcl"
+    source = <<'SRC'
+package "example" {
+  description = "Example package scaffolded by config-weave init"
+
+  gatherer "os_info" {
+    description = "Report basic operating system facts"
+    script = "gatherers/os_info.ws"
+    returns "family"  { description = "OS family (linux, windows, macos)" type = "string" }
+    returns "name"    { description = "OS name" type = "string" }
+    returns "version" { description = "OS version" type = "string" }
+    returns "arch"    { description = "CPU architecture" type = "string" }
+    returns "cpus"    { description = "Logical CPU count" type = "int" }
+  }
+
+  resource "file_present" {
+    description = "Ensure a file exists with the given content"
+    script = "resources/file_present.ws"
+    concurrency = "parallel"
+
+    param "path" {
+      description = "Absolute path of the file"
+      type = "string"
+      required = true
+    }
+    param "content" {
+      description = "Desired file content"
+      type = "string"
+      default = ""
+    }
+    param "ensure" {
+      description = "Desired state of the file"
+      type = "symbol"
+      default = :present
+
+      symbol "present" { description = "Create the file and converge its content" }
+      symbol "absent"  { description = "Remove the file if it exists" }
+    }
+  }
+
+  test "greeting_converges" {
+    description = "file_present creates the greeting file and is idempotent"
+    image = "debian:12"
+    verify = "tests/greeting_verify.ws"
+
+    step "greet" {
+      description = "Create the greeting file"
+      resource = "file_present"
+      properties {
+        path = "/tmp/my-playbook/hello.txt"
+        content = "hello from config-weave"
+      }
+    }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+The package declares what it provides. The gatherer names its script and the
+fields it returns. The resource names its script, its concurrency class and a
+`param` for every input a step may pass. The engine checks each step's
+properties against those params during validation. The `test` block is for
+the testlab and does not run during check or apply.
+[Test a package](howto_test_package) runs it.
+PROSE
+
+  p "The resource script is the part that touches the machine."
+
+  code rust {
+    filename = "my-playbook/pkgs/example/resources/file_present.ws"
+    source = <<'SRC'
+use value
+use fs
+use path
+use log
+
+fn param_str(params: Value, key: string, fallback: string) -> string {
+    if let Some(v) = params.get(key) {
+        if let Some(s) = v.as_string() {
+            return s
+        }
+    }
+    fallback
+}
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let p = param_str(params, "path", "")
+    if p == "" {
+        return Err("missing 'path' parameter")
+    }
+    if param_str(params, "ensure", "present") == "absent" {
+        if fs::exists(p) {
+            return Ok(CheckResult::NotConfigured)
+        }
+        return Ok(CheckResult::AlreadyConfigured)
+    }
+    if !fs::exists(p) {
+        return Ok(CheckResult::NotConfigured)
+    }
+    if fs::read(p)? == param_str(params, "content", "") {
+        Ok(CheckResult::AlreadyConfigured)
+    } else {
+        Ok(CheckResult::NotConfigured)
+    }
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    let p = param_str(params, "path", "")
+    if param_str(params, "ensure", "present") == "absent" {
+        log::info("removing " + p)
+        fs::delete(p)?
+        return Ok(ApplyResult::Success)
+    }
+    log::info("writing " + p)
+    fs::mkdir(path::parent(p))?
+    fs::write(p, param_str(params, "content", ""))?
+    Ok(ApplyResult::Success)
+}
+SRC
+  }
+
+  p <<'PROSE'
+`check` reads the file and compares it with the requested content. It never
+writes. `apply` creates the parent directory and writes the file. After
+`apply`, the same `check` finds the content it wrote and reports
+`AlreadyConfigured`. That is the whole convergence contract, and every
+resource you write follows the same shape.
+PROSE
+
+  h2 "Validate"
+
+  p "Run the validation pipeline. Nothing executes."
+
+  code console {
+    source = <<'SRC'
+$ config-weave validate ./my-playbook
+ok: playbook 'My Playbook' v0.1.0 — 2 package(s), 1 play(s), 3 step(s)
+SRC
+  }
+
+  p <<'PROSE'
+Validation parses the WCL, checks every block against the schema, resolves
+every resource and gatherer reference, builds the step graph and rejects
+cycles, and compiles every wscript script against the host API. A wrong
+parameter name or a misspelled host function is reported here, before any
+script runs. The summary counts two packages because the built-in `weave`
+package is always loaded beside yours, and three steps because the composite
+expands into two.
+PROSE
+
+  callout "A validated playbook" {
+    kind = :success
+    body = "The command exits 0. If it reports errors, each one carries the file, line and column, and the run stops with exit 2 until you fix them."
+  }
+
+  h2 "List the plays"
+
+  p "Ask the playbook what you can run."
+
+  code console {
+    source = <<'SRC'
+$ config-weave list ./my-playbook
+My Playbook v0.1.0 — Describe what this playbook converges
+  baseline  (3 steps) — A starter play with one step
+composites:
+  greeting_pair  (2 steps) — Write a matching hello and goodbye into one directory
+SRC
+  }
+
+  p "There is one play, `baseline`. The next four commands all run it."
+
+  h2 "Check"
+
+  p <<'PROSE'
+Run the play in check mode. Every step's `check` function runs, and nothing
+on the machine changes.
+PROSE
+
+  code console {
+    source = <<'SRC'
+$ config-weave check ./my-playbook baseline
+check 'My Playbook' v0.1.0 — play 'baseline'
+gathered:
+  os <- example.os_info
+steps:
+  [     not configured] greeting (example.file_present)
+  [     not configured] pair/hello (example.file_present)
+  [     not configured] pair/goodbye (example.file_present)
+summary: 0 already configured, 0 configured, 3 not configured, 0 reboot required, 0 skipped, 0 error, 0 not run (0.0s)
+SRC
+  }
+
+  p <<'PROSE'
+The report names the playbook and the play, lists the facts it gathered, and
+prints one line per step with its status and resource. Steps inside the
+composite are named `pair/hello` and `pair/goodbye`. All three files are
+missing, so every step is `not configured`. The summary line counts each
+status. On a terminal the report uses icons and colour instead of the
+bracketed status column, but the words are the same.
+PROSE
+
+  p "You now know what `apply` would change, without having changed anything."
+
+  h2 "Apply"
+
+  p "Run the same play in apply mode."
+
+  code console {
+    source = <<'SRC'
+$ config-weave apply ./my-playbook baseline
+    [greeting] info: writing /tmp/my-playbook/hello.txt
+    [hello] info: writing /tmp/my-playbook/pair-hello.txt
+    [goodbye] info: writing /tmp/my-playbook/pair-goodbye.txt
+apply 'My Playbook' v0.1.0 — play 'baseline'
+gathered:
+  os <- example.os_info
+steps:
+  [         configured] greeting (example.file_present)
+  [         configured] pair/hello (example.file_present)
+  [         configured] pair/goodbye (example.file_present)
+summary: 0 already configured, 3 configured, 0 not configured, 0 reboot required, 0 skipped, 0 error, 0 not run (0.0s)
+SRC
+  }
+
+  p <<'PROSE'
+For each step the engine ran `check`, found the step not configured, ran
+`apply`, and then ran `check` again. The three lines at the top are the
+`log::info` calls in the script. The status `configured` means apply
+changed the machine and the re-check confirmed the result. `greeting` ran
+before the pair because `pair` requires it, and `pair/goodbye` ran after
+`pair/hello` for the same reason.
+PROSE
+
+  p "The three files now exist under `/tmp/my-playbook`."
+
+  h2 "Apply again"
+
+  p "Run apply a second time, with nothing changed in between."
+
+  code console {
+    source = <<'SRC'
+$ config-weave apply ./my-playbook baseline
+apply 'My Playbook' v0.1.0 — play 'baseline'
+gathered:
+  os <- example.os_info
+steps:
+  [ already configured] greeting (example.file_present)
+  [ already configured] pair/hello (example.file_present)
+  [ already configured] pair/goodbye (example.file_present)
+summary: 3 already configured, 0 configured, 0 not configured, 0 reboot required, 0 skipped, 0 error, 0 not run (0.0s)
+SRC
+  }
+
+  p <<'PROSE'
+Every step reports `already configured`. The engine ran `check` for each,
+found the desired state in place, and did not call `apply`. No log lines
+appear because nothing was written. This is idempotence: a converged machine
+stays converged, and re-running the playbook is safe. This second run is in
+a fresh process, which is what proves the resource does not depend on state
+that lived only inside the first run.
+PROSE
+
+  callout "A converged machine" {
+    kind = :success
+    body = "A second `apply` reports every step `already configured` and exits 0. A step that reports `configured` again on the second run has a broken resource: its apply does not produce the state its check looks for."
+  }
+
+  h2 "Check again"
+
+  p "Finish with a check, the way a scheduled drift check would run it."
+
+  code console {
+    source = <<'SRC'
+$ config-weave check ./my-playbook baseline
+check 'My Playbook' v0.1.0 — play 'baseline'
+gathered:
+  os <- example.os_info
+steps:
+  [ already configured] greeting (example.file_present)
+  [ already configured] pair/hello (example.file_present)
+  [ already configured] pair/goodbye (example.file_present)
+summary: 3 already configured, 0 configured, 0 not configured, 0 reboot required, 0 skipped, 0 error, 0 not run (0.0s)
+SRC
+  }
+
+  p <<'PROSE'
+The report matches the second apply. Delete one of the files and run the
+check again: that step reports `not configured` and the summary changes, and
+the exit code stays 0, because check reports drift rather than failing on it.
+The exit code is 1 only when a step reports `error`, and 2 when validation
+fails.
+PROSE
+
+  h2 "Next steps"
+
+  p <<'PROSE'
+You have scaffolded, validated, checked and converged a playbook, and proven
+that its resource is idempotent. [The convergence contract](guide_convergence)
+explains why the second apply matters and what the step lifecycle looks like
+inside the engine. [Playbooks, plays and steps](guide_playbooks) covers the
+blocks you read in `playbook.wcl`, and
+[Packages, resources and gatherers](guide_packages) covers `package.wcl`.
+To write your own resource, follow
+[Add a resource to a package](howto_add_resource), and to prove it in a
+disposable instance, follow [Test a package](howto_test_package). The
+commands you ran are documented in [config-weave init](cmd_init),
+[config-weave validate](cmd_validate), [config-weave list](cmd_list),
+[config-weave check](cmd_check) and [config-weave apply](cmd_apply).
+PROSE
+}

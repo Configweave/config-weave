@@ -1,0 +1,201 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_playbooks {
+  sites = [:manual]
+  title = "Playbooks, plays and steps"
+
+  chapter_header "Playbooks, plays and steps" {
+    kicker       = "The guide · explanation"
+    reading_time = "8 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+A playbook describes the desired state of a system. It is a directory whose root holds `playbook.wcl`, an optional `lib/` of shared wscript helpers, and a `pkgs/` directory of packages. The WCL document declares a set of plays. Each play is a group of steps, and each step invokes a resource from a package with a set of properties. This chapter explains each of those layers and how they fit together. The field-by-field tables for every block live in [playbook.wcl](ref_playbook).
+PROSE
+
+  h2 "The playbook directory"
+
+  code text {
+    filename = "layout"
+    source = <<'SRC'
+my-playbook/
+  playbook.wcl        # the playbook document
+  lib/                # optional: shared wscript helpers, visible to every package
+  pkgs/
+    core/             # one package per directory
+      package.wcl
+      resources/
+      gatherers/
+SRC
+  }
+
+  p <<'PROSE'
+`playbook.wcl` holds exactly one `playbook` block. The engine appends the system import `<weave/playbook.wcl>` to the end of the source when it opens the file, so you never write an import line. Because the import is appended, your own byte spans are untouched and diagnostics point at the lines you wrote.
+PROSE
+
+  h2 "A complete playbook"
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+playbook "Sample Baseline" {
+  description = "Exercises the model loader, validation and execution"
+  version = "1.0.0"                      // optional, default "0.0.0"
+
+  gather "os" {                          // label = the variable the result lands in
+    description = "Operating system facts"
+    from = "core.os_info"                // package.gatherer
+    params {                             // optional, validated against the gatherer's params
+      depth = 2
+    }
+  }
+
+  vars {
+    work_root = "/tmp/config-weave-sample"
+    is_linux = os.family == "linux"      // may reference gatherer results
+    marker_a = $"${work_root}/a.txt"     // WCL string interpolation
+  }
+
+  play "baseline" {
+    description = "Create marker files in order"
+    // parallel = true is the default; false runs steps in declaration order
+
+    step "make-a" {
+      description = "Create the first marker file"
+      resource = "core.file_present"     // package.resource
+      condition = is_linux               // optional bool expr; false => Skipped
+      properties {                       // validated against the resource's declared params
+        path = marker_a
+        content = "alpha"
+      }
+    }
+
+    container "secondary" {              // grouping for organisation and docs; nestable
+      description = "Files that depend on the first"
+
+      step "make-b" {
+        description = "Create the second marker file"
+        resource = "core.file_present"
+        requires = ["make-a"]            // ordering edges by step name
+        properties {
+          path = $"${work_root}/b.txt"
+          content = "beta"
+        }
+      }
+    }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+Every `description` shown here is required. WCL's own block check flags unknown fields but not missing ones, so the loader enforces required fields itself and reports a missing description as a validation error.
+PROSE
+
+  h2 "Gathers and vars"
+
+  p <<'PROSE'
+A `gather` block invokes a gatherer from a package and binds its result to the variable named by the block's label. The example above binds the result of `core.os_info` to `os`, so later expressions read `os.family`. A `vars` block holds free-form `name = expr` bindings that may reference gatherer results and other vars. Both are covered in depth in [Variables and secrets](guide_variables) and [Packages, resources and gatherers](guide_packages).
+PROSE
+
+  h2 "Plays"
+
+  p <<'PROSE'
+A play is a named group of steps. `config-weave check` and `config-weave apply` each target one play by name, so a playbook with several plays is run one play at a time. A play is `parallel = true` by default. Its steps are dispatched over a dependency graph as their `requires` edges complete, bounded by each resource's concurrency class. Set `parallel = false` to run the steps in strict declaration order instead. [Scheduling and concurrency](guide_scheduling) explains the scheduler.
+PROSE
+
+  h2 "Steps"
+
+  p <<'PROSE'
+A step is one unit of work. It names a resource, qualified as `package.resource`, and supplies a `properties` block. The properties are validated at load time against the `param` blocks the resource declares: an unknown key, a missing required parameter or a type mismatch is a validation error, and declared defaults are filled in before the script runs. A step also carries three optional modifiers.
+PROSE
+
+  list {
+    li "`condition` is a bool expression. When it evaluates to false the step reports Skipped and none of its phases run."
+    li "`requires` is a list of sibling step names. Each name adds an ordering edge: the step waits until every named step has finished. Ordering is not a success demand; a skipped dependency does not block the step."
+    li "`concurrency` tightens the resource's concurrency class for this step alone. A step can make a `parallel` resource `exclusive`, but never the reverse."
+  }
+
+  p <<'PROSE'
+At run time each step walks the check, apply, re-check lifecycle described in [The convergence contract](guide_convergence).
+PROSE
+
+  callout "Property names shadow variables" {
+    kind = :warning
+    body = "Inside a `properties` block, the field names are in scope and shadow outer variables of the same name. `url = url` is a self-reference and fails with a cycle error. Name the variable differently, for example `tool_url`, and write `url = tool_url`."
+  }
+
+  h2 "Containers"
+
+  p <<'PROSE'
+A `container` groups steps inside a play. It exists for organisation and for the generated documentation, and it nests to any depth. A `condition` on a container applies to every step beneath it. Containers do not change scheduling: the play's dependency graph is flat, and a step inside a container can name any step in the play in its `requires`. A container in this sense is unrelated to the container instances the [testlab](guide_testlab) runs tests in.
+PROSE
+
+  h2 "Composites"
+
+  p <<'PROSE'
+A composite is a named, parameterised block of steps that a step invokes exactly as it would a resource. It is the unit of reuse between "one resource" and "copy these five steps". A composite declared in a playbook is local to that playbook and is referenced by bare name. The same block declared in a `package.wcl` is shared and is referenced qualified, as `package.composite`. Composites and resources share one namespace, so a package cannot declare both under one name.
+PROSE
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+composite "site" {
+  description = "Writes a pair of files for one site"
+  arg "dir"  { description = "Target directory" type = "string" required = true }
+  arg "body" { description = "File body"        type = "string" default = "hi" }
+
+  step "conf" {
+    description = "Write the config file"
+    resource = "core.file_present"
+    properties {
+      path = $"${args.dir}/conf"
+      content = args.body
+    }
+  }
+  step "data" {
+    description = "Write the data file"
+    resource = "core.file_present"
+    requires = ["conf"]
+    properties {
+      path = $"${args.dir}/data"
+      content = args.body
+    }
+  }
+}
+
+play "sites" {
+  description = "Two sites from one block"
+  step "alpha" {
+    description = "The alpha site"
+    resource = "site"
+    properties { dir = "/srv/alpha" }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+Each `arg` block has the same shape as a resource `param`: a coarse type, a `required` flag, an optional `default`, and `symbol` children for an enumerated symbol type. Inside the body every argument is bound twice, bare as `dir` and under the map as `args.dir`. Prefer the `args.` form. A property field shadows a bare variable of the same name, so the pass-through `properties { path = path }` is a self-reference cycle, while `properties { path = args.path }` always works.
+PROSE
+
+  p <<'PROSE'
+A body sees only its own arguments. It cannot read gatherer results, declared vars or `--var` overrides. A composite is a function, not a macro: a fact the body needs is passed in as a property. That restriction is what lets a block move from a playbook into a package unchanged.
+PROSE
+
+  p <<'PROSE'
+Expansion is static and happens when the playbook loads. An invocation becomes a synthetic container holding real steps, so the scheduler, the planner and every report see ordinary steps. An expanded step's report path gains one segment per enclosing invocation, for example `sites/alpha/conf`. `requires` is scoped to match: inside a body a name reaches only a sibling step of the same invocation, and from the playbook a name reaches only playbook-declared steps. Naming an invocation in `requires` waits for every step it expanded into. Nesting is capped at eight levels, and a composite that invokes itself, directly or indirectly, is rejected by name.
+PROSE
+
+  callout "Fields a composite step may carry" {
+    kind = :info
+    body = "A step inside a composite body may carry its own `concurrency` field. An `expect` field, which belongs to testlab steps, is rejected in a composite body."
+  }
+
+  h2 "Where to go next"
+
+  p <<'PROSE'
+The full block and field tables are in [playbook.wcl](ref_playbook). To scaffold a playbook and validate it, follow [Your first playbook](gs_first_playbook). To understand what a step's resource actually does on the host, continue with [Packages, resources and gatherers](guide_packages).
+PROSE
+}

@@ -1,0 +1,15 @@
+# Per-skill configuration. Each skill reads only its own top-level key.
+technical-book:
+  path: docs/manual
+  topology: in-product
+  # Tutorial commands are written by hand; nothing runs them. Listings are
+  # inline because `source_file` resolves against the root document, and the
+  # manual has two (its own main.wcl and docs/main.wcl).
+  tutorial_assurance: advisory
+  reference_entries:
+    symbol:
+      since:
+        # config-weave has one released version and no API history yet, so a
+        # per-entry "Since" line would say "0.1.0" 130 times. Turn the rule
+        # back on with the first release that changes the surface.
+        severity: "off"

@@ -1,0 +1,39 @@
+// Part V — Appendices. Declared mode: reference.
+page apx_glossary {
+  sites = [:manual]
+  title = "Glossary"
+
+  chapter_header "Glossary" {
+    kicker       = "Appendices · reference"
+    reading_time = "4 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p "The terms this manual uses, in alphabetical order. Each definition names the chapter that explains the term in full and notes any other name the term goes by."
+
+  table {
+    rows:
+      | "Term" | "Definition" |
+      | "Composite" | "A named, parameterised block of steps declared in a package or a playbook and invoked from a step like a resource. Its `arg` declarations bind inside the body as `args.name`, and the loader expands each invocation into ordinary steps. See [playbook.wcl](ref_playbook)." |
+      | "Concurrency class" | "A resource's scheduling restriction: `parallel` (no restriction), `exclusive` (one step of this resource type at a time) or `global` (runs completely alone). A step may tighten but never loosen it. See [Scheduling and concurrency](guide_scheduling)." |
+      | "Container" | "A grouping block inside a play, nestable, for organisation and docs. A condition on a container applies to all its child steps. Not to be confused with a container instance in the testlab. See [Playbooks, plays and steps](guide_playbooks)." |
+      | "Container instance" | "A testlab instance started from an OCI image (`image = \"debian:12\"`) as a vmlab container: Linux only and seconds to start. See [The testlab](guide_testlab)." |
+      | "Convergence contract" | "The check, apply, re-check rule: `check` never mutates, and after a successful `apply` a re-check, including one in a fresh process, must return `AlreadyConfigured`. Also written check → apply → re-check. See [The convergence contract](guide_convergence)." |
+      | "Encrypted value" | "A `secret(\"…\")` call in `playbook.wcl` whose plaintext `config-weave secrets encrypt` has replaced with a `CWENC1` blob. Decrypted at run time with a password and scrubbed from all output. Also called a secret. See [Variables and secrets](guide_variables)." |
+      | "Gather block" | "A playbook block, `gather \"label\" { from = \"pkg.gatherer\" }`, that invokes a gatherer. The label becomes the variable holding the result. All gathers run concurrently before steps. See [playbook.wcl](ref_playbook)." |
+      | "Gatherer" | "A package-declared fact collector implemented by a wscript script exporting `gather(params) -> Value`. A playbook gather block runs one and binds its result to a variable. See [Packages, resources and gatherers](guide_packages)." |
+      | "Host API" | "The wscript module surface config-weave registers for scripts: `log`, `fs`, `path`, `shell`, `http`, `hash`, `archive`, `env`, `sys`, `data`, `template`, `time`, `json`, `toml`, `xml`, `regex`, and on Windows `registry`, `service` and `com`. Exactly what `config-weave wscripti` emits. See [The host API](guide_host_api)." |
+      | "Package" | "A bundle of resources, gatherers, composites, tests and scenarios under `pkgs/<name>/`. Its name qualifies references from playbooks, as in `core.file_present`. See [Packages, resources and gatherers](guide_packages)." |
+      | "Play" | "A named group of steps inside a playbook. Steps run in parallel by default; `parallel = false` forces declaration order. `check` and `apply` target one play. Plural: plays. See [Playbooks, plays and steps](guide_playbooks)." |
+      | "Playbook" | "A directory holding `playbook.wcl`, plus optional `lib/` and `pkgs/`, describing the desired state of a system. The unit config-weave checks or applies. See [Playbooks, plays and steps](guide_playbooks)." |
+      | "Resource" | "A declared unit of desired state in a package, implemented by a wscript script exporting `check()` and `apply()`. Referenced from steps as `pkg.resource`. See [Packages, resources and gatherers](guide_packages)." |
+      | "Scenario" | "A scripted, multi-stage test over a declared vmlab lab. A wscript driver brings VMs up by name, applies config-weave, reboots and asserts, for flows the three-run protocol cannot express, such as a Windows domain controller promotion. See [The testlab](guide_testlab)." |
+      | "Step" | "One unit of work in a play. Names a resource or composite and supplies properties, and carries an optional condition, `requires` for ordering, and a concurrency tightening. See [Playbooks, plays and steps](guide_playbooks)." |
+      | "Testlab" | "The `config-weave test` command and its runner. Runs package tests in disposable vmlab instances, a container from an OCI image or a VM from a template, proving convergence with the three-run protocol. See [The testlab](guide_testlab)." |
+      | "Three-run protocol" | "The test sequence `check`, `apply`, `apply`, all run with `--json --continue-on-error`. Run 2 proves in-process convergence; run 3 proves cross-process idempotence. See [The test block](ref_test_block)." |
+      | "Verify script" | "A wscript script exporting `verify(facts) -> bool`, run inside a test instance after the three runs to make custom assertions about the converged state. Also called verify. See [Script entry points](ref_scripts)." |
+      | "VM instance" | "A testlab instance started from a vmlab template (`template = \"x86_64/ubuntu-24.04\"`) as a full virtual machine: Linux or Windows, with a real init system, kernel and reboots. See [The testlab](guide_testlab)." |
+      | "wscript" | "The statically typed, Rust-flavoured scripting language that resources, gatherers, verify scripts and scenario drivers are written in. Scripts have the `.ws` extension, may import helpers from `lib/`, and compile against the host API. See [wscript: values, types and functions](guide_wscript_basics)." |
+  }
+}

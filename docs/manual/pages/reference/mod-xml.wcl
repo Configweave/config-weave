@@ -1,0 +1,63 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_xml {
+  sites = [:manual]
+  title = "xml module"
+
+  chapter_header "xml module" {
+    kicker       = "Reference · reference"
+    reading_time = "2 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use xml` parses and serializes XML over the [Value type](ref_value), for
+the configuration files that JSON and TOML do not cover, such as a
+`.csproj` or a `web.config`. config-weave registers it from wscript-std.
+Every function returns `Result[…, string]`.
+PROSE
+
+  h2 "parse"
+
+  code rust {
+    source = <<'SRC'
+xml::parse(text: string) -> Result[Value, string]
+SRC
+  }
+
+  p "Parses an XML document into a `Value`. Elements nest as maps keyed by element name. Attributes are collected under `@attrs`, text under `#text`, and repeated child elements with the same name become a list."
+
+  table {
+    rows:
+      | "XML" | "Value" |
+      | "`<cfg><name>weave</name></cfg>`" | "`{\"cfg\": {\"name\": \"weave\"}}`" |
+      | "`<a k=\"v\">text</a>`" | "`{\"a\": {\"@attrs\": {\"k\": \"v\"}, \"#text\": \"text\"}}`" |
+      | "`<r><i>1</i><i>2</i></r>`" | "`{\"r\": {\"i\": [\"1\", \"2\"]}}`" |
+  }
+
+  callout "Mixed content loses its order" {
+    kind = :warning
+    body = "Text interleaved with child elements is concatenated into one `#text`. `<r>mixed<b>x</b>tail</r>` parses to `{\"r\": {\"#text\": \"mixedtail\", \"b\": \"x\"}}`, so a round trip moves the text ahead of the child. This is fine for configuration files and wrong for documents. Produce documents with the [template module](ref_mod_template) instead."
+  }
+
+  h2 "to_string and to_string_pretty"
+
+  code rust {
+    source = <<'SRC'
+xml::to_string(value: Value) -> Result[string, string]
+xml::to_string_pretty(value: Value) -> Result[string, string]
+SRC
+  }
+
+  p "Serializes a `Value` in the mapping above back to XML, compact or indented."
+
+  code rust {
+    source = <<'SRC'
+use fs
+use xml
+
+let doc = xml::parse(fs::read("/srv/app/web.config")?)?
+let config = doc.get("configuration")
+SRC
+  }
+}

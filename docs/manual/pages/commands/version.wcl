@@ -1,0 +1,45 @@
+// Part IV — Commands. Declared mode: reference.
+page cmd_version {
+  sites = [:manual]
+  title = "config-weave version"
+
+  chapter_header "config-weave version" {
+    kicker       = "Commands · reference"
+    reading_time = "1 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p "`version` prints the binary's name and version on one line. The global `--version` flag prints the same information."
+
+  h2 "Synopsis"
+
+  code console {
+    source = <<'SRC'
+config-weave version
+SRC
+  }
+
+  h2 "Options"
+
+  p "Only the [global options](cmd_root) are accepted, and none affect the output."
+
+  table {
+    rows:
+      | "Option" | "Value" | "Meaning" |
+      | "`--version`" | "" | "The clap-generated flag on the root command. Prints the same line as the subcommand." |
+  }
+
+  h2 "Examples"
+
+  code console {
+    source = <<'SRC'
+config-weave version
+config-weave 0.1.0
+SRC
+  }
+
+  h2 "Exit status"
+
+  p "Always 0."
+}

@@ -1,0 +1,81 @@
+// Part II — The guide. Declared mode: explanation.
+page guide_convergence {
+  sites = [:manual]
+  title = "The convergence contract"
+
+  chapter_header "The convergence contract" {
+    kicker       = "The guide · explanation"
+    reading_time = "5 min read"
+    updated      = "2026-09-02"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+Every resource script in config-weave obeys one rule, and the engine enforces it on every step. The rule has two halves. `check` never changes the host. It only reports whether the host already matches the desired state. `apply` changes the host so that a second `check` reports that the host now matches. The engine runs that second check itself, after every apply, and treats any other answer as a failure.
+PROSE
+
+  p <<'PROSE'
+This chapter explains what the rule means for a resource author, how the engine walks each step through it, and why the rule reaches across processes. The status values a script returns and the report statuses the engine derives from them are listed in [Script entry points](ref_scripts).
+PROSE
+
+  h2 "The two halves"
+
+  p <<'PROSE'
+`check` is report-only. It inspects the host and returns one of `AlreadyConfigured`, `NotConfigured` or `RebootRequired`. It must not create a file, start a service, or touch anything it later reads. A check that mutates makes `config-weave check` unsafe to run against a production host, which defeats the purpose of having a check mode at all.
+PROSE
+
+  p <<'PROSE'
+`apply` converges. It makes whatever change is needed and returns `Success` or `RebootRequired`. Convergence is measured by the same `check` function: after `apply` returns `Success`, the engine calls `check` again and expects `AlreadyConfigured`. A resource whose apply does not satisfy its own check fails the step with the message "apply claimed success but the re-check disagrees".
+PROSE
+
+  callout "Write the check first" {
+    kind = :tip
+    body = "A resource is easiest to get right when `check` defines the desired state precisely and `apply` does only what is needed to satisfy it. If the two drift apart, the re-check catches the drift on the first run."
+  }
+
+  h2 "The step lifecycle"
+
+  p <<'PROSE'
+The engine walks every step through the same three phases. Which phases run depends on the mode you asked for and on what each phase returns.
+PROSE
+
+  list {
+    style = :numbered
+    li "**Check.** `AlreadyConfigured` reports the step as Already Configured and moves on. `NotConfigured` proceeds to apply in apply mode, or reports Not Configured in check mode. `RebootRequired` halts the play in apply mode with exit status 3; in check mode it is an ordinary report status, because check is report-only and halting would gain nothing. An error halts the run unless you passed `--continue-on-error`."
+    li "**Apply.** `Success` proceeds to the re-check. `RebootRequired` reports the step and halts the play so the host can reboot; the next run picks up from the check phase again."
+    li "**Re-check.** The engine calls `check` once more. `AlreadyConfigured` reports the step as Configured. Anything else reports the step as Error."
+  }
+
+  p <<'PROSE'
+A script that returns `Err`, or one that faults inside the wscript virtual machine, maps to the step's Error status. Steps that were never dispatched because the run halted report as Not Run, so every step in a play has a status even after a halt. Output a script writes through the `log` module, or through `print`, appears in the run output and in the NDJSON log alongside the step that produced it.
+PROSE
+
+  p <<'PROSE'
+A step with a `condition` that evaluates to false skips all three phases and reports Skipped. A skipped step does not block the steps that depend on it; see [Scheduling and concurrency](guide_scheduling).
+PROSE
+
+  h2 "Convergence across processes"
+
+  p <<'PROSE'
+Idempotence in config-weave is cross-process. Applying a converged playbook a second time, in a fresh process, must report every step as Already Configured. The re-check inside a single run cannot prove this on its own, because it runs in the same process that just applied the change. A `check` that consults a cache, an open handle or a process-local variable passes the in-process re-check and then fails the next morning when a scheduled run starts from nothing.
+PROSE
+
+  p <<'PROSE'
+The [testlab](guide_testlab) exists to catch exactly this. Its three-run protocol runs `check`, `apply`, and then `apply` again in a fresh process. In the third run every step must report Already Configured. A step that re-applies in the third run reports Configured instead, and the test fails. So the rule for an author is to make `check` read the host, not the process.
+PROSE
+
+  callout "State that only exists in-process breaks the contract" {
+    kind = :warning
+    body = "If `check` passes only because of something `apply` left in memory, the resource is not idempotent. Everything `check` reads must survive a process restart: a file, a registry value, a service state, a package database."
+  }
+
+  h2 "Why the engine enforces it"
+
+  p <<'PROSE'
+config-weave is deliberately stateless. It keeps no record of what it applied, so the only source of truth about a host is the host itself, as seen through `check`. That is why the contract matters: it is the whole basis for reporting drift, for making `apply` safe to repeat, and for the testlab being able to prove anything. The single exception is the built-in `weave.execute_once` resource, which records that a script has run; see [Packages, resources and gatherers](guide_packages).
+PROSE
+
+  p <<'PROSE'
+For the exact enum values, the two accepted entry-point signatures and the mapping from script result to report status, see [Script entry points](ref_scripts). To see the lifecycle in practice, follow [Check, then apply](howto_check_apply).
+PROSE
+}
