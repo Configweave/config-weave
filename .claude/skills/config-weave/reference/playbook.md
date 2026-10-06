@@ -259,6 +259,8 @@ Rules:
   error.
 - A `duration` parameter is a bare WCL unit literal (`30min`, `4h`), never
   quoted.
+- A `map` parameter is a map literal (`env = { KEY: "value" }`), never a
+  nested block; any nested block inside `properties` / `params` is an error.
 - Values are any WCL expression over the variable scope, evaluated lazily when
   the step is planned.
 - Field names inside the block are in scope and shadow outer variables of the
