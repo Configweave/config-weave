@@ -460,6 +460,53 @@ fn a_missing_required_composite_property_is_reported() {
     );
 }
 
+/// A composite invocation and a composite's own body steps both reject a
+/// property written as a nested block — the body path is checked in the
+/// deferred second pass, so it needs its own coverage.
+#[test]
+fn a_property_block_is_rejected_on_an_invocation_and_in_a_body() {
+    let composite = r#"  composite "c" {
+    description = "A composite"
+    arg "a" { description = "An argument" type = "string" default = "" }
+    step "s" {
+      description = "step"
+      resource = "marker"
+      properties {
+        path = "/tmp/x"
+        content { text = "x" }
+      }
+    }
+  }
+"#;
+    validate_fails_with(
+        composite,
+        r#"  play "p" {
+    description = "block property"
+    step "t" {
+      description = "invoke"
+      resource = "probe.c"
+      properties {
+        a { b = "x" }
+      }
+    }
+  }
+"#,
+        "parameter 'a' of composite 'probe.c' is type string and must be written",
+    );
+    validate_fails_with(
+        composite,
+        r#"  play "p" {
+    description = "block property in the body"
+    step "t" {
+      description = "invoke"
+      resource = "probe.c"
+    }
+  }
+"#,
+        "parameter 'content' of resource 'probe.marker' in step 's' of composite",
+    );
+}
+
 #[test]
 fn a_composite_cycle_is_rejected() {
     validate_fails_with(

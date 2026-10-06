@@ -204,7 +204,7 @@ SRC
   }
 
   p <<'PROSE'
-Both are free-form maps. A step's `properties` block is validated against the resource's `param` declarations; a gather's `params` block against the gatherer's. Validation applies declared defaults, rejects unknown names, checks required names are present, and checks each value against its coarse type. A `symbol` parameter must be written as `:name`; the quoted spelling is an error. A `duration` parameter is written as a bare WCL unit literal (`30min`, `4h`), never quoted. Values may be any WCL expression over the variable scope, and are evaluated lazily when the step is planned.
+Both are free-form maps. A step's `properties` block is validated against the resource's `param` declarations; a gather's `params` block against the gatherer's. Validation applies declared defaults, rejects unknown names, checks required names are present, and checks each value against its coarse type. A `symbol` parameter must be written as `:name`; the quoted spelling is an error. A `duration` parameter is written as a bare WCL unit literal (`30min`, `4h`), never quoted. A `map` parameter is written as a map literal (`env = { KEY: "value" }`), never as a nested block; a nested block inside `properties` or `params` is a validation error. Values may be any WCL expression over the variable scope, and are evaluated lazily when the step is planned.
 PROSE
 
   table {

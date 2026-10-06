@@ -720,6 +720,16 @@ impl PlaybookLoader<'_> {
                 }
             }
         }
+        for b in block.blocks() {
+            present.insert(b.kind().to_string());
+            check_nested_block(
+                declared.get(b.kind()).copied(),
+                b.kind(),
+                what,
+                wcl_span(b.span()),
+                &mut self.ctx,
+            );
+        }
         check_missing_required(decls, what, wcl_span(block.span()), &mut self.ctx, |n| {
             present.contains(n)
         });
@@ -818,6 +828,9 @@ struct StaticPair {
     value: DynValue,
     span: (usize, usize),
     symbol_literal: bool,
+    /// Written as a nested block rather than an attribute; `value` is then
+    /// `Null`, and the check reports it via [`check_nested_block`].
+    block: bool,
 }
 
 /// One property field whose check is deferred to the second pass.
@@ -830,6 +843,8 @@ struct DeferredPair {
     value: Option<DynValue>,
     span: (usize, usize),
     symbol_literal: bool,
+    /// Written as a nested block rather than an attribute (`value` is None).
+    block: bool,
 }
 
 /// Reference checks deferred to the second pass: resource/gatherer/composite
@@ -1066,6 +1081,16 @@ fn check_params_deferred(
     let mut present = HashSet::new();
     for p in pairs.unwrap_or_default() {
         present.insert(p.name.as_str());
+        if p.block {
+            check_nested_block(
+                declared.get(p.name.as_str()).copied(),
+                &p.name,
+                what,
+                p.span,
+                ctx,
+            );
+            continue;
+        }
         let Some(decl) = lookup_param(&declared, &p.name, what, p.span, ctx) else {
             continue;
         };
@@ -1100,8 +1125,16 @@ fn deferred_pairs(block: &Block<'_>, what: &str, ctx: &mut Ctx<'_>) -> Vec<Defer
             value,
             span: fspan,
             symbol_literal,
+            block: false,
         });
     }
+    out.extend(block.blocks().map(|b| DeferredPair {
+        name: b.kind().to_string(),
+        value: None,
+        span: wcl_span(b.span()),
+        symbol_literal: false,
+        block: true,
+    }));
     out
 }
 
@@ -1117,6 +1150,17 @@ fn check_expect_static(
     what: &str,
 ) {
     for pair in expect {
+        if pair.block {
+            ctx.err(
+                format!(
+                    "expectation '{}' of {what} is written as a block; an expectation \
+                     is an attribute (`{} = …`)",
+                    pair.name, pair.name
+                ),
+                pair.span,
+            );
+            continue;
+        }
         let Some(decl) = returns.iter().find(|r| r.name == pair.name) else {
             continue;
         };
@@ -1169,6 +1213,36 @@ fn lookup_param<'a>(
             None
         }
     }
+}
+
+/// A `properties` / `params` block holds only `name = value` attributes —
+/// no coarse type is block-shaped — and the engine reads attributes alone,
+/// so a nested block would otherwise pass validation and then be dropped
+/// at run time without a word. `decl` is the param the block's name
+/// matches, if any, so the diagnostic can say how to spell it instead.
+fn check_nested_block(
+    decl: Option<&ParamDecl>,
+    name: &str,
+    what: &str,
+    span: (usize, usize),
+    ctx: &mut Ctx<'_>,
+) {
+    let msg = match decl {
+        Some(d) if d.ty == CoarseType::Map => format!(
+            "parameter '{name}' of {what} is type map and must be written as a map \
+             literal (`{name} = {{ KEY: \"value\" }}`), not a block"
+        ),
+        Some(d) => format!(
+            "parameter '{name}' of {what} is type {} and must be written as an \
+             attribute (`{name} = …`), not a block",
+            d.ty.as_str()
+        ),
+        None => format!(
+            "unknown block '{name}' for {what}; parameters are written as \
+             `name = value` attributes, and none is block-typed"
+        ),
+    };
+    ctx.err(msg, span);
 }
 
 /// A symbol param must be *written* as `:name`. The string spelling reaches
@@ -1279,6 +1353,16 @@ fn check_params_static(
     let mut present = HashSet::new();
     for p in pairs.unwrap_or_default() {
         present.insert(p.name.as_str());
+        if p.block {
+            check_nested_block(
+                declared.get(p.name.as_str()).copied(),
+                &p.name,
+                what,
+                p.span,
+                ctx,
+            );
+            continue;
+        }
         let Some(decl) = lookup_param(&declared, &p.name, what, p.span, ctx) else {
             continue;
         };
@@ -2066,6 +2150,7 @@ fn static_pairs(block: &Block<'_>, noun: &str, what: &str, ctx: &mut Ctx<'_>) ->
                 value: fv.value,
                 span: fspan,
                 symbol_literal: fv.symbol_literal,
+                block: false,
             }),
             Err(FieldValueError::Convert(e)) => {
                 ctx.err(format!("{noun} '{}' of {what}: {e}", f.name()), fspan)
@@ -2085,6 +2170,13 @@ fn static_pairs(block: &Block<'_>, noun: &str, what: &str, ctx: &mut Ctx<'_>) ->
             }
         }
     }
+    out.extend(block.blocks().map(|b| StaticPair {
+        name: b.kind().to_string(),
+        value: DynValue::Null,
+        span: wcl_span(b.span()),
+        symbol_literal: false,
+        block: true,
+    }));
     out
 }
 

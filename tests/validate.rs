@@ -528,3 +528,45 @@ fn an_unknown_param_type_names_duration_in_its_diagnostic() {
     assert_eq!(code, 2, "stderr: {stderr}");
     assert!(flat(&stderr).contains("or duration"), "{stderr}");
 }
+
+// ------------------------------------------------- nested blocks in properties
+
+const ENV_PARAM: &str = r#"    param "env" {
+      description = "Extra environment variables"
+      type = "map"
+    }
+"#;
+
+#[test]
+fn a_map_param_as_a_map_literal_is_accepted() {
+    let dir = sample_with_param(ENV_PARAM, Some("env = { GREETING: \"hello\" }"));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+}
+
+/// The engine reads only attributes from `properties`, so a map written as
+/// a nested block used to validate and then vanish at run time.
+#[test]
+fn a_map_param_written_as_a_block_fails_validation() {
+    let dir = sample_with_param(
+        ENV_PARAM,
+        Some("env {\n          GREETING = \"hello\"\n        }"),
+    );
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains(
+            "parameter 'env' of resource 'core.file_present' is type map and must be \
+             written as a map literal (`env = { KEY: \"value\" }`), not a block"
+        ),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_unknown_block_inside_properties_fails_validation() {
+    let dir = sample_with_param("", Some("bogus {\n          x = 1\n        }"));
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(flat(&stderr).contains("unknown block 'bogus'"), "{stderr}");
+}
