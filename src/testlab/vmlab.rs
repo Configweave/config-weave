@@ -203,8 +203,12 @@ pub fn lab_wcl(lab_name: &str, target: &TestTarget, memory: Option<&str>) -> Str
         // entrypoint; `user = "0:0"` forces root, since the testlab
         // provisions /weave and converges system state (a no-op for the
         // usual root images, but images like mssql default to non-root).
+        // vmlab has no built-in container size: an unsized container is a
+        // validation error, and its shipped `container` profile carries
+        // the micro-VM floor (1 cpu, 256MiB). `memory` still overrides it.
         TestTarget::Container(image) => format!(
             "  container \"{MACHINE}\" {{\n    image = \"{image}\"\n    \
+             profile = \"container\"\n    \
              mode  = :idle\n    user  = \"0:0\"\n{mem}    nic {{ nat = true }}\n    \
              volume {{ host = \"./{PAYLOAD_DIR}\" target = \"{CONTAINER_MOUNT}\" }}\n  }}\n"
         ),
@@ -663,6 +667,8 @@ mod tests {
         );
         assert!(wcl.contains("container \"box\""), "{wcl}");
         assert!(wcl.contains("image = \"debian:12\""), "{wcl}");
+        // vmlab rejects a container with no size; the profile supplies it.
+        assert!(wcl.contains("profile = \"container\""), "{wcl}");
         // Without :idle the image's own entrypoint would run instead of
         // leaving the instance available to exec into.
         assert!(wcl.contains("mode  = :idle"), "{wcl}");
