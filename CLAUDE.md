@@ -87,11 +87,9 @@ nothing) build at all. To develop across repos, put a `[patch]` section in a
 
 ## Conventions
 
-- Ticket-branch development, driven by the aciddog kanban board: work happens
-  on a branch named for the ticket id (`t-…`) in that ticket's worktree at
-  `.tree/<ticket-id>`, and lands on `main` through a pull request. Never commit
-  or push directly to `main` — the board's Tests and Review stages gate every
-  change, and a direct push bypasses them.
+- Ticket work, driven by the aciddog kanban board, happens on a branch named
+  for the ticket id (`t-…`) in that ticket's worktree at `.tree/<ticket-id>`.
+  Committing directly to `main` is allowed; run `just ci::check` first.
 - **just** as command runner: `just build` / `just release` (cross-builds both
   PRD targets + checksums). The merge bar lives in the `ci` module: `just
   ci::check` runs the whole gate (lint, format check, tests), `just ci::lint` /
