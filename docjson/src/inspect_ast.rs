@@ -179,6 +179,7 @@ fn extract_resource(b: &Block, diags: &mut Diags) -> ResourceDoc {
         description: req_lit_string(b, "description", &ctx, diags),
         script: req_lit_string(b, "script", &ctx, diags),
         concurrency: opt_lit_string(b, "concurrency", &ctx, diags),
+        lock: opt_lit_string(b, "lock", &ctx, diags),
         params: extract_params(b, diags),
         name,
     }

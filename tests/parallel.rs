@@ -384,3 +384,200 @@ fn play_level_sequential() {
         assert_eq!(sample(&witness, id), 1, "sequential play overlapped ({id})");
     }
 }
+
+const COMPOSITE_WRAP_B: &str = r#"
+  composite "wrap_b" {
+    description = "Invokes b from inside the package"
+    arg "id" { description = "Step identity" type = "string" required = true }
+    arg "group" { description = "Overlap group" type = "string" required = true }
+    arg "sleep" { description = "Hold time" type = "string" required = true }
+    arg "witness_dir" { description = "Witness dir" type = "string" required = true }
+
+    step "inner" {
+      description = "b, unqualified"
+      resource = "b"
+      properties {
+        id = args.id
+        group = args.group
+        sleep = args.sleep
+        witness_dir = args.witness_dir
+      }
+    }
+  }"#;
+
+/// Lock groups serialise across resource types within a package. `par.a`
+/// and `par.b` are different resources sharing `lock = "db"`; `other.c`
+/// declares the same lock name in another package, so it is a different
+/// group; `par.free` has no lock. Each probe marks itself running under
+/// its `group`, sleeps `sleep` seconds, then samples both its group's
+/// runners and all runners. `lock-b` reaches `par.b` through a composite,
+/// so its expanded inner step must carry `b`'s lock too.
+#[test]
+fn lock_group_serialises_across_resource_types() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let witness = root.join("witness");
+    std::fs::create_dir_all(&witness).unwrap();
+
+    let resource = |name: &str, extra: &str| {
+        format!(
+            r#"
+  resource "{name}" {{
+    description = "Lock probe"
+    script = "resources/probe.ws"
+    {extra}
+
+    param "id" {{
+      description = "Step identity"
+      type = "string"
+      required = true
+    }}
+    param "group" {{
+      description = "Overlap group"
+      type = "string"
+      required = true
+    }}
+    param "sleep" {{
+      description = "Seconds to hold the marker"
+      type = "string"
+      required = true
+    }}
+    param "witness_dir" {{
+      description = "Where overlap is recorded"
+      type = "string"
+      required = true
+    }}
+  }}"#
+        )
+    };
+    let probe = r#"use value
+use fs
+use path
+use shell
+
+fn p(params: Value, key: string) -> string {
+    if let Some(v) = params.get(key) {
+        if let Some(s) = v.as_string() { return s }
+    }
+    ""
+}
+
+fn check(params: Value) -> CheckResult {
+    if fs::exists(path::join(p(params, "witness_dir"), "done-" + p(params, "id"))) {
+        CheckResult::AlreadyConfigured
+    } else {
+        CheckResult::NotConfigured
+    }
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    let dir = p(params, "witness_dir")
+    let id = p(params, "id")
+    let prefix = "running-" + p(params, "group") + "-"
+    let mine = path::join(dir, prefix + id)
+    fs::write(mine, "x")?
+
+    shell::run("sleep " + p(params, "sleep"), Value::Null)?
+
+    let entries = fs::list_dir(dir)?
+    let group = 0
+    let total = 0
+    for e in entries {
+        if e.starts_with(prefix) { group = group + 1 }
+        if e.starts_with("running-") { total = total + 1 }
+    }
+    fs::write(path::join(dir, "sample-" + id), str(group))?
+    fs::write(path::join(dir, "total-" + id), str(total))?
+
+    fs::delete(mine)?
+    fs::write(path::join(dir, "done-" + id), "x")?
+    Ok(ApplyResult::Success)
+}
+"#;
+    for (pkg, body) in [
+        (
+            "par",
+            format!(
+                "{}{}{}{}",
+                resource("a", r#"lock = "db""#),
+                // A lock composes with a concurrency class.
+                resource("b", "concurrency = \"exclusive\"\n    lock = \"db\""),
+                resource("free", ""),
+                COMPOSITE_WRAP_B,
+            ),
+        ),
+        ("other", resource("c", r#"lock = "db""#)),
+    ] {
+        let d = root.join("pkgs").join(pkg);
+        std::fs::create_dir_all(d.join("resources")).unwrap();
+        std::fs::write(d.join("resources/probe.ws"), probe).unwrap();
+        std::fs::write(
+            d.join("package.wcl"),
+            format!("package \"{pkg}\" {{\n  description = \"Lock probes\"\n{body}\n}}\n"),
+        )
+        .unwrap();
+    }
+
+    let step = |name: &str, resource: &str, group: &str, sleep: &str| {
+        format!(
+            r#"    step "{name}" {{
+      description = "probe {name}"
+      resource = "{resource}"
+      properties {{
+        id = "{name}"
+        group = "{group}"
+        sleep = "{sleep}"
+        witness_dir = "{witness}"
+      }}
+    }}
+"#,
+            witness = witness.display()
+        )
+    };
+    // `lock-b` is declared before the unlocked steps: while it waits on the
+    // lock they must still be dispatched past it.
+    std::fs::write(
+        root.join("playbook.wcl"),
+        format!(
+            r#"playbook "Locks" {{
+  description = "Lock group behaviour"
+  version = "0.1.0"
+
+  play "locks" {{
+    description = "two resource types sharing a lock, plus bystanders"
+{}{}{}{}
+  }}
+}}
+"#,
+            step("lock-a", "par.a", "par-db", "0.4"),
+            step("lock-b", "par.wrap_b", "par-db", "0.4"),
+            step("other-c", "other.c", "other-db", "0.15"),
+            step("free-1", "par.free", "free", "0.15"),
+        ),
+    )
+    .unwrap();
+
+    let (code, stdout, stderr) = run_in(root, &["apply", ".", "locks", "--jobs", "8"]);
+    assert_eq!(code, 0, "stdout: {stdout}\nstderr: {stderr}");
+    let read = |kind: &str, id: &str| -> i64 {
+        std::fs::read_to_string(witness.join(format!("{kind}-{id}")))
+            .unwrap_or_default()
+            .trim()
+            .parse()
+            .unwrap_or(-1)
+    };
+
+    for id in ["lock-a", "lock-b"] {
+        assert_eq!(read("sample", id), 1, "{id} overlapped its lock group");
+    }
+    // Same lock name in another package, and an unlocked step: both ran
+    // alongside the first holder of par's lock.
+    assert!(
+        read("total", "other-c") >= 2,
+        "other.c did not run in parallel"
+    );
+    assert!(
+        read("total", "free-1") >= 2,
+        "free step did not run in parallel"
+    );
+}

@@ -142,6 +142,8 @@ PROSE
 
   p <<'PROSE'
 `concurrency` is `parallel` by default. `exclusive` and `global` restrict how the scheduler may overlap the resource's steps with others. A step may tighten the class, never loosen it. The three classes are defined in [package.wcl](ref_package) and their effect on dispatch is explained in [Scheduling and concurrency](guide_scheduling).
+
+Resources that contend for one external lock, such as a package manager's database, share a `lock = "<name>"`. The scheduler runs at most one step holding that lock at a time, across resource types. Lock names are scoped to the package.
 PROSE
 
   h2 "Gatherers"

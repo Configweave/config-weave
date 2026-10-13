@@ -242,6 +242,9 @@ pub struct ResourceDecl {
     pub description: String,
     pub script: ScriptSource,
     pub concurrency: Concurrency,
+    /// Lock group, scoped to the declaring package: at most one step of
+    /// any resource in this package naming the same lock runs at a time.
+    pub lock: Option<String>,
     pub params: Vec<ParamDecl>,
 }
 

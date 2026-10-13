@@ -152,6 +152,9 @@ pub struct ResourceDoc {
     /// None = schema default ("parallel").
     #[serde(default, skip_serializing_if = "is_none")]
     pub concurrency: Option<String>,
+    /// Package-scoped lock group; None = no lock.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub lock: Option<String>,
     #[serde(default)]
     pub params: Vec<ParamDoc>,
 }

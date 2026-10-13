@@ -565,6 +565,9 @@ fn emit_resource(w: &mut String, pkg: &str, res: &crate::model::ResourceDecl) {
     let _ = writeln!(w, "  h1 \"Resource: {}\"", esc(&res.name));
     let _ = writeln!(w, "  p \"{}\"", esc(&res.description));
     let _ = writeln!(w, "  p \"Concurrency class: {}\"", res.concurrency.as_str());
+    if let Some(lock) = &res.lock {
+        let _ = writeln!(w, "  p \"Lock group: {}\"", esc(lock));
+    }
     emit_param_table(w, &res.params);
     emit_symbol_values(w, &res.params, &[]);
 

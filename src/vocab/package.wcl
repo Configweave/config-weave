@@ -94,12 +94,17 @@ type WeaveReturnDecl {
   @children("symbol") symbols: list<WeaveSymbolDecl>
 }
 
+// `lock` names a lock group: at most one step of any resource in the same
+// package declaring the same lock runs at a time, across resource types —
+// the case where two resources contend for one external lock (a package
+// manager's database). Names are scoped to the declaring package.
 @block("resource")
 type WeaveResourceDecl {
   @inline(0) name: utf8
   description: utf8
   script: utf8
   @default("parallel") concurrency: utf8
+  lock: utf8?
   @children("param") params: list<WeaveParamDecl>
 }
 

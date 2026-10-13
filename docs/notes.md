@@ -328,6 +328,38 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   reference `--var`/`--var-file` overrides but not gatherer results or
   declared vars that depend on them.
 
+## Lock groups (post-v1 extension to PRD §5's concurrency classes)
+
+- A resource may declare `lock = "<name>"`. `exclusive` is per resource
+  type, which cannot cover two resources contending for one external lock
+  (apk's database behind `package` and `cache_updated`; apt's behind
+  `package`, `cache_updated` and `hold`). A lock group serialises every
+  resource naming it, across types.
+- **Lock names are scoped to the declaring package.** The key is
+  `(package, lock)`. A lock describes contention the package author knows
+  about inside their own package; a global namespace would let two
+  unrelated packages that happen to pick the same name (`db`) serialise
+  each other, and no package could reason about its locks without knowing
+  every other package installed. A lock genuinely shared between packages
+  is a cross-package design problem a name collision should not solve.
+- **It composes with the class**, it does not replace it: a step dispatches
+  only when its class allows *and* its lock is free. Gating is the same
+  `continue` in the scheduler's in-order scan as `exclusive`, so a step
+  waiting on a lock is passed over and later ready steps still dispatch
+  (no head-of-line blocking), and the ready-queue order is unchanged. A
+  lock is released when its step's `Done` arrives, every dispatched step
+  sends one, and a `global` step waits for `in_flight == 0` so it never
+  starts while a lock is held — no deadlock. A sequential play
+  (`parallel = false`, one worker) never has two steps in flight, so locks
+  are inert there.
+- **A lock belongs to the resource; a step cannot set one.** Tightening a
+  step's class covers the playbook-side race. A composite's inner steps
+  keep their template's `package`/`resource` after expansion, so they pick
+  up the lock of the resource they name — an unqualified reference inside a
+  package body resolves to that package, hence that package's lock scope.
+  The built-in `weave` resources declare no lock.
+- An empty lock name is a validation error.
+
 ## Host API decisions (PRD §7)
 
 - `shell::run` splits its command with shell-words and executes the
