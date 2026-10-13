@@ -127,16 +127,18 @@ unchanged. This is the whole surface.
 | `delete` | `fs::delete(path: string) -> Result[unit, string]` | a file or a symlink |
 | `delete_dir` | `fs::delete_dir(path: string) -> Result[unit, string]` | a directory and everything in it |
 | `mkdir` | `fs::mkdir(path: string) -> Result[unit, string]` | creates missing parents |
-| `exists` | `fs::exists(path: string) -> bool` | plain bool, unreadable path answers `false` |
-| `is_file` | `fs::is_file(path: string) -> bool` | plain bool |
-| `is_dir` | `fs::is_dir(path: string) -> bool` | plain bool |
+| `exists` | `fs::exists(path: string) -> bool` | plain bool, unreadable path answers `false`; follows symlinks, so a dangling link answers `false` |
+| `lexists` | `fs::lexists(path: string) -> bool` | does not follow a final symlink; a dangling link answers `true` |
+| `is_file` | `fs::is_file(path: string) -> bool` | plain bool; follows symlinks |
+| `is_dir` | `fs::is_dir(path: string) -> bool` | plain bool; follows symlinks |
 | `list_dir` | `fs::list_dir(path: string) -> Result[List[string], string]` | entry names, sorted |
-| `metadata` | `fs::metadata(path: string) -> Result[Value, string]` | map with the keys below |
+| `metadata` | `fs::metadata(path: string) -> Result[Value, string]` | map with the keys below; does not follow a final symlink (describes the link itself) |
 | `glob` | `fs::glob(pattern: string) -> Result[List[string], string]` | matching paths, sorted |
 | `temp_file` | `fs::temp_file() -> Result[string, string]` | creates a fresh file, returns its path |
 | `temp_dir` | `fs::temp_dir() -> Result[string, string]` | creates a fresh directory, returns its path |
 | `symlink` | `fs::symlink(target: string, link: string) -> Result[unit, string]` | link at `link` pointing to `target` |
 | `read_link` | `fs::read_link(path: string) -> Result[string, string]` | the target of a symlink |
+| `chown` | `fs::chown(path: string, owner: Value, group: Value) -> Result[unit, string]` | Unix only (`Err` on Windows); each of `owner`/`group` is `Value::String(name)`, `Value::Int(id)` or `Value::Null` to leave it unchanged; unknown name is `Err("unknown owner '<name>'")`; does not follow a final symlink |
 
 ### `fs::metadata` map keys
 
