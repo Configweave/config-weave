@@ -16,6 +16,7 @@ use std::io::Write as _;
 use std::path::Path;
 
 use crate::diag::Diag;
+use crate::hostapi::shell::{powershell_argv, write_ps_script};
 use crate::report::JsonRunReport;
 
 use super::backend::{ExecOutput, GuestOs, Transport};
@@ -50,6 +51,17 @@ pub enum GatherOutcome {
 pub enum VerifyOutcome {
     Passed,
     Failed(String),
+}
+
+/// What [`Workdir::powershell`] did: the script's own result, and whether
+/// its copy in the guest was removed afterwards.
+///
+/// Two fields rather than one `Result` so a failed cleanup can never mask
+/// the script's result. What to do about a leftover file is the caller's
+/// call — this module emits nothing itself.
+pub struct PsRun {
+    pub out: Result<ExecOutput, Diag>,
+    pub cleanup: Result<(), Diag>,
 }
 
 /// The interesting end of a command's output: stderr when there is any,
@@ -201,6 +213,24 @@ impl<'a> Guest<'a> {
         }
         Ok(())
     }
+
+    fn remove_file(&self, path: &str) -> Result<(), Diag> {
+        let out = match self.os {
+            GuestOs::Linux => self.t.exec(&["rm", "-f", path])?,
+            GuestOs::Windows => {
+                let script = format!("del /f /q {}", shell_path(self.os, path));
+                self.t.exec(&["cmd.exe", "/C", &script])?
+            }
+        };
+        if out.exit_code != 0 {
+            return Err(Diag::bare(format!(
+                "cannot remove {path} from the guest (exit {}): {}",
+                out.exit_code,
+                super::output::output_tail(&out.stderr, "(no output)")
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// A directory inside a guest that exists, with the things that go in it.
@@ -246,6 +276,35 @@ impl Workdir<'_> {
             }
         };
         self.guest.t.exec(&argv)
+    }
+
+    /// Run a PowerShell script in the guest without putting it on the
+    /// command line, the way `shell::powershell` does on a host: the
+    /// script plus its exit trailer is copied in as `script.ps1`, the exec
+    /// carries only a bootstrap naming that file, and the file is removed
+    /// afterwards whatever the exec did.
+    pub fn powershell(&self, script: &str) -> PsRun {
+        let (_host_dir, host) = match write_ps_script(script) {
+            Ok(written) => written,
+            Err(e) => {
+                return PsRun {
+                    out: Err(Diag::bare(e)),
+                    cleanup: Ok(()),
+                };
+            }
+        };
+        let path = format!("{}/script.ps1", self.dir);
+        let out = self.guest.t.copy_in(&host, &path).and_then(|()| {
+            let (exe, args) =
+                powershell_argv("powershell", &shell_path(self.guest.os, &path), script);
+            let mut argv = vec![exe.as_str()];
+            argv.extend(args.iter().map(String::as_str));
+            self.guest.t.exec(&argv)
+        });
+        // Attempted even when the copy or the exec failed: a partial copy
+        // still holds the script.
+        let cleanup = self.guest.remove_file(&path);
+        PsRun { out, cleanup }
     }
 
     /// Run config-weave over the staged playbook and parse its report.
@@ -396,7 +455,13 @@ mod tests {
         os: GuestOs,
         argvs: RefCell<Vec<Vec<String>>>,
         copies: RefCell<Vec<(PathBuf, String)>>,
-        replies: RefCell<VecDeque<ExecOutput>>,
+        /// What each copied file held at copy time — a host temp file may
+        /// be gone by the time a test looks.
+        bodies: RefCell<Vec<Option<String>>>,
+        /// Every exec and copy in call order, so a test can assert one
+        /// happened before the other.
+        trail: RefCell<Vec<String>>,
+        replies: RefCell<VecDeque<Result<ExecOutput, Diag>>>,
     }
 
     impl FakeGuest {
@@ -405,6 +470,8 @@ mod tests {
                 os,
                 argvs: RefCell::new(Vec::new()),
                 copies: RefCell::new(Vec::new()),
+                bodies: RefCell::new(Vec::new()),
+                trail: RefCell::new(Vec::new()),
                 replies: RefCell::new(VecDeque::new()),
             }
         }
@@ -420,7 +487,21 @@ mod tests {
         /// borrows the fake — which is how the protocol tests queue a reply
         /// *after* the workdir's mkdir has taken one.
         fn queue(&self, outs: impl IntoIterator<Item = ExecOutput>) {
-            self.replies.borrow_mut().extend(outs);
+            self.replies.borrow_mut().extend(outs.into_iter().map(Ok));
+        }
+
+        /// Queue a transport failure for the next unanswered exec.
+        fn breaking(self, why: &str) -> FakeGuest {
+            self.replies.borrow_mut().push_back(Err(Diag::bare(why)));
+            self
+        }
+
+        fn bodies(&self) -> Vec<Option<String>> {
+            self.bodies.borrow().clone()
+        }
+
+        fn trail(&self) -> Vec<String> {
+            self.trail.borrow().clone()
         }
 
         /// Every exec's argv, in call order.
@@ -442,17 +523,23 @@ mod tests {
             self.argvs
                 .borrow_mut()
                 .push(argv.iter().map(|s| s.to_string()).collect());
-            Ok(self
-                .replies
+            self.trail
+                .borrow_mut()
+                .push(format!("exec {}", argv.join(" ")));
+            self.replies
                 .borrow_mut()
                 .pop_front()
-                .unwrap_or_else(|| exited(0)))
+                .unwrap_or_else(|| Ok(exited(0)))
         }
 
         fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag> {
             self.copies
                 .borrow_mut()
                 .push((src.to_path_buf(), dest.to_string()));
+            self.bodies
+                .borrow_mut()
+                .push(std::fs::read_to_string(src).ok());
+            self.trail.borrow_mut().push(format!("copy {dest}"));
             Ok(())
         }
     }
@@ -928,5 +1015,113 @@ mod tests {
                 "/weave/t/0-core__a/facts.json",
             ]
         );
+    }
+
+    const SECRET: &str = "$pw = 'MARKER-hunter2'\nWrite-Output $pw";
+
+    #[test]
+    fn a_powershell_script_never_reaches_an_exec_argv() {
+        let fake = FakeGuest::new(GuestOs::Windows);
+        let wd = Guest::new(&fake).scenario_work("dc1", 3).expect("workdir");
+        let run = wd.powershell(SECRET);
+        assert!(run.out.is_ok() && run.cleanup.is_ok());
+
+        assert!(
+            fake.argvs().iter().flatten().all(|a| !a.contains("MARKER")),
+            "{:?}",
+            fake.argvs()
+        );
+        // The script, with the exit trailer, went in as a file instead.
+        assert_eq!(
+            fake.bodies(),
+            vec![Some(format!(
+                "{SECRET}{}",
+                crate::hostapi::shell::PS_EXIT_TRAILER
+            ))]
+        );
+    }
+
+    #[test]
+    fn a_powershell_script_is_copied_in_then_bootstrapped_then_removed() {
+        let fake = FakeGuest::new(GuestOs::Windows);
+        let wd = Guest::new(&fake).scenario_work("dc1", 3).expect("workdir");
+        wd.powershell(SECRET).out.expect("ran");
+
+        let path = "C:/weave/s/dc1-3/script.ps1";
+        assert_eq!(fake.copies()[0].1, path);
+        // The bootstrap names the guest path, as Windows writes it — not
+        // a host path.
+        let boot =
+            ". ([scriptblock]::Create([IO.File]::ReadAllText('C:\\weave\\s\\dc1-3\\script.ps1')))";
+        assert_eq!(
+            fake.trail(),
+            vec![
+                "exec cmd.exe /C if not exist C:\\weave\\s\\dc1-3 md C:\\weave\\s\\dc1-3"
+                    .to_string(),
+                format!("copy {path}"),
+                format!("exec powershell -NoProfile -NonInteractive -Command {boot}"),
+                "exec cmd.exe /C del /f /q C:\\weave\\s\\dc1-3\\script.ps1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_powershell_script_that_reads_input_gets_it_piped() {
+        let fake = FakeGuest::new(GuestOs::Windows);
+        let wd = Guest::new(&fake).scenario_work("dc1", 1).expect("workdir");
+        wd.powershell("$input | Out-String").out.expect("ran");
+        assert!(fake.argvs()[1][4].starts_with("$input | . "));
+    }
+
+    #[test]
+    fn a_powershell_exec_that_breaks_is_still_cleaned_up() {
+        // mkdir succeeds, the powershell exec's transport fails.
+        let fake = FakeGuest::new(GuestOs::Windows)
+            .replying([exited(0)])
+            .breaking("agent went away");
+        let wd = Guest::new(&fake).scenario_work("dc1", 1).expect("workdir");
+        let run = wd.powershell(SECRET);
+
+        let err = run.out.err().expect("the exec failure is the result");
+        assert!(err.message.contains("agent went away"), "{}", err.message);
+        assert!(run.cleanup.is_ok());
+        let last = fake.argvs().pop().unwrap();
+        assert_eq!(
+            last[..3],
+            ["cmd.exe", "/C", "del /f /q C:\\weave\\s\\dc1-1\\script.ps1"]
+        );
+    }
+
+    #[test]
+    fn a_failing_powershell_cleanup_does_not_mask_the_scripts_result() {
+        // mkdir ok, the script exits 7, the delete fails.
+        let fake = FakeGuest::new(GuestOs::Windows).replying([
+            exited(0),
+            failed(7, "script said no"),
+            failed(1, "Access is denied."),
+        ]);
+        let wd = Guest::new(&fake).scenario_work("dc1", 1).expect("workdir");
+        let run = wd.powershell(SECRET);
+
+        let out = run.out.expect("a nonzero exit is data");
+        assert_eq!(out.exit_code, 7);
+        assert_eq!(out.stderr, "script said no");
+        let err = run.cleanup.expect_err("the delete failed");
+        assert!(err.message.contains("Access is denied."), "{}", err.message);
+        assert!(
+            err.message.contains("C:/weave/s/dc1-1/script.ps1"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn a_powershell_script_on_linux_is_removed_with_rm() {
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).scenario_work("box", 2).expect("workdir");
+        wd.powershell(SECRET).out.expect("ran");
+        let argvs = fake.argvs();
+        assert!(argvs[1][4].contains("ReadAllText('/weave/s/box-2/script.ps1')"));
+        assert_eq!(argvs[2], ["rm", "-f", "/weave/s/box-2/script.ps1"]);
     }
 }

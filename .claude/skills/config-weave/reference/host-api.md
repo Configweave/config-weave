@@ -565,7 +565,7 @@ that copy.
 |---|---|---|
 | `name` | `() -> string` | the declared name |
 | `exec` | `(cmd: string, args: List[string]) -> Result[ExecOut, string]` | run a program in the guest, argv style |
-| `powershell` | `(script: string) -> Result[ExecOut, string]` | `powershell -NoProfile -NonInteractive -Command <script>` |
+| `powershell` | `(script: string) -> Result[ExecOut, string]` | `powershell -NoProfile -NonInteractive`, script copied in as a file (off the guest's command line) and deleted afterwards, as `shell::powershell` does on a host |
 | `copy_in` | `(host_path: string, dest: string) -> Result[unit, string]` | host file or directory into the guest |
 | `reboot` | `() -> Result[unit, string]` | |
 | `wait_ready` | `(secs: int) -> Result[unit, string]` | up to `secs` seconds for the guest to answer; negative is zero |

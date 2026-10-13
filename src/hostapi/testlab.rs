@@ -133,7 +133,7 @@ fn ds(d: Diag) -> String {
 
 /// The next working-dir number for `name`, so successive applies on one
 /// machine never collide. The machine is known to exist — `ensure_prepared`
-/// runs first at every call site.
+/// or `machine_inst` runs first at every call site.
 fn bump(state: &mut LabState, name: &str) -> usize {
     let ms = state.machines.get_mut(name).expect("machine present");
     ms.counter += 1;
@@ -311,17 +311,22 @@ pub fn module() -> Module {
         .method(
             "powershell",
             |m: &Machine, script: &str| -> Result<ExecOut, String> {
-                let st = m.state.borrow();
+                let mut st = m.state.borrow_mut();
+                machine_inst(&st, &m.name)?;
+                // A fresh working dir per script, like an apply: the
+                // script file lands there rather than on the command line.
+                let n = bump(&mut st, &m.name);
                 let inst = machine_inst(&st, &m.name)?;
-                inst.exec(&[
-                    "powershell",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    script,
-                ])
-                .map(into_exec)
-                .map_err(ds)
+                let wd = Guest::new(inst).scenario_work(&m.name, n).map_err(ds)?;
+                let run = wd.powershell(script);
+                // A leftover script file is worth a warning, never worth
+                // replacing the script's own result.
+                if let Err(e) = run.cleanup
+                    && !st.quiet
+                {
+                    eprintln!("⚠ [scenario] {}: {}", m.name, e.message);
+                }
+                run.out.map(into_exec).map_err(ds)
             },
         )
         .method(

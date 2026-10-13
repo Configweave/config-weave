@@ -262,7 +262,7 @@ fn powershell_exe() -> Result<&'static str, String> {
 /// gives: `exit N` still wins, otherwise 0 when the last statement
 /// succeeded and 1 when it failed. Without it a dot-sourced script block
 /// exits 0 after a failing last statement.
-const PS_EXIT_TRAILER: &str = "\nif ($?) { exit 0 } else { exit 1 }\n";
+pub(crate) const PS_EXIT_TRAILER: &str = "\nif ($?) { exit 0 } else { exit 1 }\n";
 
 /// The script never goes on the command line, where the process list,
 /// command-line auditing (event 4688) and EDR telemetry would see any
@@ -277,15 +277,13 @@ const PS_EXIT_TRAILER: &str = "\nif ($?) { exit 0 } else { exit 1 }\n";
 /// A script block has its own `$input`, so one that reads `$input` gets the
 /// process's stdin piped in. Only then: the pipe drains stdin before the
 /// script starts, which would starve `[Console]::In`.
-fn powershell_argv(
-    exe: &str,
-    script_path: &std::path::Path,
-    script: &str,
-) -> (String, Vec<String>) {
-    let path = script_path.to_string_lossy();
+///
+/// `script_path` is a string, not a `Path`, because the testlab passes a
+/// path inside a Windows guest from a Linux host.
+pub(crate) fn powershell_argv(exe: &str, script_path: &str, script: &str) -> (String, Vec<String>) {
     let load = format!(
         ". ([scriptblock]::Create([IO.File]::ReadAllText({})))",
-        ps_quote(&path)
+        ps_quote(script_path)
     );
     let bootstrap = if reads_input(script) {
         format!("$input | {load}")
@@ -334,7 +332,9 @@ fn ps_quote(s: &str) -> String {
 /// the user temp directory is already ACL'd to its owner (and SYSTEM and
 /// Administrators). Dropping the returned dir deletes both, so every exit
 /// path of the caller, error or timeout included, cleans up.
-fn write_ps_script(script: &str) -> Result<(tempfile::TempDir, std::path::PathBuf), String> {
+pub(crate) fn write_ps_script(
+    script: &str,
+) -> Result<(tempfile::TempDir, std::path::PathBuf), String> {
     let err = |e: std::io::Error| format!("cannot write powershell script: {e}");
     let dir = tempfile::Builder::new()
         .prefix("config-weave-ps-")
@@ -361,7 +361,7 @@ fn write_ps_script(script: &str) -> Result<(tempfile::TempDir, std::path::PathBu
 
 fn run_powershell(exe: &str, script: &str, opts: &Opts) -> Result<CmdOutput, String> {
     let (_dir, path) = write_ps_script(script)?;
-    let (program, args) = powershell_argv(exe, &path, script);
+    let (program, args) = powershell_argv(exe, &path.to_string_lossy(), script);
     run_captured(&program, &args, opts)
 }
 
@@ -455,7 +455,7 @@ mod tests {
     }
 
     fn ps(script: &str) -> Vec<String> {
-        powershell_argv("pwsh", std::path::Path::new("/t/script.ps1"), script).1
+        powershell_argv("pwsh", "/t/script.ps1", script).1
     }
 
     #[test]
