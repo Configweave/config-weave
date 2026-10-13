@@ -15,7 +15,7 @@ page ref_mod_fs {
 `fs` module of wscript-std, which config-weave does not register. Every
 function that can fail returns `Result[…, string]`, where the error string
 names the path and the operating system error. The predicates `exists`,
-`is_file` and `is_dir` return a plain `bool`. Path strings are passed through
+`lexists`, `is_file` and `is_dir` return a plain `bool`. Path strings are passed through
 to the operating system unchanged; use the [path module](ref_mod_path) to
 build them.
 PROSE
@@ -75,17 +75,26 @@ SRC
 
   p "Creates a directory, including any missing parents."
 
-  h2 "exists, is_file and is_dir"
+  h2 "exists, lexists, is_file and is_dir"
 
   code rust {
     source = <<'SRC'
 fs::exists(path: string) -> bool
+fs::lexists(path: string) -> bool
 fs::is_file(path: string) -> bool
 fs::is_dir(path: string) -> bool
 SRC
   }
 
   p "Each predicate answers one question about a path. A path that cannot be read answers `false`."
+
+  p <<'PROSE'
+`exists`, `is_file` and `is_dir` follow symlinks: they describe the link's
+target, so a dangling symlink answers `false` from all three. `lexists` does
+not follow a final symlink: it answers `true` for any symlink, dangling or not.
+Use `lexists` to ask whether something occupies a path before creating a link
+there.
+PROSE
 
   h2 "list_dir"
 
@@ -105,7 +114,7 @@ fs::metadata(path: string) -> Result[Value, string]
 SRC
   }
 
-  p "Returns a map describing the path. Read it with the accessors of the [Value type](ref_value)."
+  p "Returns a map describing the path. Read it with the accessors of the [Value type](ref_value). `metadata` does not follow a final symlink: for a link it describes the link itself, with `is_symlink` set to `true`, and it succeeds for a dangling link."
 
   table {
     rows:
@@ -150,6 +159,42 @@ SRC
   }
 
   p "`symlink` creates a link at `link` that points to `target`. `read_link` returns the target a symlink points to."
+
+  h2 "chown"
+
+  code rust {
+    source = <<'SRC'
+fs::chown(path: string, owner: Value, group: Value) -> Result[unit, string]
+SRC
+  }
+
+  p <<'PROSE'
+Changes the owner and the group of a path. Unix only: on Windows every call
+returns `Err`. `owner` and `group` each take one of three values.
+PROSE
+
+  table {
+    rows:
+      | "Value" | "Meaning" |
+      | "`Value::String(name)`" | "a user or group name; an all-digit string that names no account is used as a numeric id" |
+      | "`Value::Int(id)`" | "a numeric uid or gid" |
+      | "`Value::Null`" | "leave that part unchanged" |
+  }
+
+  p <<'PROSE'
+An unknown name returns `Err("unknown owner '<name>'")` or
+`Err("unknown group '<name>'")`. `chown` does not follow a final symlink: on a
+link it changes the link itself, never the file the link points to. This stops
+a symlink planted in a user-owned directory from redirecting a root-run
+`chown` onto another file.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+fs::write("/home/alice/.ssh/known_hosts", content)?
+fs::chown("/home/alice/.ssh/known_hosts", Value::String("alice"), Value::Null)?
+SRC
+  }
 
   code rust {
     source = <<'SRC'

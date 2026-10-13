@@ -47,6 +47,7 @@ This is the whole set of registered modules.
 | `shell` | run external commands | all | config-weave (replaces wscript-std `process`) |
 | `http` | HTTP client (rustls, no system TLS) | all | config-weave |
 | `hash` | SHA-256, SHA-512, MD5 digests | all | config-weave |
+| `encoding` | base64, UTF-8 and UTF-16LE bytes | all | config-weave |
 | `archive` | extract zip and tar.gz | all | config-weave |
 | `env` | process environment and host identity | all | config-weave |
 | `sys` | OS and hardware facts | all | config-weave |
@@ -64,7 +65,7 @@ This is the whole set of registered modules.
 | `testlab` | scenario driver handles (`Lab`, `Machine`) | scenario scripts only | config-weave |
 
 `testlab` is registered only in the context scenario driver scripts compile
-and run against. Every other script sees the twenty modules above it.
+and run against. Every other script sees the twenty-one modules above it.
 
 ### The Value type
 
@@ -127,16 +128,18 @@ unchanged. This is the whole surface.
 | `delete` | `fs::delete(path: string) -> Result[unit, string]` | a file or a symlink |
 | `delete_dir` | `fs::delete_dir(path: string) -> Result[unit, string]` | a directory and everything in it |
 | `mkdir` | `fs::mkdir(path: string) -> Result[unit, string]` | creates missing parents |
-| `exists` | `fs::exists(path: string) -> bool` | plain bool, unreadable path answers `false` |
-| `is_file` | `fs::is_file(path: string) -> bool` | plain bool |
-| `is_dir` | `fs::is_dir(path: string) -> bool` | plain bool |
+| `exists` | `fs::exists(path: string) -> bool` | plain bool, unreadable path answers `false`; follows symlinks, so a dangling link answers `false` |
+| `lexists` | `fs::lexists(path: string) -> bool` | does not follow a final symlink; a dangling link answers `true` |
+| `is_file` | `fs::is_file(path: string) -> bool` | plain bool; follows symlinks |
+| `is_dir` | `fs::is_dir(path: string) -> bool` | plain bool; follows symlinks |
 | `list_dir` | `fs::list_dir(path: string) -> Result[List[string], string]` | entry names, sorted |
-| `metadata` | `fs::metadata(path: string) -> Result[Value, string]` | map with the keys below |
+| `metadata` | `fs::metadata(path: string) -> Result[Value, string]` | map with the keys below; does not follow a final symlink (describes the link itself) |
 | `glob` | `fs::glob(pattern: string) -> Result[List[string], string]` | matching paths, sorted |
 | `temp_file` | `fs::temp_file() -> Result[string, string]` | creates a fresh file, returns its path |
 | `temp_dir` | `fs::temp_dir() -> Result[string, string]` | creates a fresh directory, returns its path |
 | `symlink` | `fs::symlink(target: string, link: string) -> Result[unit, string]` | link at `link` pointing to `target` |
 | `read_link` | `fs::read_link(path: string) -> Result[string, string]` | the target of a symlink |
+| `chown` | `fs::chown(path: string, owner: Value, group: Value) -> Result[unit, string]` | Unix only (`Err` on Windows); each of `owner`/`group` is `Value::String(name)`, `Value::Int(id)` or `Value::Null` to leave it unchanged; unknown name is `Err("unknown owner '<name>'")`; does not follow a final symlink |
 
 ### `fs::metadata` map keys
 
@@ -248,6 +251,25 @@ the whole surface.
 | `sha512_file` | `hash::sha512_file(path: string) -> Result[string, string]` | |
 | `md5` | `hash::md5(s: string) -> string` | legacy checksum interop only |
 | `md5_file` | `hash::md5_file(path: string) -> Result[string, string]` | legacy checksum interop only |
+
+## encoding
+
+`use encoding`. Converts between strings, bytes and base64. Cross-platform.
+Bytes are `List[int]`, as in `fs::read_bytes`/`fs::write_bytes`; a byte argument
+with an element outside `0..=255` is an `Err`. This is the whole surface.
+
+| Function | Signature | Notes |
+|---|---|---|
+| `base64_encode` | `encoding::base64_encode(bytes: List[int]) -> Result[string, string]` | standard alphabet, `=` padded |
+| `base64_decode` | `encoding::base64_decode(s: string) -> Result[List[int], string]` | standard alphabet, padded; surrounding whitespace ignored |
+| `utf8` | `encoding::utf8(s: string) -> List[int]` | a string's UTF-8 bytes; base64 a string with `base64_encode(utf8(s))` |
+| `from_utf8` | `encoding::from_utf8(bytes: List[int]) -> Result[string, string]` | `Err` on invalid UTF-8 |
+| `utf16le` | `encoding::utf16le(s: string) -> List[int]` | UTF-16 little-endian, no BOM |
+
+```rust
+// Windows unattend hidden password: base64(UTF-16LE(password + element name))
+let hidden = encoding::base64_encode(encoding::utf16le(password + "Password"))?
+```
 
 ## archive
 

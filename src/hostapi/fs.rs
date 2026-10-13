@@ -71,8 +71,14 @@ pub fn module() -> Module {
     m.fn_("mkdir", |path: &str| -> Result<(), String> {
         std::fs::create_dir_all(path).map_err(err)
     });
-    m.doc_next("Whether a path exists");
+    m.doc_next(
+        "Whether a path exists. Follows symlinks: a dangling symlink answers false (see lexists)",
+    );
     m.fn_("exists", |path: &str| Path::new(path).exists());
+    m.doc_next(
+        "Whether a path exists without following a final symlink: a dangling symlink answers true",
+    );
+    m.fn_("lexists", |path: &str| lexists(path));
     m.doc_next("Whether a path is a file");
     m.fn_("is_file", |path: &str| Path::new(path).is_file());
     m.doc_next("Whether a path is a directory");
@@ -89,7 +95,8 @@ pub fn module() -> Module {
     });
     m.doc_next(
         "File metadata as a map: size, modified (unix secs), readonly, is_file, is_dir, \
-         is_symlink, mode (unix permission bits; 0 elsewhere)",
+         is_symlink, mode (unix permission bits; 0 elsewhere). Does not follow a final \
+         symlink: for a link it describes the link itself",
     );
     m.fn_("metadata", |path: &str| -> Result<DynValue, String> {
         let meta = std::fs::symlink_metadata(path).map_err(err)?;
@@ -167,5 +174,200 @@ pub fn module() -> Module {
             .map(|p| p.display().to_string())
             .map_err(err)
     });
+    m.doc_next(
+        "Change a path's owner and group (Unix only). Each is a user/group name, a numeric id, \
+         or Value::Null to leave it unchanged. Does not follow a final symlink",
+    );
+    m.fn_(
+        "chown",
+        |path: &str, owner: DynValue, group: DynValue| -> Result<(), String> {
+            chown(path, &owner, &group)
+        },
+    );
     m
+}
+
+fn lexists(path: &str) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
+}
+
+/// `lchown`, not `chown`: config-weave runs as root and writes into
+/// user-owned trees (a home directory), where following a link the user
+/// planted would hand them ownership of an arbitrary file.
+#[cfg(unix)]
+fn chown(path: &str, owner: &DynValue, group: &DynValue) -> Result<(), String> {
+    let uid = resolve_id(owner, "owner", lookup_uid)?;
+    let gid = resolve_id(group, "group", lookup_gid)?;
+    std::os::unix::fs::lchown(path, uid, gid).map_err(|e| format!("cannot chown {path}: {e}"))
+}
+
+#[cfg(not(unix))]
+fn chown(_path: &str, _owner: &DynValue, _group: &DynValue) -> Result<(), String> {
+    Err("fs::chown is only available on Unix".to_string())
+}
+
+/// A name is looked up first; an all-digit string that names no account
+/// is taken as a numeric id, as chown(1) does.
+#[cfg(unix)]
+fn resolve_id(
+    v: &DynValue,
+    what: &str,
+    lookup: fn(&str) -> Result<Option<u32>, String>,
+) -> Result<Option<u32>, String> {
+    match v {
+        DynValue::Null => Ok(None),
+        DynValue::Int(n) => u32::try_from(*n)
+            .map(Some)
+            .map_err(|_| format!("{what} id {n} is out of range")),
+        DynValue::String(name) => match lookup(name)? {
+            Some(id) => Ok(Some(id)),
+            None => name
+                .parse::<u32>()
+                .map(Some)
+                .map_err(|_| format!("unknown {what} '{name}'")),
+        },
+        other => Err(format!(
+            "{what} must be a name, a numeric id or null, got {other:?}"
+        )),
+    }
+}
+
+/// Run a reentrant `get*nam_r` lookup, growing the scratch buffer on
+/// ERANGE. Workers run scripts on parallel threads, so the non-reentrant
+/// `getpwnam` is off the table.
+#[cfg(unix)]
+fn lookup_with<T>(
+    name: &str,
+    call: impl Fn(
+        *const libc::c_char,
+        *mut T,
+        *mut libc::c_char,
+        libc::size_t,
+        *mut *mut T,
+    ) -> libc::c_int,
+    id: impl Fn(&T) -> u32,
+) -> Result<Option<u32>, String> {
+    let cname = std::ffi::CString::new(name).map_err(|_| format!("invalid name '{name}'"))?;
+    let mut buf = vec![0 as libc::c_char; 1024];
+    loop {
+        // SAFETY: an all-zero passwd/group is a valid out-parameter; the
+        // call only writes into it and into `buf`.
+        let mut entry: T = unsafe { std::mem::zeroed() };
+        let mut found: *mut T = std::ptr::null_mut();
+        let rc = call(
+            cname.as_ptr(),
+            &mut entry,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut found,
+        );
+        if rc == libc::ERANGE && buf.len() < 1 << 20 {
+            buf.resize(buf.len() * 2, 0);
+            continue;
+        }
+        if rc != 0 {
+            return Err(format!(
+                "cannot look up '{name}': {}",
+                std::io::Error::from_raw_os_error(rc)
+            ));
+        }
+        return Ok((!found.is_null()).then(|| id(&entry)));
+    }
+}
+
+#[cfg(unix)]
+fn lookup_uid(name: &str) -> Result<Option<u32>, String> {
+    lookup_with(
+        name,
+        // SAFETY: arguments are valid pointers sized as passed.
+        |n, e, b, l, r| unsafe { libc::getpwnam_r(n, e, b, l, r) },
+        |p: &libc::passwd| p.pw_uid,
+    )
+}
+
+#[cfg(unix)]
+fn lookup_gid(name: &str) -> Result<Option<u32>, String> {
+    lookup_with(
+        name,
+        // SAFETY: arguments are valid pointers sized as passed.
+        |n, e, b, l, r| unsafe { libc::getgrnam_r(n, e, b, l, r) },
+        |g: &libc::group| g.gr_gid,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lexists_sees_a_dangling_symlink() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let link = dir.path().join("dangling");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.path().join("missing"), &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(dir.path().join("missing"), &link).unwrap();
+        let link = link.to_str().unwrap();
+        assert!(!Path::new(link).exists(), "exists follows the link");
+        assert!(lexists(link));
+        assert!(!lexists(dir.path().join("missing").to_str().unwrap()));
+    }
+
+    #[cfg(unix)]
+    fn id_name(flag: &str) -> String {
+        let out = std::process::Command::new("id").arg(flag).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chown_to_self_by_id_and_by_name() {
+        use std::os::unix::fs::MetadataExt;
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let path = f.path().to_str().unwrap();
+        // SAFETY: plain id queries with no arguments.
+        let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+        chown(path, &DynValue::Int(uid as i64), &DynValue::Int(gid as i64)).unwrap();
+        chown(
+            path,
+            &DynValue::String(id_name("-un")),
+            &DynValue::String(id_name("-gn")),
+        )
+        .unwrap();
+        chown(path, &DynValue::Null, &DynValue::Null).unwrap();
+        let meta = std::fs::metadata(path).unwrap();
+        assert_eq!((meta.uid(), meta.gid()), (uid, gid));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chown_unknown_user_errors() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let path = f.path().to_str().unwrap();
+        let err = chown(
+            path,
+            &DynValue::String("no-such-user-cw".into()),
+            &DynValue::Null,
+        )
+        .unwrap_err();
+        assert_eq!(err, "unknown owner 'no-such-user-cw'");
+        let err = chown(path, &DynValue::Null, &DynValue::Bool(true)).unwrap_err();
+        assert!(err.starts_with("group must be"), "got: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chown_does_not_follow_a_final_symlink() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let link = dir.path().join("dangling");
+        std::os::unix::fs::symlink(dir.path().join("missing"), &link).unwrap();
+        // SAFETY: plain id query with no arguments.
+        let uid = unsafe { libc::getuid() };
+        chown(
+            link.to_str().unwrap(),
+            &DynValue::Int(uid as i64),
+            &DynValue::Null,
+        )
+        .unwrap();
+    }
 }
