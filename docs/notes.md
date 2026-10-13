@@ -387,6 +387,15 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   awkwardly. It backs `linux_files.template`; author template bodies as raw
   heredocs (`<<'TMPL'`) so WCL's own `$"…${}"` interpolation leaves Tera's
   `{{ }}`/`{% %}` untouched, and feed dynamic data through `vars`.
+- wscript host functions have a fixed arity: no optional parameters and
+  no overloading. Options are a required trailing `opts` argument that is
+  `Null` (defaults) or a map, as in `shell::run` and `http::get`. Adding
+  options to an existing function would break every caller, so it gets a
+  `_with` sibling that takes the trailing `opts` and the original keeps
+  its signature and default behaviour: `registry::read_with` and friends
+  (`{view}`), `service::start_with` / `stop_with` / `restart_with`
+  (`{timeout}`). A function added new takes `opts` from the start
+  (`registry::read_typed`). Unknown option keys are an `Err`.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:
