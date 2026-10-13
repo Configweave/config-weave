@@ -1561,6 +1561,15 @@ fn load_package_source(
                     },
                     None => Concurrency::Parallel,
                 };
+                let lock = string_field_optional(&block, "lock", &mut ctx).filter(|l| {
+                    if l.trim().is_empty() {
+                        ctx.err(
+                            format!("resource '{rname}' declares an empty lock name"),
+                            wcl_span(block.span()),
+                        );
+                    }
+                    !l.trim().is_empty()
+                });
                 let params = load_params(&block, &mut ctx);
                 if resources
                     .insert(
@@ -1570,6 +1579,7 @@ fn load_package_source(
                             description: rdesc,
                             script,
                             concurrency,
+                            lock,
                             params,
                         },
                     )

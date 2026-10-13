@@ -10,6 +10,11 @@
 //! - `exclusive`: at most one in-flight step per resource type
 //! - `global`: drain all in-flight steps, run solo, resume
 //!
+//! Independently of the class, a resource may name a `lock` group: at most
+//! one in-flight step per (package, lock) across every resource type in
+//! that package. A step starts only when both its class and its lock
+//! allow; one waiting on either is passed over, never blocking the scan.
+//!
 //! Halting (Error without --continue-on-error, or RebootRequired in
 //! apply) stops dispatching and lets in-flight steps finish — no
 //! mid-flight cancellation.
@@ -55,6 +60,8 @@ enum Plan {
     Run {
         resource_key: String,
         concurrency: Concurrency,
+        /// `(package, lock name)` — lock names are package-scoped.
+        lock: Option<(String, String)>,
         params: DynValue,
     },
 }
@@ -371,6 +378,7 @@ fn plan_from_block(pb: &Playbook, step: &Step, block: &Block<'_>) -> Plan {
     Plan::Run {
         resource_key: format!("{}.{}", step.package, step.resource),
         concurrency,
+        lock: decl.lock.clone().map(|l| (step.package.clone(), l)),
         params: DynValue::Map(params),
     }
 }
@@ -430,6 +438,7 @@ fn schedule(
     let mut halted = false;
     let mut in_flight = 0usize;
     let mut running_exclusive: HashSet<String> = HashSet::new();
+    let mut held_locks: HashSet<(String, String)> = HashSet::new();
     let mut global_running = false;
 
     let (done_tx, done_rx) = mpsc::channel::<Done>();
@@ -575,6 +584,7 @@ fn schedule(
                     Plan::Run {
                         resource_key,
                         concurrency,
+                        lock,
                         params,
                     } => {
                         // Concurrency gating.
@@ -595,6 +605,9 @@ fn schedule(
                                 }
                             }
                         }
+                        if lock.as_ref().is_some_and(|l| held_locks.contains(l)) {
+                            continue;
+                        }
                         let Some(worker) = idle_workers.pop_front() else {
                             break;
                         };
@@ -602,6 +615,9 @@ fn schedule(
                         in_flight += 1;
                         if *concurrency == Concurrency::Exclusive {
                             running_exclusive.insert(resource_key.clone());
+                        }
+                        if let Some(l) = lock {
+                            held_locks.insert(l.clone());
                         }
                         if *concurrency == Concurrency::Global {
                             global_running = true;
@@ -664,11 +680,15 @@ fn schedule(
         if let Plan::Run {
             resource_key,
             concurrency,
+            lock,
             ..
         } = &plans[done.idx]
         {
             if *concurrency == Concurrency::Exclusive {
                 running_exclusive.remove(resource_key);
+            }
+            if let Some(l) = lock {
+                held_locks.remove(l);
             }
             if *concurrency == Concurrency::Global {
                 global_running = false;

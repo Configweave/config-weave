@@ -134,6 +134,7 @@ PROSE
       | "`description`" | "string" | "yes" | "One-line summary for the docs." |
       | "`script`" | "string" | "yes" | "Path of the wscript file, relative to the package directory." |
       | "`concurrency`" | "string" | "no, default `\"parallel\"`" | "The scheduling class. See [Concurrency classes](ref_package)." |
+      | "`lock`" | "string" | "no" | "A lock group shared with other resources of this package. See [Lock groups](ref_package)." |
       | "`param`" | "block, repeatable" | "no" | "Declared parameters. See [param](ref_package)." |
   }
 
@@ -312,4 +313,23 @@ SRC
       | "`exclusive`" | "At most one step of this resource type runs at a time. Steps of other resources continue. The package-manager lock case." |
       | "`global`" | "The step runs completely alone. The scheduler drains every in-flight step, runs this one, then resumes." |
   }
+
+  h2 "Lock groups"
+
+  code wcl {
+    source = <<'SRC'
+resource "package" {
+  description = "An apk package"
+  script = "resources/package.ws"
+  lock = "apk-db"
+}
+resource "cache_updated" {
+  description = "A fresh apk index"
+  script = "resources/cache_updated.ws"
+  lock = "apk-db"
+}
+SRC
+  }
+
+  p "A resource may name a lock group in its `lock` field. At most one step of any resource in the same package naming the same lock runs at a time, across resource types: `exclusive` serialises one resource, a lock serialises a set of them that contend for one external lock, such as a package manager's database. A step starts only when both its concurrency class and its lock allow, and a step waiting on a lock never holds up other ready steps. Lock names are scoped to the declaring package, so two packages that both say `apk-db` do not serialise against each other. The lock belongs to the resource: a step cannot set it, and a composite's inner steps take the lock of the resource they name. An empty lock name fails validation."
 }

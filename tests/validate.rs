@@ -570,3 +570,48 @@ fn an_unknown_block_inside_properties_fails_validation() {
     assert_eq!(code, 2, "stderr: {stderr}");
     assert!(flat(&stderr).contains("unknown block 'bogus'"), "{stderr}");
 }
+
+// ------------------------------------------------------------ lock groups
+
+/// A copy of the sample whose `core.file_present` declares `lock_line`
+/// next to its `concurrency`.
+fn sample_with_lock(lock_line: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    copy_sample(dir.path());
+    let pkg = dir.path().join("pkgs/core/package.wcl");
+    let src = std::fs::read_to_string(&pkg).unwrap();
+    let anchor = "    concurrency = \"parallel\"\n";
+    assert!(src.contains(anchor), "sample package.wcl drifted");
+    std::fs::write(
+        &pkg,
+        src.replacen(anchor, &format!("{anchor}    {lock_line}\n"), 1),
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn a_string_lock_is_accepted() {
+    let dir = sample_with_lock("lock = \"core-db\"");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+}
+
+#[test]
+fn a_non_string_lock_fails_validation() {
+    let dir = sample_with_lock("lock = 3");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("field 'lock' declared as utf8"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn an_empty_lock_fails_validation() {
+    let dir = sample_with_lock("lock = \"\"");
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(flat(&stderr).contains("empty lock name"), "{stderr}");
+}

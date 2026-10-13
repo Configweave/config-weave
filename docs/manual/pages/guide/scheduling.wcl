@@ -70,6 +70,10 @@ PROSE
 A step may tighten the class its resource declares, never loosen it. Setting `concurrency = "exclusive"` on a step whose resource is `parallel` serialises that one step without changing the resource definition. Setting `parallel` on a step whose resource is `exclusive` is a validation error. Tightening is what lets a playbook resolve a race the package author did not anticipate, for example two `weave.execute` steps that both write the same lock file.
 PROSE
 
+  p <<'PROSE'
+A class works on one resource type. When several resources contend for the same external lock, for example a package manager's `package`, `cache_updated` and `hold` resources all touching its database, the package gives each the same `lock = "<name>"`. The scheduler then runs at most one step holding that lock at a time, whatever its resource. A step starts only when both its class and its lock allow. A step waiting on a lock is passed over rather than blocking the queue, so unrelated ready steps keep dispatching in declaration order. Lock names are scoped to the package that declares them. A play with `parallel = false` needs neither, since it runs one step at a time.
+PROSE
+
   callout "Choose the loosest class that is correct" {
     kind = :tip
     body = "Because a step can only tighten, a resource that defaults to `exclusive` can never run two unrelated instances at once. Declare `parallel` unless the resource really does contend for one host-wide lock, and let the playbook tighten where it must."
@@ -84,6 +88,6 @@ PROSE
   h2 "Where to go next"
 
   p <<'PROSE'
-The three classes with their exact rules are tabulated in [package.wcl](ref_package). The `requires`, `condition` and `concurrency` fields on a step are in [playbook.wcl](ref_playbook). The `--jobs` and `--continue-on-error` flags are in [config-weave apply](cmd_apply).
+The three classes and lock groups with their exact rules are in [package.wcl](ref_package). The `requires`, `condition` and `concurrency` fields on a step are in [playbook.wcl](ref_playbook). The `--jobs` and `--continue-on-error` flags are in [config-weave apply](cmd_apply).
 PROSE
 }

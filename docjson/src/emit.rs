@@ -190,6 +190,7 @@ fn sync_resource(b: &mut Block, doc: &ResourceDoc, diags: &mut Diags) {
     set_or_insert_field(b, "description", string_literal_expr(&doc.description));
     set_or_insert_field(b, "script", string_literal_expr(&doc.script));
     set_opt_string(b, "concurrency", doc.concurrency.as_deref());
+    set_opt_string(b, "lock", doc.lock.as_deref());
     sync_params(b, &doc.params, diags);
 }
 
@@ -552,6 +553,25 @@ mod tests {
         );
         let twice = render_package(&once, &doc2).unwrap();
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn resource_lock_roundtrips() {
+        let source = "\
+package \"demo\" {
+  description = \"d\"
+
+  resource \"thing\" {
+    description = \"t\"
+    script = \"resources/thing.ws\"
+    lock = \"db\"
+  }
+}
+";
+        let doc = extract_package(&parse_for_edit(source, "t").unwrap()).unwrap();
+        assert_eq!(doc.resources[0].lock.as_deref(), Some("db"));
+        let once = render_package(source, &doc).unwrap();
+        assert!(once.contains("lock = \"db\""), "{once}");
     }
 
     /// A composite carries `arg` declarations and a body of steps, neither

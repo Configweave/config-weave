@@ -182,6 +182,7 @@ The script exports `check(params: Value)` and `apply(params: Value)`, each retur
 | `description` | string | yes | | One-line summary for the docs |
 | `script` | string | yes | | Path of the wscript file, relative to the package directory |
 | `concurrency` | string | no | `"parallel"` | Scheduling class: `parallel`, `exclusive` or `global` |
+| `lock` | string | no | none | Lock group, scoped to this package: at most one step of any resource here naming the same lock runs at a time |
 | `param` | block, repeatable | no | none | Declared parameters |
 
 ### param
@@ -322,6 +323,15 @@ This is the whole set.
 | `global` | The step runs alone. The scheduler drains every in-flight step, runs this one, then resumes. The reboot or kernel-update case. |
 
 Tighten-only rule: a step may declare a class tighter than its resource (`parallel` < `exclusive` < `global`), and an invocation's class tightens every step of a composite body, but a step declaring a looser class than its resource fails validation. Declare the loosest correct class on the resource, because a resource defaulting to `exclusive` can never run two unrelated instances at once. A step whose script touches a shared lock declares `concurrency = "exclusive"` on the step. The scheduler honours the class for every step of the resource; a play with `parallel = false` runs in declaration order instead.
+
+### Lock groups
+
+`exclusive` serialises one resource type. When several resources contend for one external lock (apk's or apt's database: `package`, `cache_updated`, `hold`), give each the same `lock = "<name>"`. At most one step holding a given lock runs at a time, across resource types. A step starts only when both its class and its lock allow; a step waiting on a lock does not hold up other ready steps. Lock names are scoped to the declaring package, so `linux_apk`'s `apk-db` and another package's `apk-db` are unrelated. `lock` is declared on the resource only; a step cannot set or change it, and a composite's inner steps take the lock of the resource they name.
+
+```wcl
+resource "package"       { description = "…" script = "resources/package.ws"       lock = "apk-db" }
+resource "cache_updated" { description = "…" script = "resources/cache_updated.ws" lock = "apk-db" }
+```
 
 ## The built-in `weave` package
 

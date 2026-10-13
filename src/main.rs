@@ -1246,6 +1246,7 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
                             "name": r.name,
                             "description": r.description,
                             "concurrency": r.concurrency.as_str(),
+                            "lock": r.lock,
                             "params": params_json(&r.params),
                         })
                     })

@@ -49,7 +49,7 @@ composites:
 SRC
   }
 
-  p "The JSON inventory. Each package entry carries `name`, `description`, `builtin`, `resources` (with `concurrency` and `params`), `composites`, `gatherers`, `tests` (with `machine_kind`, `source` and `group`) and `scenarios`."
+  p "The JSON inventory. Each package entry carries `name`, `description`, `builtin`, `resources` (with `concurrency`, `lock` and `params`), `composites`, `gatherers`, `tests` (with `machine_kind`, `source` and `group`) and `scenarios`."
 
   code console {
     source = <<'SRC'
