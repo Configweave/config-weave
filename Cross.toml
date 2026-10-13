@@ -11,3 +11,13 @@
 # glibc-incompatible between the two).
 [build.env]
 passthrough = ["CARGO_TARGET_DIR"]
+
+# cross 0.2.5's default images are Ubuntu 16.04/20.04, whose glibc is too old
+# to run build scripts compiled by current Rust (they need GLIBC_2.30+).
+# Pinned by digest to the Ubuntu 24.04 `main` images so a rebuild of the tag
+# cannot change the toolchain under a release.
+[target.x86_64-pc-windows-gnu]
+image = "ghcr.io/cross-rs/x86_64-pc-windows-gnu@sha256:b9a4da5b58b8b2ec090cadf7d47eae803ac43df29ccdf5933265921abf631db9"
+
+[target.x86_64-unknown-linux-musl]
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-musl@sha256:664b119c13833d07bbbfb60f17cfa6f8b4e7d730bf30aad31dd803887ecd7e39"
