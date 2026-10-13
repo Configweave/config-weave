@@ -124,6 +124,35 @@ fn feed_stdin(child: &mut Child, opts: &Opts) {
     }
 }
 
+/// Output is decoded lossily: a child that writes a stray non-UTF-8 byte
+/// (PowerShell 5.1 re-encodes native output to the OEM code page) loses
+/// that character to U+FFFD, not the whole stream.
+fn decode(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// Read `reader` line by line, decoding each lossily, with the line ending
+/// (`\n` or `\r\n`) stripped as `BufRead::lines` would.
+fn lossy_lines(reader: impl Read, mut each: impl FnMut(String)) {
+    let mut reader = BufReader::new(reader);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                if buf.last() == Some(&b'\n') {
+                    buf.pop();
+                    if buf.last() == Some(&b'\r') {
+                        buf.pop();
+                    }
+                }
+                each(decode(&buf));
+            }
+        }
+    }
+}
+
 fn run_captured(program: &str, args: &[String], opts: &Opts) -> Result<CmdOutput, String> {
     let mut child = build_command(program, args, opts)
         .spawn()
@@ -140,19 +169,19 @@ fn run_captured(program: &str, args: &[String], opts: &Opts) -> Result<CmdOutput
         .take()
         .ok_or_else(|| format!("cannot capture stderr of '{program}'"))?;
     let out_thread = std::thread::spawn(move || {
-        let mut buf = String::new();
-        let _ = stdout_pipe.read_to_string(&mut buf);
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buf);
         buf
     });
     let err_thread = std::thread::spawn(move || {
-        let mut buf = String::new();
-        let _ = stderr_pipe.read_to_string(&mut buf);
+        let mut buf = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buf);
         buf
     });
 
     let code = wait_with_timeout(&mut child, opts.timeout)?;
-    let stdout = out_thread.join().unwrap_or_default();
-    let stderr = err_thread.join().unwrap_or_default();
+    let stdout = decode(&out_thread.join().unwrap_or_default());
+    let stderr = decode(&err_thread.join().unwrap_or_default());
     Ok(CmdOutput {
         stdout,
         stderr,
@@ -181,17 +210,15 @@ fn run_streaming_impl(program: &str, args: &[String], opts: &Opts) -> Result<Cmd
     // stderr on a helper thread into a buffer, logging after.
     let err_thread = std::thread::spawn(move || {
         let mut lines = Vec::new();
-        for line in BufReader::new(stderr_pipe).lines().map_while(Result::ok) {
-            lines.push(line);
-        }
+        lossy_lines(stderr_pipe, |line| lines.push(line));
         lines
     });
     let mut stdout = String::new();
-    for line in BufReader::new(stdout_pipe).lines().map_while(Result::ok) {
+    lossy_lines(stdout_pipe, |line| {
         log::emit(log::Level::Info, &line);
         stdout.push_str(&line);
         stdout.push('\n');
-    }
+    });
     let code = wait_with_timeout(&mut child, opts.timeout)?;
     let mut stderr = String::new();
     for line in err_thread.join().unwrap_or_default() {
@@ -299,4 +326,30 @@ pub fn module() -> Module {
         },
     );
     m
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    // `\xff` is never valid UTF-8; the text either side of it must survive.
+    const INVALID: &str = r"printf 'before \377 after\n'; printf 'err \377 tail\n' >&2";
+
+    #[cfg(unix)]
+    #[test]
+    fn captured_output_survives_invalid_utf8() {
+        let out = run_captured("sh", &["-c".into(), INVALID.into()], &Opts::default()).unwrap();
+        assert_eq!(out.stdout, "before \u{FFFD} after\n");
+        assert_eq!(out.stderr, "err \u{FFFD} tail\n");
+        assert!(out.success);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn streamed_output_survives_invalid_utf8() {
+        let script = format!("{INVALID}; printf 'next line\\r\\n'");
+        let out = run_streaming_impl("sh", &["-c".into(), script], &Opts::default()).unwrap();
+        assert_eq!(out.stdout, "before \u{FFFD} after\nnext line\n");
+        assert_eq!(out.stderr, "err \u{FFFD} tail\n");
+    }
 }

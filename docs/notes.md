@@ -335,6 +335,11 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   the escape hatches when shell features are wanted. `powershell` tries
   `powershell` then `pwsh`, so it also works on Linux boxes with
   PowerShell Core.
+- `CmdOutput.stdout`/`stderr` are read as bytes and decoded with
+  `String::from_utf8_lossy` (streaming: per line). Windows PowerShell 5.1
+  re-encodes native output to the OEM code page, and a strict decode turned
+  one `é` into an empty stream. No raw-bytes field: no package needs one, and
+  the streaming variant only holds decoded lines.
 - The `data` module covers INI only; JSON, TOML and XML are wscript-std's
   `json`, `toml` and `xml` modules registered as-is (the PRD's "re-export,
   don't duplicate" note). `regex` is registered for the same reason: the

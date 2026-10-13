@@ -199,7 +199,9 @@ struct CmdOutput { stdout: string, stderr: string, code: int, success: bool }
 
 `success` is `true` when `code` is zero. A non-zero exit is `Ok` with
 `success == false`. `Err` means the command could not run: program not found,
-spawn failed, or the timeout fired.
+spawn failed, or the timeout fired. `stdout` and `stderr` are decoded as
+UTF-8 lossily: a byte that is not valid UTF-8 becomes U+FFFD and the rest of
+the stream survives.
 
 ```rust
 let out = shell::run("systemctl is-active nginx", Value::Null)?

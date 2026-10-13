@@ -47,7 +47,7 @@ struct CmdOutput {
 SRC
   }
 
-  p "The result of every function in this module. `success` is `true` when `code` is zero."
+  p "The result of every function in this module. `success` is `true` when `code` is zero. `stdout` and `stderr` are decoded as UTF-8 lossily: a byte that is not valid UTF-8, such as an OEM code-page character from Windows PowerShell 5.1, becomes U+FFFD and the rest of the stream survives."
 
   h2 "run"
 
