@@ -72,17 +72,10 @@ fn walk_item(item: &Item, out: &mut Vec<SecretCall>) {
             }
         }
         // Type-level declarations and connections hold no runtime value
-        // expressions a playbook author would put a secret in. Listed
-        // explicitly so an upstream `Item` addition fails the build.
-        Item::TypeDecl(_)
-        | Item::InterfaceDecl(_)
-        | Item::UnionDecl(_)
-        | Item::NamespaceDecl(_)
-        | Item::UseDecl(_)
-        | Item::SymbolSetDecl(_)
-        | Item::Import(_)
-        | Item::ConnectionDecl(_)
-        | Item::Connection(_) => {}
+        // expressions a playbook author would put a secret in. `Item` is
+        // `#[non_exhaustive]` upstream, so a new variant lands in this arm
+        // silently; review it on every wcl_lang bump.
+        _ => {}
     }
 }
 
@@ -216,10 +209,14 @@ fn walk_expr(expr: &Expr, out: &mut Vec<SecretCall>) {
         | Expr::Utf16(_)
         | Expr::Utf32(_)
         | Expr::Identifier(..)
-        | Expr::Symbol(_)
+        | Expr::Symbol(..)
         | Expr::None
         | Expr::SelfKw(_)
         | Expr::ParentKw(_) => {}
+        // `Expr` is `#[non_exhaustive]` upstream. A variant added later
+        // lands here unwalked, and a `secret(...)` nested in it would go
+        // unseen, so review this match on every wcl_lang bump.
+        _ => {}
     }
 }
 
