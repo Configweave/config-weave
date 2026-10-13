@@ -367,6 +367,22 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   the escape hatches when shell features are wanted. `powershell` tries
   `powershell` then `pwsh`, so it also works on Linux boxes with
   PowerShell Core.
+- `CmdOutput.stdout`/`stderr` are read as bytes and decoded with
+  `String::from_utf8_lossy` (streaming: per line). Windows PowerShell 5.1
+  re-encodes native output to the OEM code page, and a strict decode turned
+  one `é` into an empty stream. No raw-bytes field: no package needs one, and
+  the streaming variant only holds decoded lines.
+- `shell::powershell` keeps the script off the command line (secrets would
+  show in the process list, event 4688 and EDR). It writes the script plus
+  a trailer `if ($?) { exit 0 } else { exit 1 }` to `script.ps1` in a fresh
+  temp dir (Unix 0700/0600; Windows relies on the per-user temp ACL) and
+  runs `-Command ". ([scriptblock]::Create([IO.File]::ReadAllText('<path>')))"`,
+  prefixed `$input | ` when the script names `$input`. Measured against
+  `-Command <script>` on pwsh 7.4 this matches exit codes (explicit `exit`,
+  failing last statement, throw, parse error), output and stdin; `-File`
+  matched only with the trailer and is blocked by a GPO execution policy,
+  and `-Command -` mis-parses multi-line input and costs `opts.stdin`.
+  Windows PowerShell 5.1 is unmeasured.
 - The `data` module covers INI only; JSON, TOML and XML are wscript-std's
   `json`, `toml` and `xml` modules registered as-is (the PRD's "re-export,
   don't duplicate" note). `regex` is registered for the same reason: the

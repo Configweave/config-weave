@@ -181,7 +181,7 @@ command or script string and an options `Value`, and returns
 | `run` | `shell::run(cmd: string, opts: Value) -> Result[CmdOutput, string]` | splits `cmd` with shell-words and executes the program directly; globs, pipes and `$VAR` are literal text |
 | `run_streaming` | `shell::run_streaming(cmd: string, opts: Value) -> Result[CmdOutput, string]` | as `run`, and streams each line through `log` as it arrives: stdout at info, stderr at warn |
 | `bash` | `shell::bash(script: string, opts: Value) -> Result[CmdOutput, string]` | `bash -c`, falls back to `sh`; the way to use pipes, globs and expansion |
-| `powershell` | `shell::powershell(script: string, opts: Value) -> Result[CmdOutput, string]` | `powershell`, falls back to `pwsh`, with `-NoProfile -NonInteractive`; works on Linux with PowerShell Core |
+| `powershell` | `shell::powershell(script: string, opts: Value) -> Result[CmdOutput, string]` | `powershell`, falls back to `pwsh`, with `-NoProfile -NonInteractive`; works on Linux with PowerShell Core. The script goes through a private temp file (deleted after the run), never the command line; exit codes, output and stdin (`$input`, `[Console]::In`) behave as with `-Command` |
 
 ### Shell options map
 
@@ -202,7 +202,9 @@ struct CmdOutput { stdout: string, stderr: string, code: int, success: bool }
 
 `success` is `true` when `code` is zero. A non-zero exit is `Ok` with
 `success == false`. `Err` means the command could not run: program not found,
-spawn failed, or the timeout fired.
+spawn failed, or the timeout fired. `stdout` and `stderr` are decoded as
+UTF-8 lossily: a byte that is not valid UTF-8 becomes U+FFFD and the rest of
+the stream survives.
 
 ```rust
 let out = shell::run("systemctl is-active nginx", Value::Null)?
