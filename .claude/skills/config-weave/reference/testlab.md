@@ -267,7 +267,7 @@ The module exposes no free functions. It registers the handle types `Lab`, `Mach
 |---|---|---|
 | `name` | `() -> string` | the machine's declared name |
 | `exec` | `(cmd: string, args: List[string]) -> Result[ExecOut, string]` | run a program in the guest |
-| `powershell` | `(script: string) -> Result[ExecOut, string]` | run a script with `powershell -NoProfile -NonInteractive -Command` |
+| `powershell` | `(script: string) -> Result[ExecOut, string]` | run a script with `powershell -NoProfile -NonInteractive`; the script is copied in as a file, never put on the guest's command line, and deleted afterwards |
 | `copy_in` | `(host_path: string, dest: string) -> Result[unit, string]` | copy a host file or directory into the guest |
 | `reboot` | `() -> Result[unit, string]` | reboot the machine and wait for the guest agent again |
 | `wait_ready` | `(secs: int) -> Result[unit, string]` | wait up to `secs` seconds for the guest to answer |

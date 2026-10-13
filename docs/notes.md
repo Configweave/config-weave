@@ -710,6 +710,22 @@ below). Bindings fixed here:
   `windows_domain:ad_matrix` is the first: forest root (DNS) → member join
   → additional DC → second forest (own segment), all over real reboots.
   The two-VM + reboot integration is smoke-verified on vmlab with Alpine.
+- **`Machine.powershell` keeps the script off the guest's command line**,
+  for the reason `shell::powershell` does on a host (see "Host API
+  decisions"), and with the same pieces: `write_ps_script` (script +
+  `PS_EXIT_TRAILER`) and `powershell_argv` (bootstrap, quoting, the
+  `$input` rule) are `pub(crate)` in `hostapi::shell` and reused, not
+  restated. `Workdir::powershell` copies the file to `script.ps1` in a
+  fresh `scenario_work(machine, n)` dir (the apply counter, so it costs one
+  mkdir exec), execs the bootstrap with the guest path in backslash form,
+  then deletes the file (`del /f /q` / `rm -f`) whether the copy or exec
+  failed or not. The bootstrap takes the path as a string so a Windows
+  guest path never round-trips through a Linux host `Path`. A failed
+  delete never replaces the script's result: `PsRun` carries both, and the
+  host module prints a warning naming the file unless output is JSON
+  (`quiet`). The empty working dir is left behind like every other
+  scenario dir. Unit-tested through the fake transport only; not yet run
+  against a real Windows guest.
 
 ## wscript binding (PRD §6/§7)
 
