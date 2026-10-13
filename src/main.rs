@@ -292,7 +292,27 @@ enum SecretsCommand {
     },
 }
 
+/// Stack for the thread the CLI runs on. Matches the usual 8 MiB main
+/// thread limit.
+const MAIN_STACK: usize = 8 << 20;
+
+/// Runs the CLI on a spawned thread with a known stack size. wcl_lang's
+/// parser and evaluator refuse to recurse when `stacker` reports under
+/// 256 KiB of stack left. On a static musl build the main thread reports
+/// only what is mapped so far (about 125 KiB at startup), so every parse
+/// on the main thread fails as "nesting too deep". A spawned thread with
+/// an explicit size reports its real headroom on every target.
 fn main() -> ExitCode {
+    std::thread::Builder::new()
+        .name("main".into())
+        .stack_size(MAIN_STACK)
+        .spawn(run_cli)
+        .expect("spawn the CLI thread")
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+fn run_cli() -> ExitCode {
     let cli = Cli::parse();
     logging::set_verbosity(cli.verbose);
     // Held for the whole process so buffered NDJSON lines flush on exit.
