@@ -47,6 +47,7 @@ This is the whole set of registered modules.
 | `shell` | run external commands | all | config-weave (replaces wscript-std `process`) |
 | `http` | HTTP client (rustls, no system TLS) | all | config-weave |
 | `hash` | SHA-256, SHA-512, MD5 digests | all | config-weave |
+| `encoding` | base64, UTF-8 and UTF-16LE bytes | all | config-weave |
 | `archive` | extract zip and tar.gz | all | config-weave |
 | `env` | process environment and host identity | all | config-weave |
 | `sys` | OS and hardware facts | all | config-weave |
@@ -64,7 +65,7 @@ This is the whole set of registered modules.
 | `testlab` | scenario driver handles (`Lab`, `Machine`) | scenario scripts only | config-weave |
 
 `testlab` is registered only in the context scenario driver scripts compile
-and run against. Every other script sees the twenty modules above it.
+and run against. Every other script sees the twenty-one modules above it.
 
 ### The Value type
 
@@ -250,6 +251,25 @@ the whole surface.
 | `sha512_file` | `hash::sha512_file(path: string) -> Result[string, string]` | |
 | `md5` | `hash::md5(s: string) -> string` | legacy checksum interop only |
 | `md5_file` | `hash::md5_file(path: string) -> Result[string, string]` | legacy checksum interop only |
+
+## encoding
+
+`use encoding`. Converts between strings, bytes and base64. Cross-platform.
+Bytes are `List[int]`, as in `fs::read_bytes`/`fs::write_bytes`; a byte argument
+with an element outside `0..=255` is an `Err`. This is the whole surface.
+
+| Function | Signature | Notes |
+|---|---|---|
+| `base64_encode` | `encoding::base64_encode(bytes: List[int]) -> Result[string, string]` | standard alphabet, `=` padded |
+| `base64_decode` | `encoding::base64_decode(s: string) -> Result[List[int], string]` | standard alphabet, padded; surrounding whitespace ignored |
+| `utf8` | `encoding::utf8(s: string) -> List[int]` | a string's UTF-8 bytes; base64 a string with `base64_encode(utf8(s))` |
+| `from_utf8` | `encoding::from_utf8(bytes: List[int]) -> Result[string, string]` | `Err` on invalid UTF-8 |
+| `utf16le` | `encoding::utf16le(s: string) -> List[int]` | UTF-16 little-endian, no BOM |
+
+```rust
+// Windows unattend hidden password: base64(UTF-16LE(password + element name))
+let hidden = encoding::base64_encode(encoding::utf16le(password + "Password"))?
+```
 
 ## archive
 

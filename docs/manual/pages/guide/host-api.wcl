@@ -35,6 +35,7 @@ PROSE
     li "[shell](ref_mod_shell) runs commands. `shell::run` splits its command with shell-words and executes the program directly, with no shell interpretation. `bash` and `powershell` are the escape hatches for shell features; `powershell` tries `powershell` and then `pwsh`, so it also works on Linux with PowerShell Core."
     li "[http](ref_mod_http) fetches and downloads over HTTP."
     li "[hash](ref_mod_hash) computes digests of strings and files."
+    li "[encoding](ref_mod_encoding) converts between strings, bytes and base64, including the UTF-16LE form Windows uses."
     li "[archive](ref_mod_archive) extracts archives."
     li "[env](ref_mod_env) reads and writes environment variables."
     li "[sys](ref_mod_sys) reports the platform: family, OS name, CPU count and similar facts."

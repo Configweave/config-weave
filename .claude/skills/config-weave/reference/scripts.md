@@ -246,11 +246,12 @@ of any other name is a compile error at validation.
 | `regex` | wscript-std | Pattern matching. Every function takes `(pattern, text)` in that order. |
 | `time` | wscript-std | Clock and timestamp formatting. |
 | `log` | config-weave | Structured output at a level. |
-| `fs` | config-weave | Files and directories, metadata, glob, temp files, symlinks. |
+| `fs` | config-weave | Files and directories, metadata, glob, temp files, symlinks, ownership. |
 | `path` | config-weave | Join, split, normalise paths. |
 | `shell` | config-weave | `run` (no shell interpretation), `bash`, `powershell`. |
 | `http` | config-weave | Fetch and download. |
 | `hash` | config-weave | Digests of strings and files. |
+| `encoding` | config-weave | Base64, UTF-8 and UTF-16LE conversions over `List[int]` bytes. |
 | `archive` | config-weave | Extract archives. |
 | `env` | config-weave | Environment variables. |
 | `sys` | config-weave | Platform facts: family, OS name, CPU count. |

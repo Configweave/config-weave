@@ -1,0 +1,62 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_encoding {
+  sites = [:manual]
+  title = "encoding module"
+
+  chapter_header "encoding module" {
+    kicker       = "Reference · reference"
+    reading_time = "1 min read"
+    updated      = "2026-10-13"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use encoding` converts between strings, bytes and base64. Bytes are a
+`List[int]`, the same representation `fs::read_bytes` returns and
+`fs::write_bytes` takes, so the two modules compose. A function that takes
+bytes returns `Err` when any element lies outside `0..=255`.
+PROSE
+
+  h2 "base64_encode and base64_decode"
+
+  code rust {
+    source = <<'SRC'
+encoding::base64_encode(bytes: List[int]) -> Result[string, string]
+encoding::base64_decode(s: string) -> Result[List[int], string]
+SRC
+  }
+
+  p "Both use the standard base64 alphabet with `=` padding. `base64_decode` ignores leading and trailing whitespace and returns `Err` for any other character outside the alphabet."
+
+  h2 "utf8 and from_utf8"
+
+  code rust {
+    source = <<'SRC'
+encoding::utf8(s: string) -> List[int]
+encoding::from_utf8(bytes: List[int]) -> Result[string, string]
+SRC
+  }
+
+  p "`utf8` returns a string's UTF-8 bytes. `from_utf8` decodes bytes into a string and returns `Err` when they are not valid UTF-8. To base64 a string, encode it to bytes first."
+
+  h2 "utf16le"
+
+  code rust {
+    source = <<'SRC'
+encoding::utf16le(s: string) -> List[int]
+SRC
+  }
+
+  p "Returns a string's UTF-16 little-endian bytes, with no byte order mark. Windows APIs and file formats that store wide strings use this form."
+
+  p "A Windows unattend file hides a password as `base64(UTF-16LE(password + suffix))`, where the suffix is the element name, such as `Password` or `AdministratorPassword`:"
+
+  code rust {
+    source = <<'SRC'
+use encoding
+
+let hidden = encoding::base64_encode(encoding::utf16le(password + "Password"))?
+// write it with <PlainText>false</PlainText>
+SRC
+  }
+}

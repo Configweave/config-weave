@@ -7,6 +7,7 @@
 pub mod archive;
 pub mod com;
 pub mod data;
+pub mod encoding;
 pub mod env;
 pub mod fs;
 pub mod hash;
@@ -54,6 +55,7 @@ pub fn context() -> Context {
         .module(shell::module())
         .module(http::module())
         .module(hash::module())
+        .module(encoding::module())
         .module(archive::module())
         .module(env::module())
         .module(sys::module())
