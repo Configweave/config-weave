@@ -5,8 +5,8 @@ page ref_mod_service {
 
   chapter_header "service module (Windows)" {
     kicker       = "Reference · reference"
-    reading_time = "1 min read"
-    updated      = "2026-09-02"
+    reading_time = "2 min read"
+    updated      = "2026-10-13"
     version      = "config-weave 0.1.0"
   }
 
@@ -30,16 +30,22 @@ SRC
 
   p "The current state of a service: `running`, `stopped`, `start_pending`, `stop_pending`, `paused`, `pause_pending` or `continue_pending`. A state the module does not recognise is reported as `unknown`."
 
-  h2 "start and stop"
+  h2 "start, stop and restart"
 
   code rust {
     source = <<'SRC'
 service::start(name: string) -> Result[unit, string]
 service::stop(name: string) -> Result[unit, string]
+service::restart(name: string) -> Result[unit, string]
+service::start_with(name: string, opts: Value) -> Result[unit, string]
+service::stop_with(name: string, opts: Value) -> Result[unit, string]
+service::restart_with(name: string, opts: Value) -> Result[unit, string]
 SRC
   }
 
-  p "Starts or stops a service. Each is a no-op when the service is already in the target state."
+  p "Starts, stops or restarts a service and returns once it has reached the target state, so a re-check straight after apply sees `running` or `stopped`, never a `*_pending` state. Each first waits out any pending state. `start` on a `paused` service continues it. `start` on a running service and `stop` on a stopped one are no-ops. `restart` stops the service, waits, starts it and waits again."
+
+  p "The wait polls the service at a tenth of the wait hint it reports, between 100 ms and 1 s, for up to 60 seconds. The `_with` forms take an options map whose only key is `timeout` (seconds, int or float; in `restart_with` it applies to each phase); `Value::Null` keeps the default. On timeout the call returns an `Err` naming the last state it saw. If the service drops back to its starting state after going pending (for example it crashes while starting), the call fails at once."
 
   h2 "set_startup and startup"
 
@@ -50,7 +56,7 @@ service::startup(name: string) -> Result[string, string]
 SRC
   }
 
-  p "`set_startup` sets the startup type to `automatic`, `manual` or `disabled`. `startup` reads it back; a type outside those three is reported as `other`."
+  p "`set_startup` sets the startup type to `automatic`, `automatic_delayed`, `manual` or `disabled`. `automatic_delayed` is Automatic (Delayed Start); setting plain `automatic` clears the delayed flag. `startup` reads the type back as one of those four, or `boot` or `system` for driver start types, or `other` for anything else."
 
   code rust {
     source = <<'SRC'

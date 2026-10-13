@@ -443,10 +443,18 @@ surface.
 | Function | Signature | Notes |
 |---|---|---|
 | `status` | `service::status(name: string) -> Result[string, string]` | one of the status strings below |
-| `start` | `service::start(name: string) -> Result[unit, string]` | no-op when already running |
-| `stop` | `service::stop(name: string) -> Result[unit, string]` | no-op when already stopped |
-| `set_startup` | `service::set_startup(name: string, mode: string) -> Result[unit, string]` | `mode` is `automatic`, `manual` or `disabled`; anything else is an `Err` |
-| `startup` | `service::startup(name: string) -> Result[string, string]` | `automatic`, `manual`, `disabled`, or `other` for any other startup type |
+| `start` | `service::start(name: string) -> Result[unit, string]` | waits (60s) until `running`; waits out pending states first, continues a `paused` service, no-op when already running |
+| `stop` | `service::stop(name: string) -> Result[unit, string]` | waits (60s) until `stopped`; waits out pending states first, no-op when already stopped |
+| `restart` | `service::restart(name: string) -> Result[unit, string]` | `stop` then `start`, each waiting |
+| `start_with` | `service::start_with(name: string, opts: Value) -> Result[unit, string]` | as `start`; `opts` is `Value::Null` or `{timeout: secs}` |
+| `stop_with` | `service::stop_with(name: string, opts: Value) -> Result[unit, string]` | as `stop`, same `opts` |
+| `restart_with` | `service::restart_with(name: string, opts: Value) -> Result[unit, string]` | as `restart`; `timeout` applies to each phase |
+| `set_startup` | `service::set_startup(name: string, mode: string) -> Result[unit, string]` | `mode` is `automatic`, `automatic_delayed`, `manual` or `disabled`; anything else is an `Err`. `automatic` clears the delayed-start flag |
+| `startup` | `service::startup(name: string) -> Result[string, string]` | `automatic`, `automatic_delayed`, `manual`, `disabled`, `boot`, `system`, or `other` for any other startup type |
+
+A wait that runs out returns an `Err` naming the last state seen. A service
+that goes pending and then drops back (for example it crashes while starting)
+fails at once.
 
 ### Service status strings
 
