@@ -6,3 +6,4 @@ dist/
 target-cross-win/
 # Ticket worktrees (`.tree/<ticket-id>`) live inside the repo.
 .tree/
+.scratch/
