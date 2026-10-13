@@ -396,6 +396,11 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   (`{view}`), `service::start_with` / `stop_with` (`{timeout}`). A
   function added new takes `opts` from the start (`registry::read_typed`,
   `service::restart`). Unknown option keys are an `Err`.
+- `registry::read_typed` returns `{kind, data}` with `kind` from `write`'s
+  vocabulary (`sz`, `expand_sz`, `dword`, `qword`, `multi_sz`, `binary`,
+  `none`), so a package can detect a value stored with the wrong kind.
+  Binary data (REG_BINARY, REG_NONE) uses the `fs::read_bytes` shape, a
+  list of byte ints.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:
