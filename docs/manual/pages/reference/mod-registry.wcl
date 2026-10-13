@@ -37,7 +37,20 @@ SRC
       | "REG_SZ, REG_EXPAND_SZ" | "`Value::String`" |
       | "REG_DWORD, REG_QWORD" | "`Value::Int`" |
       | "REG_MULTI_SZ" | "`Value::List` of `Value::String`" |
+      | "REG_BINARY, REG_NONE" | "`Value::List` of `Value::Int`, one per byte (the `fs::read_bytes` shape)" |
   }
+
+  p "Any other registry type, such as REG_LINK, is an `Err`."
+
+  h2 "read_typed"
+
+  code rust {
+    source = <<'SRC'
+registry::read_typed(key: string, name: string, opts: Value) -> Result[Option[Value], string]
+SRC
+  }
+
+  p "Reads a value together with its kind. It returns `None` when the key or the value is absent, and otherwise a map `{kind, data}`. `kind` is the name `write` accepts: `sz`, `expand_sz`, `dword`, `qword`, `multi_sz`, `binary` or `none`. `data` has the shape `read` returns. Use `read_typed` when a REG_SZ must be told apart from a REG_EXPAND_SZ, or a REG_DWORD from a REG_QWORD. `opts` is the view map described under Registry views below; pass `Value::Null` for the native view."
 
   h2 "write"
 
@@ -47,7 +60,7 @@ registry::write(key: string, name: string, value: Value, kind: string) -> Result
 SRC
   }
 
-  p "Writes a value. `kind` selects the registry type and must match the shape of `value`: `sz` and `expand_sz` take a string, `dword` and `qword` take an int, and `multi_sz` takes a list of strings."
+  p "Writes a value. `kind` selects the registry type and must match the shape of `value`: `sz` and `expand_sz` take a string, `dword` and `qword` take an int, `multi_sz` takes a list of strings, and `binary` and `none` take a list of byte ints from 0 to 255."
 
   h2 "delete_value"
 
@@ -79,6 +92,21 @@ SRC
   }
 
   p "Whether a key exists."
+
+  h2 "Registry views"
+
+  code rust {
+    source = <<'SRC'
+registry::read_with(key: string, name: string, opts: Value) -> Result[Option[Value], string]
+registry::write_with(key: string, name: string, value: Value, kind: string, opts: Value) -> Result[unit, string]
+registry::delete_value_with(key: string, name: string, opts: Value) -> Result[unit, string]
+registry::create_key_with(key: string, opts: Value) -> Result[unit, string]
+registry::delete_key_with(key: string, opts: Value) -> Result[unit, string]
+registry::key_exists_with(key: string, opts: Value) -> Result[bool, string]
+SRC
+  }
+
+  p "Each `_with` function behaves like the function without the suffix and takes a trailing `opts` map. The only option is `view`. `\"native\"` (the default) uses the process's own view. `\"wow64_32\"` forces the 32-bit view (`WOW6432Node`), and `\"wow64_64\"` forces the 64-bit view. `read_typed` takes the same map. Pass `Value::Null` for the defaults. An unknown option or view is an `Err`. The functions without the suffix always use the native view."
 
   code rust {
     source = <<'SRC'

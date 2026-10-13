@@ -436,11 +436,24 @@ prefix is case-insensitive and accepts the short or the long name
 | Function | Signature | Notes |
 |---|---|---|
 | `read` | `registry::read(key: string, name: string) -> Result[Option[Value], string]` | `None` when the key or the value is absent; `Value` typed by kind (below); a kind outside the table is an `Err` |
+| `read_typed` | `registry::read_typed(key: string, name: string, opts: Value) -> Result[Option[Value], string]` | `None` when absent, else a map `{kind, data}`: `kind` is the `write` kind name (table below), `data` is what `read` returns; tells `sz` from `expand_sz` and `dword` from `qword` |
 | `write` | `registry::write(key: string, name: string, value: Value, kind: string) -> Result[unit, string]` | `kind` must match the shape of `value` |
 | `delete_value` | `registry::delete_value(key: string, name: string) -> Result[unit, string]` | one value |
 | `create_key` | `registry::create_key(key: string) -> Result[unit, string]` | creates missing parents |
 | `delete_key` | `registry::delete_key(key: string) -> Result[unit, string]` | the key and its whole subtree |
 | `key_exists` | `registry::key_exists(key: string) -> Result[bool, string]` | |
+| `read_with` | `registry::read_with(key: string, name: string, opts: Value) -> Result[Option[Value], string]` | `read` in the view `opts` selects |
+| `write_with` | `registry::write_with(key: string, name: string, value: Value, kind: string, opts: Value) -> Result[unit, string]` | |
+| `delete_value_with` | `registry::delete_value_with(key: string, name: string, opts: Value) -> Result[unit, string]` | |
+| `create_key_with` | `registry::create_key_with(key: string, opts: Value) -> Result[unit, string]` | |
+| `delete_key_with` | `registry::delete_key_with(key: string, opts: Value) -> Result[unit, string]` | |
+| `key_exists_with` | `registry::key_exists_with(key: string, opts: Value) -> Result[bool, string]` | |
+
+`opts` (on `read_typed` and every `_with` function) is `Value::Null` or a
+map with one key, `view`: `"native"` (default, the process's own view),
+`"wow64_32"` (the 32-bit `WOW6432Node` view) or `"wow64_64"` (the 64-bit
+view). An unknown key or view is an `Err`. The functions without `_with`
+always use the native view.
 
 ### Registry value kinds
 
@@ -451,9 +464,14 @@ prefix is case-insensitive and accepts the short or the long name
 | `dword` | REG_DWORD | `Value::Int` |
 | `qword` | REG_QWORD | `Value::Int` |
 | `multi_sz` | REG_MULTI_SZ | `Value::List` of `Value::String` |
+| `binary` | REG_BINARY | `Value::List` of `Value::Int`, one per byte, 0-255 (the `fs::read_bytes` shape) |
+| `none` | REG_NONE | as `binary` |
 
 `read` returns the same shapes: REG_SZ and REG_EXPAND_SZ as `Value::String`,
-REG_DWORD and REG_QWORD as `Value::Int`, REG_MULTI_SZ as a list of strings.
+REG_DWORD and REG_QWORD as `Value::Int`, REG_MULTI_SZ as a list of strings,
+REG_BINARY and REG_NONE as a list of byte ints. Any other registry type
+(REG_LINK, ...) is an `Err`. `read` cannot tell REG_SZ from REG_EXPAND_SZ or
+REG_DWORD from REG_QWORD; `read_typed` can.
 
 ## service (Windows only)
 
