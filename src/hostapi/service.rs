@@ -82,7 +82,7 @@ fn parse_startup(mode: &str) -> Result<(u32, Option<bool>), String> {
     })
 }
 
-/// The `opts` argument of `start_with`/`stop_with`/`restart_with`: null or
+/// The `opts` argument of `start_with`/`stop_with`/`restart`: null or
 /// a map with `timeout` (seconds).
 fn parse_timeout(opts: &DynValue) -> Result<Duration, String> {
     let mut out = DEFAULT_TIMEOUT;
@@ -322,21 +322,13 @@ pub fn module() -> Module {
         },
     );
 
-    m.doc_next("Stop then start a service, waiting (60s each) for each state");
-    #[cfg(windows)]
-    m.fn_("restart", |name: &str| -> Result<(), String> {
-        win::converge(name, Target::Stopped, DEFAULT_TIMEOUT)?;
-        win::converge(name, Target::Running, DEFAULT_TIMEOUT)
-    });
-    #[cfg(not(windows))]
-    m.fn_("restart", |_: &str| -> Result<(), String> {
-        Err(NOT_WINDOWS.to_string())
-    });
-
-    m.doc_next("Like restart. opts: timeout (secs per phase, default 60)");
+    m.doc_next(
+        "Stop then start a service, waiting for each state. opts: timeout (secs per phase, \
+         default 60)",
+    );
     #[cfg(windows)]
     m.fn_(
-        "restart_with",
+        "restart",
         |name: &str, opts: DynValue| -> Result<(), String> {
             let timeout = parse_timeout(&opts)?;
             win::converge(name, Target::Stopped, timeout)?;
@@ -344,13 +336,10 @@ pub fn module() -> Module {
         },
     );
     #[cfg(not(windows))]
-    m.fn_(
-        "restart_with",
-        |_: &str, opts: DynValue| -> Result<(), String> {
-            parse_timeout(&opts)?;
-            Err(NOT_WINDOWS.to_string())
-        },
-    );
+    m.fn_("restart", |_: &str, opts: DynValue| -> Result<(), String> {
+        parse_timeout(&opts)?;
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m.doc_next("Set startup type: automatic | automatic_delayed | manual | disabled");
     #[cfg(windows)]

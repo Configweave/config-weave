@@ -393,9 +393,9 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   options to an existing function would break every caller, so it gets a
   `_with` sibling that takes the trailing `opts` and the original keeps
   its signature and default behaviour: `registry::read_with` and friends
-  (`{view}`), `service::start_with` / `stop_with` / `restart_with`
-  (`{timeout}`). A function added new takes `opts` from the start
-  (`registry::read_typed`). Unknown option keys are an `Err`.
+  (`{view}`), `service::start_with` / `stop_with` (`{timeout}`). A
+  function added new takes `opts` from the start (`registry::read_typed`,
+  `service::restart`). Unknown option keys are an `Err`.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:

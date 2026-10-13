@@ -36,16 +36,15 @@ SRC
     source = <<'SRC'
 service::start(name: string) -> Result[unit, string]
 service::stop(name: string) -> Result[unit, string]
-service::restart(name: string) -> Result[unit, string]
+service::restart(name: string, opts: Value) -> Result[unit, string]
 service::start_with(name: string, opts: Value) -> Result[unit, string]
 service::stop_with(name: string, opts: Value) -> Result[unit, string]
-service::restart_with(name: string, opts: Value) -> Result[unit, string]
 SRC
   }
 
   p "Starts, stops or restarts a service and returns once it has reached the target state, so a re-check straight after apply sees `running` or `stopped`, never a `*_pending` state. Each first waits out any pending state. `start` on a `paused` service continues it. `start` on a running service and `stop` on a stopped one are no-ops. `restart` stops the service, waits, starts it and waits again."
 
-  p "The wait polls the service at a tenth of the wait hint it reports, between 100 ms and 1 s, for up to 60 seconds. The `_with` forms take an options map whose only key is `timeout` (seconds, int or float; in `restart_with` it applies to each phase); `Value::Null` keeps the default. On timeout the call returns an `Err` naming the last state it saw. If the service drops back to its starting state after going pending (for example it crashes while starting), the call fails at once."
+  p "The wait polls the service at a tenth of the wait hint it reports, between 100 ms and 1 s, for up to 60 seconds. `restart` and the `_with` forms take an options map whose only key is `timeout` (seconds, int or float; in `restart` it applies to each phase); `Value::Null` keeps the default. On timeout the call returns an `Err` naming the last state it saw. If the service drops back to its starting state after going pending (for example it crashes while starting), the call fails at once."
 
   h2 "set_startup and startup"
 
