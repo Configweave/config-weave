@@ -184,6 +184,7 @@ Every instance is a vmlab machine. The `image` or `template` field is the whole 
 | Default memory | 256MiB, allocated on demand | The template's own sizing |
 | `setup` shell | `sh -c` | `sh -c` on Linux, `cmd /C` on Windows |
 | Requirement | An OCI image with a shell; vmlab pulls it | The template ships the vmlab guest agent, which the runner polls for readiness (up to 300s) |
+| `vmlab up` limit | 5 min, then killed, torn down, group errors | 30 min, then the same (scenario machines too) |
 | Windows extra | n/a | The agent reports `windows`; a Windows build of config-weave is required (see Binary resolution) |
 | Payload | Mounted at `/weave` | Copied to `/weave` (`C:/weave` on Windows) |
 

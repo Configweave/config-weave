@@ -623,8 +623,15 @@ below). Bindings fixed here:
 - **The backend.** CLI discovery `$CONFIG_WEAVE_VMLAB_CMD` → `vmlab`
   (probed with `--version`). Each provision writes a one-machine lab into
   a tempdir whose unique name is the lab name (`cw-test-…`) and runs
-  `vmlab up` there. Teardown = `vmlab destroy` + tempdir removal;
-  `--keep` leaves the lab up and reports its directory so `vmlab exec` /
+  `vmlab up` there, under a deadline — 30 min for a VM, 5 for a container
+  (`VM_UP_DEADLINE`/`CONTAINER_UP_DEADLINE`; a scenario's `up <machine>`
+  takes the VM one). A Windows VM stuck at boot used to hold the run for
+  as long as it stayed stuck. On expiry `backend::run_cmd_deadline` kills
+  the vmlab child process (not its process group, so whatever lab daemon
+  it started is left for `destroy` to talk to), and the error names the
+  machine, its target and the limit; the usual teardown path then runs,
+  so `--keep` still keeps it. Teardown = `vmlab destroy` + tempdir
+  removal; `--keep` leaves the lab up and reports its directory so `vmlab exec` /
   `vmlab container exec` / `vmlab console` work post-mortem. A group
   provisions **one** instance and runs all its tests inside it
   sequentially (the big win — boot is paid once per group, not per test).

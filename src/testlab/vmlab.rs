@@ -38,6 +38,15 @@ const READY_DEADLINE: Duration = Duration::from_secs(300);
 /// next boot and a Windows guest can take several minutes to answer again.
 const REBOOT_DEADLINE: Duration = Duration::from_secs(900);
 
+/// How long `vmlab up` may take to bring a VM up before the run gives up on
+/// it. A Windows guest stuck at boot otherwise holds the whole run for as
+/// long as it stays stuck; a healthy cold Windows boot fits well inside.
+const VM_UP_DEADLINE: Duration = Duration::from_secs(30 * 60);
+
+/// As [`VM_UP_DEADLINE`], for a container: an image pull plus a micro-VM
+/// boot, normally seconds.
+const CONTAINER_UP_DEADLINE: Duration = Duration::from_secs(5 * 60);
+
 /// Pause between readiness attempts while the agent is still coming up.
 const READY_POLL: Duration = Duration::from_secs(3);
 
@@ -62,6 +71,10 @@ pub struct VmlabBackend {
     cmd: String,
     /// Suppress stderr progress lines (JSON output mode).
     quiet: bool,
+    /// How long `vmlab up` may run for a VM / a container. The constants
+    /// in production; a test shortens them.
+    vm_up: Duration,
+    container_up: Duration,
 }
 
 impl VmlabBackend {
@@ -80,7 +93,12 @@ impl VmlabBackend {
                 )
             },
         )?;
-        Ok(VmlabBackend { cmd, quiet })
+        Ok(VmlabBackend {
+            cmd,
+            quiet,
+            vm_up: VM_UP_DEADLINE,
+            container_up: CONTAINER_UP_DEADLINE,
+        })
     }
 
     /// Provision a running instance of `target`, ready for `exec`. With
@@ -127,7 +145,21 @@ impl VmlabBackend {
         if !self.quiet {
             eprintln!("bringing up lab {} ({target})…", instance.lab);
         }
-        let up = instance.run(&["up"])?;
+        let deadline = match target {
+            TestTarget::Vm(_) => self.vm_up,
+            TestTarget::Container(_) => self.container_up,
+        };
+        let up = match instance.run_deadline(&["up"], deadline)? {
+            Some(up) => up,
+            None => {
+                let _ = instance.teardown();
+                return Err(Diag::bare(up_timed_out(
+                    MACHINE,
+                    &target.to_string(),
+                    deadline,
+                )));
+            }
+        };
         if !up.status.success() {
             let msg = format!("cannot bring up a {target}: {}", stderr_tail(&up));
             let _ = instance.teardown();
@@ -185,8 +217,25 @@ impl VmlabBackend {
             lab: lab_name,
             keep,
             gone: false,
+            vm_up: self.vm_up,
         })
     }
+}
+
+/// Why a provision gave up: which machine, made from what, and how long
+/// it was given. The lab is torn down by the caller's usual path.
+fn up_timed_out(machine: &str, what: &str, deadline: Duration) -> String {
+    let secs = deadline.as_secs();
+    let limit = if secs >= 60 && secs.is_multiple_of(60) {
+        format!("{} min", secs / 60)
+    } else {
+        format!("{}s", deadline.as_secs_f64())
+    };
+    format!(
+        "`vmlab up` for machine '{machine}' ({what}) did not finish within {limit}; \
+         killed it — the guest is likely stuck at boot (`--keep` and `vmlab console` \
+         show where)"
+    )
 }
 
 /// The lab definition for one disposable instance. A container mounts the
@@ -277,6 +326,8 @@ pub struct VmlabLab {
     lab: String,
     keep: bool,
     gone: bool,
+    /// How long `vmlab up <machine>` may run; scenario machines are VMs.
+    vm_up: Duration,
 }
 
 impl VmlabLab {
@@ -294,7 +345,13 @@ impl VmlabLab {
         }
         // The machine is declared in the lab file, so `up <name>` ensures
         // the daemon (full config) and starts just this one — no reload.
-        let up = self.run(&["up", name])?;
+        let up = super::backend::run_cmd_deadline(
+            &self.cmd,
+            &["up", name],
+            Some(&self.dir),
+            self.vm_up,
+        )?
+        .ok_or_else(|| Diag::bare(up_timed_out(name, &format!("lab {}", self.lab), self.vm_up)))?;
         if !up.status.success() {
             return Err(Diag::bare(format!(
                 "cannot bring up machine '{name}': {}",
@@ -397,6 +454,11 @@ impl super::backend::Transport for VmlabInstance {
 impl VmlabInstance {
     fn run(&self, args: &[&str]) -> Result<Output, Diag> {
         super::backend::run_cmd(&self.cmd, args, Some(&self.dir))
+    }
+
+    /// As `run`, killed after `deadline`; `None` when it was.
+    fn run_deadline(&self, args: &[&str], deadline: Duration) -> Result<Option<Output>, Diag> {
+        super::backend::run_cmd_deadline(&self.cmd, args, Some(&self.dir), deadline)
     }
 
     /// Whether this handle addresses a VM (as opposed to a container).
@@ -703,6 +765,142 @@ mod tests {
 
         let vm = lab_wcl("l", &TestTarget::Vm("x86_64/t".into()), Some("8GiB"));
         assert!(vm.contains("memory = 8GiB"), "{vm}");
+    }
+
+    /// A stand-in vmlab CLI whose `up` never finishes. Every call appends
+    /// its working directory and argv to `log`, so a test can see what was
+    /// asked of it and in which lab.
+    #[cfg(unix)]
+    fn hanging_vmlab(dir: &Path) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let log = dir.join("calls.log");
+        let script = dir.join("vmlab");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$(pwd) $*\" >> '{}'\n\
+                 case \"$1\" in up) exec sleep 60 ;; esac\nexit 0\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (script, log)
+    }
+
+    #[cfg(unix)]
+    fn backend(cmd: &Path, vm_up: Duration, container_up: Duration) -> VmlabBackend {
+        VmlabBackend {
+            cmd: cmd.display().to_string(),
+            quiet: true,
+            vm_up,
+            container_up,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_vm_that_never_comes_up_is_killed_named_and_torn_down() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cmd, log) = hanging_vmlab(tmp.path());
+        let b = backend(&cmd, Duration::from_millis(500), Duration::from_secs(60));
+
+        let start = Instant::now();
+        let err = b
+            .provision(
+                &TestTarget::Vm("x86_64/windows-server-2025".into()),
+                None,
+                false,
+            )
+            .err()
+            .expect("a hung `up` must fail the provision");
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "{:?}",
+            start.elapsed()
+        );
+
+        assert!(err.message.contains("machine 'box'"), "{}", err.message);
+        assert!(
+            err.message.contains("vm x86_64/windows-server-2025"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("within 0.5s"), "{}", err.message);
+
+        // The existing teardown ran: `destroy` in the same lab, whose
+        // directory is then gone.
+        let calls = std::fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = calls.lines().collect();
+        assert_eq!(lines.len(), 2, "{calls}");
+        let (lab_dir, verb) = lines[0].rsplit_once(' ').unwrap();
+        assert_eq!(verb, "up");
+        assert_eq!(lines[1], format!("{lab_dir} destroy"));
+        assert!(!Path::new(lab_dir).exists(), "lab dir removed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_container_gets_its_own_deadline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cmd, log) = hanging_vmlab(tmp.path());
+        // Only the container deadline is short, so finishing quickly proves
+        // that is the one applied.
+        let b = backend(&cmd, Duration::from_secs(60), Duration::from_millis(500));
+
+        let start = Instant::now();
+        let err = b
+            .provision(&TestTarget::Container("debian:12".into()), None, false)
+            .err()
+            .expect("a hung `up` must fail the provision");
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(
+            err.message.contains("container debian:12"),
+            "{}",
+            err.message
+        );
+        assert!(std::fs::read_to_string(&log).unwrap().contains(" destroy"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_scenario_machine_that_never_comes_up_names_itself_and_the_lab_still_tears_down() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cmd, log) = hanging_vmlab(tmp.path());
+        let b = backend(&cmd, Duration::from_millis(500), Duration::from_secs(60));
+        let lab_src = tmp.path().join("ad-lab");
+        std::fs::create_dir(&lab_src).unwrap();
+        std::fs::write(
+            lab_src.join("vmlab.wcl"),
+            "lab \"ad\" {\n  vm \"dc1\" { template = \"x\" }\n}\n",
+        )
+        .unwrap();
+
+        let mut lab = b.open_lab(&lab_src, false).unwrap();
+        let err = lab.machine("dc1").err().expect("a hung `up dc1` must fail");
+        assert!(err.message.contains("machine 'dc1'"), "{}", err.message);
+        assert!(err.message.contains("lab ad-"), "{}", err.message);
+        assert!(err.message.contains("within 0.5s"), "{}", err.message);
+
+        // What the scenario runner does once the script returns.
+        lab.teardown().unwrap();
+        let calls = std::fs::read_to_string(&log).unwrap();
+        assert!(calls.lines().any(|l| l.ends_with(" up dc1")), "{calls}");
+        assert!(
+            calls.lines().last().unwrap().ends_with(" destroy"),
+            "{calls}"
+        );
+    }
+
+    #[test]
+    fn a_whole_minute_deadline_reads_in_minutes() {
+        let msg = up_timed_out("box", "vm x86_64/t", VM_UP_DEADLINE);
+        assert!(msg.contains("within 30 min"), "{msg}");
+        assert!(msg.contains("machine 'box' (vm x86_64/t)"), "{msg}");
     }
 
     #[test]

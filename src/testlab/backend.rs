@@ -2,8 +2,11 @@
 //! one exec produced, and how an external tool reattaches to a live
 //! instance. The instances themselves are vmlab machines — see `vmlab`.
 
+use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use crate::diag::Diag;
 
@@ -48,6 +51,83 @@ pub fn run_cmd(cmd: &str, args: &[&str], cwd: Option<&Path>) -> Result<Output, D
         .output()
         .map_err(|e| Diag::bare(format!("failed to run `{} {}`: {e}", cmd, args.join(" "))))
 }
+
+/// As [`run_cmd`], but give up after `deadline`: the child is killed and
+/// `Ok(None)` comes back, so the caller can say what timed out — only it
+/// knows the machine and what was being asked of it.
+///
+/// The pipes are drained on threads while the child runs, or a chatty
+/// child would fill one and never exit. After a kill they get a short
+/// grace to finish rather than an unbounded join: a grandchild that
+/// inherited them (a shell's `sleep`, say) can hold them open long after
+/// the child itself is gone.
+pub fn run_cmd_deadline(
+    cmd: &str,
+    args: &[&str],
+    cwd: Option<&Path>,
+    deadline: Duration,
+) -> Result<Option<Output>, Diag> {
+    let mut command = Command::new(cmd);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| Diag::bare(format!("failed to run `{} {}`: {e}", cmd, args.join(" "))))?;
+
+    fn drain(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8>> {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = pipe.read_to_end(&mut buf);
+            let _ = tx.send(buf);
+        });
+        rx
+    }
+    let stdout = drain(child.stdout.take().expect("stdout is piped"));
+    let stderr = drain(child.stderr.take().expect("stderr is piped"));
+
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if start.elapsed() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(None);
+            }
+            Ok(None) => std::thread::sleep(DEADLINE_POLL),
+            Err(e) => {
+                let _ = child.kill();
+                return Err(Diag::bare(format!(
+                    "failed waiting on `{} {}`: {e}",
+                    cmd,
+                    args.join(" ")
+                )));
+            }
+        }
+    };
+    // Exited on its own, so the pipes close with it — unless a grandchild
+    // kept them, in which case take what has arrived.
+    let collect = |rx: mpsc::Receiver<Vec<u8>>| rx.recv_timeout(PIPE_GRACE).unwrap_or_default();
+    Ok(Some(Output {
+        status,
+        stdout: collect(stdout),
+        stderr: collect(stderr),
+    }))
+}
+
+/// How often [`run_cmd_deadline`] checks whether its child has exited.
+const DEADLINE_POLL: Duration = Duration::from_millis(100);
+
+/// How long [`run_cmd_deadline`] waits for a pipe to close once the child
+/// has exited.
+const PIPE_GRACE: Duration = Duration::from_secs(5);
 
 /// What the host can do to a live instance — and the only thing the
 /// `guest` module needs from one.
@@ -104,4 +184,44 @@ pub enum AttachInfo {
         /// The template (VMs) or OCI image (containers) it was made from.
         source: String,
     },
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_command_inside_its_deadline_reports_as_run_cmd_would() {
+        let out = run_cmd_deadline(
+            "sh",
+            &["-c", "echo out; echo err >&2; exit 3"],
+            None,
+            Duration::from_secs(30),
+        )
+        .unwrap()
+        .expect("finished in time");
+        assert_eq!(out.status.code(), Some(3));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "out\n");
+        assert_eq!(String::from_utf8_lossy(&out.stderr), "err\n");
+    }
+
+    #[test]
+    fn a_command_past_its_deadline_is_killed() {
+        let start = Instant::now();
+        // No `exec`: the sleep is a grandchild holding the pipes, which
+        // must not keep the caller waiting once the shell is killed.
+        let out = run_cmd_deadline(
+            "sh",
+            &["-c", "sleep 60; echo late"],
+            None,
+            Duration::from_millis(300),
+        )
+        .unwrap();
+        assert!(out.is_none(), "timed out");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "returned at the deadline, not when the child would have exited: {:?}",
+            start.elapsed()
+        );
+    }
 }
