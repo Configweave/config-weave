@@ -382,7 +382,15 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   failing last statement, throw, parse error), output and stdin; `-File`
   matched only with the trailer and is blocked by a GPO execution policy,
   and `-Command -` mis-parses multi-line input and costs `opts.stdin`.
-  Windows PowerShell 5.1 is unmeasured.
+  Re-measured on Windows PowerShell 5.1 and pwsh 7.4: exit codes match
+  the old form in every case but one. A script-level `return` while `$?`
+  is false — `try { Get-Service nope -ErrorAction Stop } catch { return }`
+  — exited 1 under `-Command <script>` and exits **0** now, because
+  `return` leaves the script block before the trailer runs. A script
+  whose last statement is an empty `catch {}` after a caught error exits
+  1 under both forms (ordinary `-Command` behaviour). Guard scripts
+  (`weave.execute` checks, resource checks) must end with an explicit
+  `exit 0`/`exit 1` and never rely on `return`; the author docs say so.
 - The `data` module covers INI only; JSON, TOML and XML are wscript-std's
   `json`, `toml` and `xml` modules registered as-is (the PRD's "re-export,
   don't duplicate" note). `regex` is registered for the same reason: the

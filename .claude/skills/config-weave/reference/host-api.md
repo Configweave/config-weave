@@ -181,7 +181,17 @@ command or script string and an options `Value`, and returns
 | `run` | `shell::run(cmd: string, opts: Value) -> Result[CmdOutput, string]` | splits `cmd` with shell-words and executes the program directly; globs, pipes and `$VAR` are literal text |
 | `run_streaming` | `shell::run_streaming(cmd: string, opts: Value) -> Result[CmdOutput, string]` | as `run`, and streams each line through `log` as it arrives: stdout at info, stderr at warn |
 | `bash` | `shell::bash(script: string, opts: Value) -> Result[CmdOutput, string]` | `bash -c`, falls back to `sh`; the way to use pipes, globs and expansion |
-| `powershell` | `shell::powershell(script: string, opts: Value) -> Result[CmdOutput, string]` | `powershell`, falls back to `pwsh`, with `-NoProfile -NonInteractive`; works on Linux with PowerShell Core. The script goes through a private temp file (deleted after the run), never the command line; exit codes, output and stdin (`$input`, `[Console]::In`) behave as with `-Command` |
+| `powershell` | `shell::powershell(script: string, opts: Value) -> Result[CmdOutput, string]` | `powershell`, falls back to `pwsh`, with `-NoProfile -NonInteractive`; works on Linux with PowerShell Core. The script goes through a private temp file (deleted after the run), never the command line; exit codes, output and stdin (`$input`, `[Console]::In`) behave as with `-Command`, except that a script-level `return` while `$?` is false exits 0 (see below) |
+
+`shell::powershell` runs the script as a dot-sourced script block followed by
+`if ($?) { exit 0 } else { exit 1 }`. Measured on Windows PowerShell 5.1 and
+pwsh 7.4, exit codes match `-Command <script>` in every case but one: a
+script-level `return` while `$?` is false exits **0** where `-Command` exited 1, because
+`return` leaves the block before the trailer runs —
+`try { Get-Service nope -ErrorAction Stop } catch { return }` exits 0. A script
+whose last statement is an empty `catch {}` after a caught error exits 1, as
+under `-Command`. End any script whose exit code matters (a guard, an
+`execute` check) with an explicit `exit 0` / `exit 1`; never rely on `return`.
 
 ### Shell options map
 

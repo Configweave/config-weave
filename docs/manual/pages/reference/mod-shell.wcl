@@ -87,7 +87,9 @@ shell::powershell(script: string, opts: Value) -> Result[CmdOutput, string]
 SRC
   }
 
-  p "Runs `script` with `powershell`, and falls back to `pwsh`, passing `-NoProfile -NonInteractive`. It works on Linux when PowerShell Core is installed. The script never appears on the command line, so the process list and command-line auditing do not see a secret interpolated into it: it is written to a private temp file, deleted after the run, which a short `-Command` bootstrap reads and runs. Exit codes, output and standard input (`$input` and `[Console]::In`) behave as they would with `-Command`, and execution policy does not apply."
+  p "Runs `script` with `powershell`, and falls back to `pwsh`, passing `-NoProfile -NonInteractive`. It works on Linux when PowerShell Core is installed. The script never appears on the command line, so the process list and command-line auditing do not see a secret interpolated into it: it is written to a private temp file, deleted after the run, which a short `-Command` bootstrap reads and runs. Exit codes, output and standard input (`$input` and `[Console]::In`) behave as they would with `-Command`, with the exception below, and execution policy does not apply."
+
+  p "Two exit-code cases to know, both measured on Windows PowerShell 5.1 and pwsh 7.4. A script-level `return` while `$?` is false exits 0, where `-Command <script>` exited 1: the script runs as a dot-sourced script block followed by `if ($?) { exit 0 } else { exit 1 }`, and `return` leaves the block before that line runs. So `try { Get-Service nope -ErrorAction Stop } catch { return }` exits 0. A script whose last statement is an empty `catch {}` after a caught error exits 1, as it does under `-Command`. End a script whose exit code matters, such as a guard, with an explicit `exit 0` or `exit 1`, and never rely on `return`."
 
   code rust {
     source = <<'SRC'

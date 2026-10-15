@@ -71,7 +71,7 @@ SRC
 
   p "`apply` and `check` run the playbook's only play, and fail with an error naming the plays when the playbook declares several or none. To run one play of several, use `apply_with` or `check_with` with `Value::Map(#{ \"play\": Value::String(\"name\") })`. Any other option key is an `Err`."
 
-  p "`powershell` keeps the script off the guest's command line, so the guest's process list and command-line auditing do not see a secret interpolated into it. The script is copied into a fresh working directory in the guest as a file, `-Command` gets a short bootstrap that reads and runs it, and the file is deleted afterwards, even when the run fails. Exit codes and output behave as they would with `-Command <script>`, and execution policy does not apply. If the delete fails, the script's result is still returned and a warning naming the leftover file is printed to standard error (not in JSON output mode)."
+  p "`powershell` keeps the script off the guest's command line, so the guest's process list and command-line auditing do not see a secret interpolated into it. The script is copied into a fresh working directory in the guest as a file, `-Command` gets a short bootstrap that reads and runs it, and the file is deleted afterwards, even when the run fails. Exit codes and output behave as they would with `-Command <script>`, with the `return` exception described under [shell::powershell](ref_mod_shell), and execution policy does not apply. If the delete fails, the script's result is still returned and a warning naming the leftover file is printed to standard error (not in JSON output mode)."
 
   h2 "RunReport"
 

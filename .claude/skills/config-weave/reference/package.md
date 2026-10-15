@@ -351,7 +351,7 @@ step "install-tool" {
 }
 ```
 
-The guard `check` exits 0 when the host is already converged (step reports `AlreadyConfigured`); any other status runs `run`. After `run`, the engine re-runs the guard as the re-check, and a guard still non-zero fails the step with "apply claimed success but the re-check disagrees". `run` exiting non-zero fails the step unless the status is listed in `reboot_on`, in which case the step reports `RebootRequired` and the play halts until the next run.
+Under PowerShell, end the guard with an explicit `exit 0` / `exit 1`: a script-level `return` after a caught error exits 0, which reads as converged (see `shell::powershell` in host-api.md). The guard `check` exits 0 when the host is already converged (step reports `AlreadyConfigured`); any other status runs `run`. After `run`, the engine re-runs the guard as the re-check, and a guard still non-zero fails the step with "apply claimed success but the re-check disagrees". `run` exiting non-zero fails the step unless the status is listed in `reboot_on`, in which case the step reports `RebootRequired` and the play halts until the next run.
 
 | Param | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
