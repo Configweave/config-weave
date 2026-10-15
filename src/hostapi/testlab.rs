@@ -10,7 +10,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use wscript::{Module, Script};
@@ -18,6 +18,7 @@ use wscript_std::DynValue;
 
 use crate::diag::Diag;
 use crate::model::Playbook;
+use crate::testlab::backend::Transport;
 use crate::testlab::guest::{GatherOutcome, Guest};
 use crate::testlab::synth::{self, BinaryResolver};
 use crate::testlab::vmlab::{VmlabInstance, VmlabLab};
@@ -224,14 +225,16 @@ fn gather_fact(
 }
 
 /// Apply or check a whole authored playbook directory (relative to the
-/// scenario's package) and return a queryable report.
+/// scenario's package) and return a queryable report. `play` is the
+/// `opts.play` of `apply_with`/`check_with`; without one the playbook's
+/// only play runs.
 fn apply_playbook(
     state: &mut LabState,
     name: &str,
     dir: &str,
     mode: &str,
+    play: Option<String>,
 ) -> Result<RunReport, Diag> {
-    ensure_prepared(state, name)?;
     let host_dir = state.pkg_dir.join(dir);
     if !host_dir.is_dir() {
         return Err(Diag::bare(format!(
@@ -239,11 +242,31 @@ fn apply_playbook(
             state.pkg_dir.display()
         )));
     }
+    // Resolved before the binary is copied in: a scenario that names the
+    // wrong play should fail without paying for a machine round trip.
+    let play = match play {
+        Some(p) => p,
+        None => only_play(&host_dir, dir)?,
+    };
+    ensure_prepared(state, name)?;
     let n = bump(state, name);
     let ms = &state.machines[name];
-    let wd = Guest::new(&ms.instance).scenario_work(name, n)?;
-    wd.stage(&host_dir)?;
-    let out = wd.run(mode, None, None, mode)?;
+    run_playbook(&ms.instance, name, n, &host_dir, mode, &play)
+}
+
+/// Stage `host_dir` into a fresh working dir on `machine` and run `play`
+/// from it. Split out over the transport so the argv is unit-testable.
+fn run_playbook(
+    t: &dyn Transport,
+    machine: &str,
+    n: usize,
+    host_dir: &Path,
+    mode: &str,
+    play: &str,
+) -> Result<RunReport, Diag> {
+    let wd = Guest::new(t).scenario_work(machine, n)?;
+    wd.stage(host_dir)?;
+    let out = wd.run(mode, Some(play), None, mode)?;
     let steps = out
         .report
         .steps
@@ -254,6 +277,58 @@ fn apply_playbook(
         ok: out.report.exit_code == 0,
         steps,
     })
+}
+
+/// The play `apply(dir)`/`check(dir)` run: the playbook's only one.
+/// `config-weave apply|check` require a play, and with several there is
+/// no right guess, so the error names them and points at `apply_with`.
+fn only_play(host_dir: &Path, dir: &str) -> Result<String, Diag> {
+    let loaded = crate::model::load(host_dir);
+    let Some(pb) = loaded.playbook else {
+        let why: Vec<String> = loaded.diags.into_iter().map(|d| d.message).collect();
+        return Err(Diag::bare(format!(
+            "cannot read the plays of playbook dir '{dir}': {}",
+            why.join("; ")
+        )));
+    };
+    let names: Vec<&str> = pb.plays.iter().map(|p| p.name.as_str()).collect();
+    match names.as_slice() {
+        [one] => Ok(one.to_string()),
+        [] => Err(Diag::bare(format!(
+            "playbook dir '{dir}' declares no play to run"
+        ))),
+        many => Err(Diag::bare(format!(
+            "playbook dir '{dir}' declares {} plays ({}); name one with \
+             apply_with/check_with(dir, {{play: \"name\"}})",
+            many.len(),
+            many.join(", ")
+        ))),
+    }
+}
+
+/// The `opts` of `apply_with`/`check_with`: null or a map with `play`.
+fn parse_play_opts(opts: &DynValue) -> Result<Option<String>, String> {
+    let mut play = None;
+    match opts {
+        DynValue::Null => {}
+        DynValue::Map(m) => {
+            for (k, v) in m {
+                match (k.as_str(), v) {
+                    ("play", DynValue::String(p)) if !p.is_empty() => play = Some(p.clone()),
+                    ("play", other) => {
+                        return Err(format!(
+                            "option 'play' must be a non-empty play name, got {other:?}"
+                        ));
+                    }
+                    (other, _) => {
+                        return Err(format!("unknown option '{other}' (expected play)"));
+                    }
+                }
+            }
+        }
+        other => return Err(format!("options must be a map or null, got {other:?}")),
+    }
+    Ok(play)
 }
 
 // --------------------------------------------------------------- registration
@@ -375,14 +450,30 @@ pub fn module() -> Module {
             "apply",
             |m: &Machine, dir: &str| -> Result<RunReport, String> {
                 let mut st = m.state.borrow_mut();
-                apply_playbook(&mut st, &m.name, dir, "apply").map_err(ds)
+                apply_playbook(&mut st, &m.name, dir, "apply", None).map_err(ds)
+            },
+        )
+        .method(
+            "apply_with",
+            |m: &Machine, dir: String, opts: DynValue| -> Result<RunReport, String> {
+                let play = parse_play_opts(&opts)?;
+                let mut st = m.state.borrow_mut();
+                apply_playbook(&mut st, &m.name, &dir, "apply", play).map_err(ds)
             },
         )
         .method(
             "check",
             |m: &Machine, dir: &str| -> Result<RunReport, String> {
                 let mut st = m.state.borrow_mut();
-                apply_playbook(&mut st, &m.name, dir, "check").map_err(ds)
+                apply_playbook(&mut st, &m.name, dir, "check", None).map_err(ds)
+            },
+        )
+        .method(
+            "check_with",
+            |m: &Machine, dir: String, opts: DynValue| -> Result<RunReport, String> {
+                let play = parse_play_opts(&opts)?;
+                let mut st = m.state.borrow_mut();
+                apply_playbook(&mut st, &m.name, &dir, "check", play).map_err(ds)
             },
         );
 
@@ -417,4 +508,91 @@ fn machine_inst<'a>(st: &'a LabState, name: &str) -> Result<&'a VmlabInstance, S
         .get(name)
         .map(|ms| &ms.instance)
         .ok_or_else(|| format!("no machine '{name}'"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testlab::backend::GuestOs;
+    use crate::testlab::guest::fake::{FakeGuest, printed};
+
+    const REPORT: &str = r#"{"playbook":"p","version":"0","play":"site","mode":"apply","exit_code":0,"duration_secs":0.0,"gathered":[],"steps":[]}"#;
+
+    /// A playbook dir declaring `plays`, each with no steps.
+    fn playbook_dir(plays: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let mut src = String::from("playbook \"p\" {\n  description = \"p\"\n");
+        for p in plays {
+            src.push_str(&format!(
+                "  play \"{p}\" {{\n    description = \"d\"\n  }}\n"
+            ));
+        }
+        src.push_str("}\n");
+        std::fs::write(dir.path().join("playbook.wcl"), src).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_playbook_run_names_the_play() {
+        // `config-weave apply|check` require `<PLAYBOOK_DIR> <PLAY>`; the
+        // run used to omit the play and could never succeed.
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let host = tempfile::tempdir().unwrap();
+        fake.queue([printed(""), printed(REPORT)]);
+        let report = run_playbook(&fake, "dc1", 2, host.path(), "apply", "site").unwrap();
+        assert!(report.ok);
+
+        assert_eq!(
+            fake.argvs()[1],
+            vec![
+                "/weave/config-weave",
+                "apply",
+                "/weave/s/dc1-2/playbook",
+                "site",
+                "--json",
+                "--continue-on-error",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_only_play_is_the_default() {
+        let dir = playbook_dir(&["site"]);
+        assert_eq!(only_play(dir.path(), "promote").unwrap(), "site");
+    }
+
+    #[test]
+    fn several_plays_are_named_rather_than_guessed() {
+        let dir = playbook_dir(&["forest", "member"]);
+        let err = only_play(dir.path(), "promote").unwrap_err();
+        assert!(err.message.contains("'promote'"), "{}", err.message);
+        assert!(err.message.contains("forest, member"), "{}", err.message);
+        assert!(err.message.contains("apply_with"), "{}", err.message);
+
+        let none = playbook_dir(&[]);
+        let err = only_play(none.path(), "empty").unwrap_err();
+        assert!(err.message.contains("no play"), "{}", err.message);
+    }
+
+    #[test]
+    fn play_opts_take_a_name_and_reject_anything_else() {
+        use std::collections::HashMap;
+        assert_eq!(parse_play_opts(&DynValue::Null).unwrap(), None);
+
+        let mut m = HashMap::new();
+        m.insert("play".to_string(), DynValue::String("member".into()));
+        assert_eq!(
+            parse_play_opts(&DynValue::Map(m)).unwrap().as_deref(),
+            Some("member")
+        );
+
+        let mut bad = HashMap::new();
+        bad.insert("plya".to_string(), DynValue::String("member".into()));
+        let err = parse_play_opts(&DynValue::Map(bad)).unwrap_err();
+        assert!(err.contains("unknown option 'plya'"), "{err}");
+
+        let mut empty = HashMap::new();
+        empty.insert("play".to_string(), DynValue::String(String::new()));
+        assert!(parse_play_opts(&DynValue::Map(empty)).is_err());
+    }
 }

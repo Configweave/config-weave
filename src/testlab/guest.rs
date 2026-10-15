@@ -440,10 +440,11 @@ impl Workdir<'_> {
     }
 }
 
+/// A scripted [`Transport`] for unit tests here and in the scenario host
+/// module, which drives a guest through the same seam.
 #[cfg(test)]
-mod tests {
+pub(crate) mod fake {
     use super::*;
-    use crate::testlab::backend::ExecOutput;
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
@@ -451,7 +452,7 @@ mod tests {
     /// The second adapter at the [`Transport`] seam: records what it was
     /// asked to do and replays canned outputs. Everything above the seam
     /// is exercised through this, with no instance anywhere.
-    struct FakeGuest {
+    pub(crate) struct FakeGuest {
         os: GuestOs,
         argvs: RefCell<Vec<Vec<String>>>,
         copies: RefCell<Vec<(PathBuf, String)>>,
@@ -465,7 +466,7 @@ mod tests {
     }
 
     impl FakeGuest {
-        fn new(os: GuestOs) -> FakeGuest {
+        pub(crate) fn new(os: GuestOs) -> FakeGuest {
             FakeGuest {
                 os,
                 argvs: RefCell::new(Vec::new()),
@@ -478,7 +479,7 @@ mod tests {
 
         /// Queue results for the next execs, in order. Anything beyond the
         /// queue succeeds silently.
-        fn replying(self, outs: impl IntoIterator<Item = ExecOutput>) -> FakeGuest {
+        pub(crate) fn replying(self, outs: impl IntoIterator<Item = ExecOutput>) -> FakeGuest {
             self.queue(outs);
             self
         }
@@ -486,30 +487,30 @@ mod tests {
         /// As [`FakeGuest::replying`], but callable once a `Guest` already
         /// borrows the fake — which is how the protocol tests queue a reply
         /// *after* the workdir's mkdir has taken one.
-        fn queue(&self, outs: impl IntoIterator<Item = ExecOutput>) {
+        pub(crate) fn queue(&self, outs: impl IntoIterator<Item = ExecOutput>) {
             self.replies.borrow_mut().extend(outs.into_iter().map(Ok));
         }
 
         /// Queue a transport failure for the next unanswered exec.
-        fn breaking(self, why: &str) -> FakeGuest {
+        pub(crate) fn breaking(self, why: &str) -> FakeGuest {
             self.replies.borrow_mut().push_back(Err(Diag::bare(why)));
             self
         }
 
-        fn bodies(&self) -> Vec<Option<String>> {
+        pub(crate) fn bodies(&self) -> Vec<Option<String>> {
             self.bodies.borrow().clone()
         }
 
-        fn trail(&self) -> Vec<String> {
+        pub(crate) fn trail(&self) -> Vec<String> {
             self.trail.borrow().clone()
         }
 
         /// Every exec's argv, in call order.
-        fn argvs(&self) -> Vec<Vec<String>> {
+        pub(crate) fn argvs(&self) -> Vec<Vec<String>> {
             self.argvs.borrow().clone()
         }
 
-        fn copies(&self) -> Vec<(PathBuf, String)> {
+        pub(crate) fn copies(&self) -> Vec<(PathBuf, String)> {
             self.copies.borrow().clone()
         }
     }
@@ -544,7 +545,7 @@ mod tests {
         }
     }
 
-    fn exited(code: i32) -> ExecOutput {
+    pub(crate) fn exited(code: i32) -> ExecOutput {
         ExecOutput {
             exit_code: code,
             stdout: String::new(),
@@ -552,13 +553,30 @@ mod tests {
         }
     }
 
-    fn failed(code: i32, stderr: &str) -> ExecOutput {
+    pub(crate) fn failed(code: i32, stderr: &str) -> ExecOutput {
         ExecOutput {
             exit_code: code,
             stdout: String::new(),
             stderr: stderr.to_string(),
         }
     }
+
+    /// A run that printed `stdout` and exited 0.
+    pub(crate) fn printed(stdout: &str) -> ExecOutput {
+        ExecOutput {
+            exit_code: 0,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fake::*;
+    use super::*;
+    use crate::testlab::backend::ExecOutput;
+    use std::path::{Path, PathBuf};
 
     /// `locate_binary` requires an explicit path to exist, so hand it a
     /// real (empty) file — the guest never actually runs it here.
@@ -815,14 +833,6 @@ mod tests {
     }
 
     // ------------------------------------------------------------ protocol
-
-    fn printed(stdout: &str) -> ExecOutput {
-        ExecOutput {
-            exit_code: 0,
-            stdout: stdout.to_string(),
-            stderr: String::new(),
-        }
-    }
 
     const EMPTY_REPORT: &str = r#"{"playbook":"p","version":"0","play":"test","mode":"apply","exit_code":0,"duration_secs":0.0,"gathered":[],"steps":[]}"#;
 

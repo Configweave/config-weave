@@ -697,7 +697,14 @@ below). Bindings fixed here:
   `machine.apply_resource(key, props)` synthesizes a one-step playbook
   (`synth::synthesize_resource`, rendering `props` as a WCL `properties`
   block), copies the binary in once per machine, runs `config-weave
-  {check,apply} --json`, and returns the step's status; `machine.reboot()`
+  {check,apply} --json`, and returns the step's status.
+  `machine.apply(dir)`/`check(dir)` stage an authored playbook dir whole
+  and run **its only play** — `config-weave apply|check` require `<PLAY>`,
+  and until 2026-10 the run omitted it, so neither method could
+  ever succeed. The plays are read host-side (`model::load`) before the
+  binary is copied in; several or none is an error naming them. Choosing
+  one of several is `apply_with`/`check_with(dir, {play})`, per the
+  `_with` convention in "Host API decisions". `machine.reboot()`
   = `vmlab vm restart` + osinfo re-poll (900s, DC promotion finalizes on
   boot). `VmlabInstance::reboot`/`wait_ready` and
   `VmlabBackend::open_lab`/`VmlabLab` carry this; the single-machine `box`

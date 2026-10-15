@@ -274,8 +274,10 @@ The module exposes no free functions. It registers the handle types `Lab`, `Mach
 | `apply_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | apply one resource in the guest through a synthesized one-step playbook |
 | `check_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | check one resource in the guest |
 | `gather` | `(key: string, params: Value) -> Result[Value, string]` | run one gatherer in the guest and return its value; a refusal is an `Err` |
-| `apply` | `(dir: string) -> Result[RunReport, string]` | apply a whole playbook directory in the guest |
-| `check` | `(dir: string) -> Result[RunReport, string]` | check a whole playbook directory in the guest |
+| `apply` | `(dir: string) -> Result[RunReport, string]` | apply a whole playbook directory in the guest; runs its only play, and errs naming the plays when there are several or none |
+| `apply_with` | `(dir: string, opts: Value) -> Result[RunReport, string]` | as `apply`; `opts` is null or `{play: "name"}`, any other key is an `Err` |
+| `check` | `(dir: string) -> Result[RunReport, string]` | check a whole playbook directory in the guest; play chosen as for `apply` |
+| `check_with` | `(dir: string, opts: Value) -> Result[RunReport, string]` | as `check`, with `opts` as for `apply_with` |
 
 `RunReport` is the report of a whole-playbook `apply` or `check`. This is the whole surface.
 

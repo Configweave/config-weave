@@ -572,8 +572,10 @@ that copy.
 | `apply_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | one resource; `props` is a `Value::Map` |
 | `check_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | one resource |
 | `gather` | `(key: string, params: Value) -> Result[Value, string]` | one gatherer's value; a refusal is an `Err` |
-| `apply` | `(dir: string) -> Result[RunReport, string]` | a whole playbook directory |
-| `check` | `(dir: string) -> Result[RunReport, string]` | a whole playbook directory |
+| `apply` | `(dir: string) -> Result[RunReport, string]` | a whole playbook directory, its only play; several or no plays is an `Err` naming them |
+| `apply_with` | `(dir: string, opts: Value) -> Result[RunReport, string]` | `opts`: null or `{play: "name"}`; other keys are an `Err` |
+| `check` | `(dir: string) -> Result[RunReport, string]` | as `apply` |
+| `check_with` | `(dir: string, opts: Value) -> Result[RunReport, string]` | as `apply_with` |
 
 ### RunReport
 
