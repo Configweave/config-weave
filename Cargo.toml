@@ -7,10 +7,11 @@ default-members = ["."]
 # Cross-repo deps come from GitHub, not sibling checkouts: a ticket worktree
 # lives at <repo>/.tree/<ticket>, where a relative `../` path resolves to
 # nothing. Declared once here so the CLI and docjson can never disagree about
-# which wcl_lang they build against. Cargo.lock pins the commit;
-# `cargo update -p <crate>` bumps it.
+# which wcl_lang they build against. wcl_lang is pinned to a release tag:
+# bump it by editing the tag. wscript tracks main; Cargo.lock pins the
+# commit and `cargo update -p wscript` bumps it.
 [workspace.dependencies]
-wcl_lang = { git = "https://github.com/wiltaylor/wcl.git", branch = "main" }
+wcl_lang = { git = "https://github.com/wiltaylor/wcl.git", tag = "v0.38.1-alpha" }
 wscript = { git = "https://github.com/Configweave/wscript.git", branch = "main" }
 wscript-std = { git = "https://github.com/Configweave/wscript.git", branch = "main" }
 

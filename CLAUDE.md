@@ -78,9 +78,10 @@ embedded WCL schema served as system imports).
 
 `wcl_lang`, `wscript` and `wscript-std` are **GitHub git dependencies**, not
 sibling path deps — declared once in `[workspace.dependencies]` so the CLI and
-`docjson/` cannot disagree about which `wcl_lang` they build against. The commit
-is pinned by `Cargo.lock`; bump it deliberately with `cargo update -p wcl_lang`
-(or `-p wscript`). No sibling checkout is needed to build, which is what lets a
+`docjson/` cannot disagree about which `wcl_lang` they build against.
+`wcl_lang` is pinned to a release tag in `Cargo.toml`; bump it by editing the
+tag. `wscript` tracks `main`, pinned by `Cargo.lock`; bump it deliberately with
+`cargo update -p wscript`. No sibling checkout is needed to build, which is what lets a
 ticket worktree (`.tree/<ticket-id>`, where a relative `../` path resolves to
 nothing) build at all. To develop across repos, put a `[patch]` section in a
 **gitignored** `.cargo/config.toml` pointing those git URLs at local paths.
