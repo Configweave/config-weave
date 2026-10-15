@@ -217,6 +217,7 @@ A dynamically linked development build (`cargo build`) cannot run inside an arbi
 - The command is found at `$CONFIG_WEAVE_VMLAB_CMD` if set, else as `vmlab` on the path, and probed once with `--version` before any test runs. A missing vmlab is exit 2 before a single instance is provisioned.
 - vmlab and its virtualisation support are the only host requirements; there is no container runtime to install. VM tests also need KVM.
 - Each instance is a one-machine lab in a temporary directory named `cw-test-…`; teardown runs `vmlab destroy` and removes the directory.
+- A VM instance is declared with `agent_update = false`, so it keeps the template's sealed guest agent: `vmlab up` does not refresh a stale one (on windows-server-2025 that refresh fails and the first exec hangs). A scenario's own `vmlab.wcl` is the author's — add `agent_update = false` to its `vm` blocks, or once on the `lab` block, for the same effect.
 
 ```console
 vmlab --version

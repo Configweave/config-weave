@@ -628,8 +628,16 @@ below). Bindings fixed here:
   `vmlab container exec` / `vmlab console` work post-mortem. A group
   provisions **one** instance and runs all its tests inside it
   sequentially (the big win — boot is paid once per group, not per test).
-- **VM instances (`template`).** `vm "box" { template, nic { nat = true } }`,
-  template defaults for sizing. Readiness **polls** `vmlab osinfo box`
+- **VM instances (`template`).** `vm "box" { template, agent_update =
+  false, nic { nat = true } }`, template defaults for sizing.
+  `agent_update = false` keeps the clone on the template's sealed guest
+  agent: by default `vmlab up` refreshes a stale agent, which buys a
+  throwaway clone nothing and on windows-server-2025 fails and leaves the
+  first exec hanging until the exec timeout. vmlab declares the field on
+  `vm` and `lab` only — `container` rejects it (`field 'agent_update' is
+  not declared by schema 'Container'`), and a container's agent ships
+  with the host anyway. Scenario labs are author-written, so it is theirs
+  to set. Readiness **polls** `vmlab osinfo box`
   until the guest agent answers (up to 300s, 3s between tries); the poll
   is required because `vmlab up` only blocks on agent readiness for VMs
   something *depends on*, and this lab's single VM has no dependents, so

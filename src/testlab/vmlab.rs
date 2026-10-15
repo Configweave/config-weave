@@ -192,7 +192,8 @@ impl VmlabBackend {
 /// The lab definition for one disposable instance. A container mounts the
 /// payload directory read-write at [`CONTAINER_MOUNT`] and runs as root
 /// with no entrypoint — the instance exists to be exec'd into, not to run
-/// the image's own process. A VM is a plain clone of the template.
+/// the image's own process. A VM is a clone of the template, kept on the
+/// template's sealed guest agent.
 pub fn lab_wcl(lab_name: &str, target: &TestTarget, memory: Option<&str>) -> String {
     // A WCL byte-size literal is unquoted (`memory = 4GiB`).
     let mem = memory
@@ -212,9 +213,14 @@ pub fn lab_wcl(lab_name: &str, target: &TestTarget, memory: Option<&str>) -> Str
              mode  = :idle\n    user  = \"0:0\"\n{mem}    nic {{ nat = true }}\n    \
              volume {{ host = \"./{PAYLOAD_DIR}\" target = \"{CONTAINER_MOUNT}\" }}\n  }}\n"
         ),
+        // `agent_update = false` stops `up` refreshing a guest agent older
+        // than the host's. A throwaway clone gains nothing from the
+        // refresh, and on windows-server-2025 it fails and leaves the first
+        // exec hanging until the exec timeout. A container takes no such
+        // field — its agent ships with the host and is never refreshed.
         TestTarget::Vm(template) => format!(
             "  vm \"{MACHINE}\" {{\n    template = \"{template}\"\n{mem}    \
-             nic {{ nat = true }}\n  }}\n"
+             agent_update = false\n    nic {{ nat = true }}\n  }}\n"
         ),
     };
     format!("import <vmlab.wcl>\n\nlab \"{lab_name}\" {{\n{machine}}}\n")
@@ -652,6 +658,8 @@ mod tests {
         assert!(wcl.contains("vm \"box\""), "{wcl}");
         assert!(wcl.contains("template = \"x86_64/linux-modern\""), "{wcl}");
         assert!(wcl.contains("nic { nat = true }"), "{wcl}");
+        // A refreshed agent hangs windows-server-2025's first exec.
+        assert!(wcl.contains("agent_update = false"), "{wcl}");
         assert!(
             !wcl.contains("volume"),
             "a VM needs no payload mount: {wcl}"
@@ -677,6 +685,8 @@ mod tests {
             wcl.contains("volume { host = \"./payload\" target = \"/weave\" }"),
             "{wcl}"
         );
+        // vmlab's container block has no such field.
+        assert!(!wcl.contains("agent_update"), "{wcl}");
     }
 
     #[test]
