@@ -49,7 +49,7 @@ struct Machine {}
 SRC
   }
 
-  p "A provisioned machine. The config-weave binary is copied into a machine and smoke-tested the first time a method needs it, so a machine that is only ever used through `exec` never pays for that copy. Resource keys are `package.resource`, and `props` is a `Value::Map` of the resource's properties. Playbook directories are resolved relative to the scenario's package."
+  p "A provisioned machine. The config-weave binary is copied into a machine and smoke-tested the first time a method needs it, so a machine that is only ever used through `exec` never pays for that copy. Resource keys are `package.resource`, and `props` is a `Value::Map` of the resource's properties. A string for a `symbol`-typed parameter is written into the playbook as that symbol, so `\"ensure\": Value::String(\"absent\")` becomes `ensure = :absent`; a string that is not a valid symbol name (letters, digits and `_`, not starting with a digit) is an `Err`. Playbook directories are resolved relative to the scenario's package."
 
   table {
     rows:
@@ -63,11 +63,15 @@ SRC
       | "`apply_resource`" | "`(key: string, props: Value) -> Result[StepResult, string]`" | "apply one resource in the guest" |
       | "`check_resource`" | "`(key: string, props: Value) -> Result[StepResult, string]`" | "check one resource in the guest" |
       | "`gather`" | "`(key: string, params: Value) -> Result[Value, string]`" | "run one gatherer in the guest and return its value; a refusal is an `Err`" |
-      | "`apply`" | "`(dir: string) -> Result[RunReport, string]`" | "apply a whole playbook directory in the guest" |
-      | "`check`" | "`(dir: string) -> Result[RunReport, string]`" | "check a whole playbook directory in the guest" |
+      | "`apply`" | "`(dir: string) -> Result[RunReport, string]`" | "apply the only play of a whole playbook directory in the guest" |
+      | "`apply_with`" | "`(dir: string, opts: Value) -> Result[RunReport, string]`" | "as `apply`; `opts` is null or `{play: \"name\"}`" |
+      | "`check`" | "`(dir: string) -> Result[RunReport, string]`" | "check the only play of a whole playbook directory in the guest" |
+      | "`check_with`" | "`(dir: string, opts: Value) -> Result[RunReport, string]`" | "as `check`; `opts` is null or `{play: \"name\"}`" |
   }
 
-  p "`powershell` keeps the script off the guest's command line, so the guest's process list and command-line auditing do not see a secret interpolated into it. The script is copied into a fresh working directory in the guest as a file, `-Command` gets a short bootstrap that reads and runs it, and the file is deleted afterwards, even when the run fails. Exit codes and output behave as they would with `-Command <script>`, and execution policy does not apply. If the delete fails, the script's result is still returned and a warning naming the leftover file is printed to standard error (not in JSON output mode)."
+  p "`apply` and `check` run the playbook's only play, and fail with an error naming the plays when the playbook declares several or none. To run one play of several, use `apply_with` or `check_with` with `Value::Map(#{ \"play\": Value::String(\"name\") })`. Any other option key is an `Err`."
+
+  p "`powershell` keeps the script off the guest's command line, so the guest's process list and command-line auditing do not see a secret interpolated into it. The script is copied into a fresh working directory in the guest as a file, `-Command` gets a short bootstrap that reads and runs it, and the file is deleted afterwards, even when the run fails. Exit codes and output behave as they would with `-Command <script>`, with the `return` exception described under [shell::powershell](ref_mod_shell), and execution policy does not apply. If the delete fails, the script's result is still returned and a warning naming the leftover file is printed to standard error (not in JSON output mode)."
 
   h2 "RunReport"
 

@@ -129,7 +129,7 @@ PROSE
   h2 "Environment and reporting"
 
   p <<'PROSE'
-The runner finds vmlab through `$CONFIG_WEAVE_VMLAB_CMD` or `vmlab` on the path, and probes it once before any test runs, so a broken environment is exit status 2 before a single instance is provisioned. Each instance is a one-machine lab in a temporary directory; teardown destroys the lab and removes the directory. `--keep` leaves the lab running and prints its directory, so `vmlab exec`, `vmlab container exec` and `vmlab console` work for a post-mortem.
+The runner finds vmlab through `$CONFIG_WEAVE_VMLAB_CMD` or `vmlab` on the path, and probes it once before any test runs, so a broken environment is exit status 2 before a single instance is provisioned. Each instance is a one-machine lab in a temporary directory; teardown destroys the lab and removes the directory. A VM instance keeps its template's guest agent (`agent_update = false`), because the refresh `vmlab up` otherwise performs on a stale agent fails on windows-server-2025 and leaves the first command hanging. A scenario lab is your own `vmlab.wcl`, so set `agent_update = false` on its `vm` blocks, or once on the `lab` block, to get the same behaviour. `--keep` leaves the lab running and prints its directory, so `vmlab exec`, `vmlab container exec` and `vmlab console` work for a post-mortem.
 PROSE
 
   p <<'PROSE'

@@ -184,6 +184,7 @@ Every instance is a vmlab machine. The `image` or `template` field is the whole 
 | Default memory | 256MiB, allocated on demand | The template's own sizing |
 | `setup` shell | `sh -c` | `sh -c` on Linux, `cmd /C` on Windows |
 | Requirement | An OCI image with a shell; vmlab pulls it | The template ships the vmlab guest agent, which the runner polls for readiness (up to 300s) |
+| `vmlab up` limit | 5 min, then killed, torn down, group errors | 30 min, then the same (scenario machines too) |
 | Windows extra | n/a | The agent reports `windows`; a Windows build of config-weave is required (see Binary resolution) |
 | Payload | Mounted at `/weave` | Copied to `/weave` (`C:/weave` on Windows) |
 
@@ -217,6 +218,7 @@ A dynamically linked development build (`cargo build`) cannot run inside an arbi
 - The command is found at `$CONFIG_WEAVE_VMLAB_CMD` if set, else as `vmlab` on the path, and probed once with `--version` before any test runs. A missing vmlab is exit 2 before a single instance is provisioned.
 - vmlab and its virtualisation support are the only host requirements; there is no container runtime to install. VM tests also need KVM.
 - Each instance is a one-machine lab in a temporary directory named `cw-test-…`; teardown runs `vmlab destroy` and removes the directory.
+- A VM instance is declared with `agent_update = false`, so it keeps the template's sealed guest agent: `vmlab up` does not refresh a stale one (on windows-server-2025 that refresh fails and the first exec hangs). A scenario's own `vmlab.wcl` is the author's — add `agent_update = false` to its `vm` blocks, or once on the `lab` block, for the same effect.
 
 ```console
 vmlab --version
@@ -261,7 +263,7 @@ The module exposes no free functions. It registers the handle types `Lab`, `Mach
 | `machine` | `(name: string) -> Result[Machine, string]` | bring the declared VM up on first reference and return its handle |
 | `log` | `(message: string)` | print a scenario progress line to the terminal |
 
-`Machine` is a provisioned VM. The config-weave binary is copied in and smoke-tested the first time a method needs it, so a machine only used through `exec` never pays for the copy. Resource keys are `package.resource`; `props` and `params` are a `Value::Map`. Playbook directories are resolved relative to the scenario's package. This is the whole surface.
+`Machine` is a provisioned VM. The config-weave binary is copied in and smoke-tested the first time a method needs it, so a machine only used through `exec` never pays for the copy. Resource keys are `package.resource`; `props` and `params` are a `Value::Map`. A top-level string prop for a `symbol`-typed param is rendered as that symbol (`"ensure": Value::String("absent")` → `ensure = :absent`); one that is not a valid identifier is an `Err`. Playbook directories are resolved relative to the scenario's package. This is the whole surface.
 
 | Method | Signature | Summary |
 |---|---|---|
@@ -274,8 +276,10 @@ The module exposes no free functions. It registers the handle types `Lab`, `Mach
 | `apply_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | apply one resource in the guest through a synthesized one-step playbook |
 | `check_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | check one resource in the guest |
 | `gather` | `(key: string, params: Value) -> Result[Value, string]` | run one gatherer in the guest and return its value; a refusal is an `Err` |
-| `apply` | `(dir: string) -> Result[RunReport, string]` | apply a whole playbook directory in the guest |
-| `check` | `(dir: string) -> Result[RunReport, string]` | check a whole playbook directory in the guest |
+| `apply` | `(dir: string) -> Result[RunReport, string]` | apply a whole playbook directory in the guest; runs its only play, and errs naming the plays when there are several or none |
+| `apply_with` | `(dir: string, opts: Value) -> Result[RunReport, string]` | as `apply`; `opts` is null or `{play: "name"}`, any other key is an `Err` |
+| `check` | `(dir: string) -> Result[RunReport, string]` | check a whole playbook directory in the guest; play chosen as for `apply` |
+| `check_with` | `(dir: string, opts: Value) -> Result[RunReport, string]` | as `check`, with `opts` as for `apply_with` |
 
 `RunReport` is the report of a whole-playbook `apply` or `check`. This is the whole surface.
 

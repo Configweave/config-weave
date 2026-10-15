@@ -382,7 +382,15 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   failing last statement, throw, parse error), output and stdin; `-File`
   matched only with the trailer and is blocked by a GPO execution policy,
   and `-Command -` mis-parses multi-line input and costs `opts.stdin`.
-  Windows PowerShell 5.1 is unmeasured.
+  Re-measured on Windows PowerShell 5.1 and pwsh 7.4: exit codes match
+  the old form in every case but one. A script-level `return` while `$?`
+  is false — `try { Get-Service nope -ErrorAction Stop } catch { return }`
+  — exited 1 under `-Command <script>` and exits **0** now, because
+  `return` leaves the script block before the trailer runs. A script
+  whose last statement is an empty `catch {}` after a caught error exits
+  1 under both forms (ordinary `-Command` behaviour). Guard scripts
+  (`weave.execute` checks, resource checks) must end with an explicit
+  `exit 0`/`exit 1` and never rely on `return`; the author docs say so.
 - The `data` module covers INI only; JSON, TOML and XML are wscript-std's
   `json`, `toml` and `xml` modules registered as-is (the PRD's "re-export,
   don't duplicate" note). `regex` is registered for the same reason: the
@@ -623,13 +631,28 @@ below). Bindings fixed here:
 - **The backend.** CLI discovery `$CONFIG_WEAVE_VMLAB_CMD` → `vmlab`
   (probed with `--version`). Each provision writes a one-machine lab into
   a tempdir whose unique name is the lab name (`cw-test-…`) and runs
-  `vmlab up` there. Teardown = `vmlab destroy` + tempdir removal;
-  `--keep` leaves the lab up and reports its directory so `vmlab exec` /
+  `vmlab up` there, under a deadline — 30 min for a VM, 5 for a container
+  (`VM_UP_DEADLINE`/`CONTAINER_UP_DEADLINE`; a scenario's `up <machine>`
+  takes the VM one). A Windows VM stuck at boot used to hold the run for
+  as long as it stayed stuck. On expiry `backend::run_cmd_deadline` kills
+  the vmlab child process (not its process group, so whatever lab daemon
+  it started is left for `destroy` to talk to), and the error names the
+  machine, its target and the limit; the usual teardown path then runs,
+  so `--keep` still keeps it. Teardown = `vmlab destroy` + tempdir
+  removal; `--keep` leaves the lab up and reports its directory so `vmlab exec` /
   `vmlab container exec` / `vmlab console` work post-mortem. A group
   provisions **one** instance and runs all its tests inside it
   sequentially (the big win — boot is paid once per group, not per test).
-- **VM instances (`template`).** `vm "box" { template, nic { nat = true } }`,
-  template defaults for sizing. Readiness **polls** `vmlab osinfo box`
+- **VM instances (`template`).** `vm "box" { template, agent_update =
+  false, nic { nat = true } }`, template defaults for sizing.
+  `agent_update = false` keeps the clone on the template's sealed guest
+  agent: by default `vmlab up` refreshes a stale agent, which buys a
+  throwaway clone nothing and on windows-server-2025 fails and leaves the
+  first exec hanging until the exec timeout. vmlab declares the field on
+  `vm` and `lab` only — `container` rejects it (`field 'agent_update' is
+  not declared by schema 'Container'`), and a container's agent ships
+  with the host anyway. Scenario labs are author-written, so it is theirs
+  to set. Readiness **polls** `vmlab osinfo box`
   until the guest agent answers (up to 300s, 3s between tries); the poll
   is required because `vmlab up` only blocks on agent readiness for VMs
   something *depends on*, and this lab's single VM has no dependents, so
@@ -697,7 +720,20 @@ below). Bindings fixed here:
   `machine.apply_resource(key, props)` synthesizes a one-step playbook
   (`synth::synthesize_resource`, rendering `props` as a WCL `properties`
   block), copies the binary in once per machine, runs `config-weave
-  {check,apply} --json`, and returns the step's status; `machine.reboot()`
+  {check,apply} --json`, and returns the step's status. A wscript
+  string cannot say whether it means `"absent"` or `:absent`, so the
+  rendering is schema-driven: a top-level string prop for a param the
+  resource (or composite) declares `type = "symbol"` renders as `:name`,
+  and one that is not a WCL identifier is refused host-side rather than
+  emitted as WCL that fails to parse in the guest. Nested values and
+  every other param render as before.
+  `machine.apply(dir)`/`check(dir)` stage an authored playbook dir whole
+  and run **its only play** — `config-weave apply|check` require `<PLAY>`,
+  and until 2026-10 the run omitted it, so neither method could
+  ever succeed. The plays are read host-side (`model::load`) before the
+  binary is copied in; several or none is an error naming them. Choosing
+  one of several is `apply_with`/`check_with(dir, {play})`, per the
+  `_with` convention in "Host API decisions". `machine.reboot()`
   = `vmlab vm restart` + osinfo re-poll (900s, DC promotion finalizes on
   boot). `VmlabInstance::reboot`/`wait_ready` and
   `VmlabBackend::open_lab`/`VmlabLab` carry this; the single-machine `box`

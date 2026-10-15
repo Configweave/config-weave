@@ -216,7 +216,7 @@ SRC
   }
 
   list {
-    li "`shell` selects the interpreter: `:auto` (PowerShell on Windows, bash elsewhere), `:bash` (falling back to `sh`) or `:powershell` (with `-NoProfile -NonInteractive`). These are the only two script-body entry points the `shell` host module has."
+    li "`shell` selects the interpreter: `:auto` (PowerShell on Windows, bash elsewhere), `:bash` (falling back to `sh`) or `:powershell` (with `-NoProfile -NonInteractive`). These are the only two script-body entry points the `shell` host module has. Under PowerShell, end the guard with an explicit `exit 0` or `exit 1`: a script-level `return` after a caught error exits 0, which reads as already converged (see [shell::powershell](ref_mod_shell))."
     li "`cwd`, `env` and `timeout` apply to both scripts. A zero or omitted timeout means no limit."
     li "`reboot_on` lists exit statuses from `run` that mean the work succeeded but the host must reboot; the Windows installer convention is `[3010, 1641]`. The play halts and resumes on the next run. Unix truncates an exit status to the range 0 to 255, so only Windows can report the four-digit codes."
     li "Its concurrency class is `parallel` on purpose. A step can only tighten, so an `exclusive` default would forbid running two unrelated scripts at once. A step that touches a shared lock declares `concurrency = \"exclusive\"` itself."

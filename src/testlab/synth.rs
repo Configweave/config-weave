@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::diag::Diag;
-use crate::model::{Package, Playbook, TestDecl};
+use crate::model::{CoarseType, Package, Playbook, TestDecl};
 
 use super::backend::GuestOs;
 
@@ -273,7 +273,7 @@ pub fn synthesize_resource(
     key: &str,
     props: &wscript_std::DynValue,
 ) -> Result<(SynthesizedTest, String), Diag> {
-    let (package, _resource) = key
+    let (package, resource) = key
         .split_once('.')
         .ok_or_else(|| Diag::bare(format!("resource key '{key}' must be 'package.resource'")))?;
 
@@ -288,6 +288,21 @@ pub fn synthesize_resource(
     }
     copy_playbook_lib(pb, dir.path())?;
 
+    // A scenario prop is a wscript string either way, but a symbol param
+    // only validates written as `:name` — so the schema decides. An
+    // unknown resource is left to the in-guest validation to name.
+    let params = p
+        .resources
+        .get(resource)
+        .map(|r| r.params.as_slice())
+        .or_else(|| p.composites.get(resource).map(|c| c.params.as_slice()))
+        .unwrap_or_default();
+    let symbols: Vec<&str> = params
+        .iter()
+        .filter(|d| d.ty == CoarseType::Symbol)
+        .map(|d| d.name.as_str())
+        .collect();
+
     let step = "step";
     let mut out = String::new();
     out.push_str(&format!(
@@ -301,7 +316,7 @@ pub fn synthesize_resource(
         "\n    step \"{step}\" {{\n      description = \"apply {key}\"\n      resource = \"{key}\"\n"
     ));
     out.push_str("      ");
-    out.push_str(&render_props(props)?);
+    out.push_str(&render_props(props, &symbols)?);
     out.push('\n');
     out.push_str("    }\n  }\n}\n");
 
@@ -336,8 +351,9 @@ pub fn synthesize_gather(pb: &Playbook, package: &str) -> Result<SynthesizedTest
 
 /// Render a wscript map value as a WCL `properties { … }` block. Resource
 /// params are scalars (string/int/float/bool); anything else is rendered
-/// as a string for a best-effort pass.
-fn render_props(props: &wscript_std::DynValue) -> Result<String, Diag> {
+/// as a string for a best-effort pass. A top-level string for a key named
+/// in `symbols` (the resource's symbol-typed params) renders as `:name`.
+fn render_props(props: &wscript_std::DynValue, symbols: &[&str]) -> Result<String, Diag> {
     use wscript_std::DynValue;
     let map = match props {
         DynValue::Map(m) => m,
@@ -352,7 +368,21 @@ fn render_props(props: &wscript_std::DynValue) -> Result<String, Diag> {
     };
     let mut out = String::from("properties {\n");
     for (k, v) in map {
-        out.push_str(&format!("        {k} = {}\n", render_value(v)));
+        let rendered = match v {
+            DynValue::String(sym) if symbols.contains(&k.as_str()) => {
+                // Checked here because a bad one would otherwise surface as
+                // a WCL parse error inside the guest, far from the cause.
+                if !crate::engine::vars::is_identifier(sym) {
+                    return Err(Diag::bare(format!(
+                        "property '{k}' is a symbol param, and {sym:?} is not a valid symbol \
+                         name (letters, digits and _, not starting with a digit)"
+                    )));
+                }
+                format!(":{sym}")
+            }
+            _ => render_value(v),
+        };
+        out.push_str(&format!("        {k} = {rendered}\n"));
     }
     out.push_str("      }");
     Ok(out)
@@ -541,12 +571,123 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
         // A single-key map renders a deterministic properties block.
         let mut m = HashMap::new();
         m.insert("path".to_string(), DynValue::String("/tmp/x".into()));
-        let block = render_props(&DynValue::Map(m)).unwrap();
+        let block = render_props(&DynValue::Map(m), &[]).unwrap();
         assert!(block.starts_with("properties {"), "{block}");
         assert!(block.contains("path = \"/tmp/x\""), "{block}");
 
         // Null props → an empty block.
-        assert_eq!(render_props(&DynValue::Null).unwrap(), "properties {}");
+        assert_eq!(render_props(&DynValue::Null, &[]).unwrap(), "properties {}");
+    }
+
+    #[test]
+    fn a_symbol_param_renders_as_a_symbol_and_a_string_param_stays_quoted() {
+        use std::collections::HashMap;
+        use wscript_std::DynValue;
+
+        let mut m = HashMap::new();
+        m.insert("ensure".to_string(), DynValue::String("absent".into()));
+        m.insert("path".to_string(), DynValue::String("absent".into()));
+        let block = render_props(&DynValue::Map(m), &["ensure"]).unwrap();
+        assert!(block.contains("ensure = :absent"), "{block}");
+        assert!(block.contains("path = \"absent\""), "{block}");
+    }
+
+    #[test]
+    fn a_symbol_param_that_is_not_an_identifier_is_refused() {
+        use std::collections::HashMap;
+        use wscript_std::DynValue;
+
+        for bad in ["not-present", "1st", "", "a b"] {
+            let mut m = HashMap::new();
+            m.insert("ensure".to_string(), DynValue::String(bad.into()));
+            let err = render_props(&DynValue::Map(m), &["ensure"]).unwrap_err();
+            assert!(err.message.contains("'ensure'"), "{}", err.message);
+            assert!(
+                err.message.contains("not a valid symbol"),
+                "{}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn a_synthesized_scenario_step_with_a_symbol_param_validates() {
+        use std::collections::HashMap;
+        use wscript_std::DynValue;
+
+        let src = tempfile::tempdir().unwrap();
+        let pkg_dir = src.path().join("pkgs/tlab");
+        std::fs::create_dir_all(pkg_dir.join("resources")).unwrap();
+        std::fs::write(
+            src.path().join("playbook.wcl"),
+            "playbook \"fixture\" {\n  description = \"f\"\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            pkg_dir.join("package.wcl"),
+            r#"package "tlab" {
+  description = "fixture"
+
+  resource "file" {
+    description = "A file"
+    script = "resources/file.ws"
+    param "path" {
+      description = "Where"
+      type = "string"
+      required = true
+    }
+    param "ensure" {
+      description = "Present or absent"
+      type = "symbol"
+      symbol "present" { description = "exists" }
+      symbol "absent" { description = "does not exist" }
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            pkg_dir.join("resources/file.ws"),
+            r#"use value
+
+fn check(params: Value) -> CheckResult {
+    CheckResult::AlreadyConfigured
+}
+
+fn apply(params: Value) -> ApplyResult {
+    ApplyResult::Success
+}
+"#,
+        )
+        .unwrap();
+
+        let loaded = crate::model::load(src.path());
+        assert!(
+            loaded.diags.is_empty(),
+            "fixture must validate: {:?}",
+            loaded.diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let pb = loaded.playbook.unwrap();
+
+        let mut m = HashMap::new();
+        m.insert("path".to_string(), DynValue::String("/tmp/x".into()));
+        m.insert("ensure".to_string(), DynValue::String("absent".into()));
+        let (synth, _) = synthesize_resource(&pb, "tlab.file", &DynValue::Map(m)).unwrap();
+
+        // Quoted, this failed validation with "write :absent, not \"absent\"".
+        let again = crate::model::load(synth.dir.path());
+        assert!(
+            again.diags.is_empty(),
+            "synthesized scenario playbook must validate: {:?}",
+            again.diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let diags = crate::engine::validate(&again.playbook.unwrap());
+        assert!(
+            diags.is_empty(),
+            "{:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
     }
 
     #[test]
