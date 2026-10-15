@@ -569,7 +569,7 @@ that copy.
 | `copy_in` | `(host_path: string, dest: string) -> Result[unit, string]` | host file or directory into the guest |
 | `reboot` | `() -> Result[unit, string]` | |
 | `wait_ready` | `(secs: int) -> Result[unit, string]` | up to `secs` seconds for the guest to answer; negative is zero |
-| `apply_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | one resource; `props` is a `Value::Map` |
+| `apply_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | one resource; `props` is a `Value::Map`; a string for a `symbol` param is written as `:name` and must be an identifier |
 | `check_resource` | `(key: string, props: Value) -> Result[StepResult, string]` | one resource |
 | `gather` | `(key: string, params: Value) -> Result[Value, string]` | one gatherer's value; a refusal is an `Err` |
 | `apply` | `(dir: string) -> Result[RunReport, string]` | a whole playbook directory, its only play; several or no plays is an `Err` naming them |

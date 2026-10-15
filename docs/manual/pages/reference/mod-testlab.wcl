@@ -49,7 +49,7 @@ struct Machine {}
 SRC
   }
 
-  p "A provisioned machine. The config-weave binary is copied into a machine and smoke-tested the first time a method needs it, so a machine that is only ever used through `exec` never pays for that copy. Resource keys are `package.resource`, and `props` is a `Value::Map` of the resource's properties. Playbook directories are resolved relative to the scenario's package."
+  p "A provisioned machine. The config-weave binary is copied into a machine and smoke-tested the first time a method needs it, so a machine that is only ever used through `exec` never pays for that copy. Resource keys are `package.resource`, and `props` is a `Value::Map` of the resource's properties. A string for a `symbol`-typed parameter is written into the playbook as that symbol, so `\"ensure\": Value::String(\"absent\")` becomes `ensure = :absent`; a string that is not a valid symbol name (letters, digits and `_`, not starting with a digit) is an `Err`. Playbook directories are resolved relative to the scenario's package."
 
   table {
     rows:

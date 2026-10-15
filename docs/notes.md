@@ -697,7 +697,13 @@ below). Bindings fixed here:
   `machine.apply_resource(key, props)` synthesizes a one-step playbook
   (`synth::synthesize_resource`, rendering `props` as a WCL `properties`
   block), copies the binary in once per machine, runs `config-weave
-  {check,apply} --json`, and returns the step's status.
+  {check,apply} --json`, and returns the step's status. A wscript
+  string cannot say whether it means `"absent"` or `:absent`, so the
+  rendering is schema-driven: a top-level string prop for a param the
+  resource (or composite) declares `type = "symbol"` renders as `:name`,
+  and one that is not a WCL identifier is refused host-side rather than
+  emitted as WCL that fails to parse in the guest. Nested values and
+  every other param render as before.
   `machine.apply(dir)`/`check(dir)` stage an authored playbook dir whole
   and run **its only play** — `config-weave apply|check` require `<PLAY>`,
   and until 2026-10 the run omitted it, so neither method could

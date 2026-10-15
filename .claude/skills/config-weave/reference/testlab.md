@@ -261,7 +261,7 @@ The module exposes no free functions. It registers the handle types `Lab`, `Mach
 | `machine` | `(name: string) -> Result[Machine, string]` | bring the declared VM up on first reference and return its handle |
 | `log` | `(message: string)` | print a scenario progress line to the terminal |
 
-`Machine` is a provisioned VM. The config-weave binary is copied in and smoke-tested the first time a method needs it, so a machine only used through `exec` never pays for the copy. Resource keys are `package.resource`; `props` and `params` are a `Value::Map`. Playbook directories are resolved relative to the scenario's package. This is the whole surface.
+`Machine` is a provisioned VM. The config-weave binary is copied in and smoke-tested the first time a method needs it, so a machine only used through `exec` never pays for the copy. Resource keys are `package.resource`; `props` and `params` are a `Value::Map`. A top-level string prop for a `symbol`-typed param is rendered as that symbol (`"ensure": Value::String("absent")` → `ensure = :absent`); one that is not a valid identifier is an `Err`. Playbook directories are resolved relative to the scenario's package. This is the whole surface.
 
 | Method | Signature | Summary |
 |---|---|---|
