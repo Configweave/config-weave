@@ -327,6 +327,15 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
 - Gather params must evaluate before variables resolve, so they may
   reference `--var`/`--var-file` overrides but not gatherer results or
   declared vars that depend on them.
+- There is no "apply always" mode, decided 2026-10-20. A resource whose
+  check always returns NotConfigured fails the post-apply re-check, and
+  that is intended: the re-check and the testlab's three-run idempotence
+  protocol are what make "converged" mean something. A resource that wants
+  force semantics detects drift instead, or takes a revision param the
+  author bumps to request a re-apply (the `password_revision` pattern in
+  config-weave-pkgs). Neither a resource flag that skips the re-check nor
+  an "applied, unverifiable" ApplyResult was added. Revisit only for a
+  resource that can detect neither drift nor a revision.
 
 ## Lock groups (post-v1 extension to PRD §5's concurrency classes)
 
