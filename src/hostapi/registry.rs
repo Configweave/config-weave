@@ -1,6 +1,8 @@
 //! The `registry` module (PRD §7): Windows registry access, typed for
 //! REG_SZ, REG_EXPAND_SZ, REG_DWORD, REG_QWORD, REG_MULTI_SZ, REG_BINARY and
-//! REG_NONE. Keys are written as a hive-prefixed path:
+//! REG_NONE (`read_typed` also passes any other type through as raw bytes).
+//! A key or value is "absent" only for ERROR_FILE_NOT_FOUND or
+//! ERROR_PATH_NOT_FOUND; any other open or query failure is an `Err`. Keys are written as a hive-prefixed path:
 //! `HKLM\Software\Vendor\App`. Registered on every platform; calls fail at
 //! runtime off Windows.
 
@@ -31,6 +33,10 @@ mod codec {
     const REG_DWORD: u32 = 4;
     const REG_MULTI_SZ: u32 = 7;
     const REG_QWORD: u32 = 11;
+
+    // Win32 error codes that mean "no such key or value" (winerror.h).
+    const ERROR_FILE_NOT_FOUND: u32 = 2;
+    const ERROR_PATH_NOT_FOUND: u32 = 3;
 
     // Access-mask bits that select a registry view (winnt.h).
     const KEY_WOW64_64KEY: u32 = 0x0100;
@@ -80,21 +86,54 @@ mod codec {
                 }
                 Ok(DynValue::List(items))
             }
-            REG_BINARY | REG_NONE => Ok(DynValue::List(
-                buf.iter().map(|b| DynValue::Int(*b as i64)).collect(),
-            )),
+            REG_BINARY | REG_NONE => Ok(byte_list(buf)),
             other => Err(format!("unsupported registry value type {other}")),
         }
     }
 
-    /// The `{kind, data}` map `read_typed` returns.
+    /// The `{kind, data}` map `read_typed` returns. A type the module does
+    /// not handle comes back as `{kind: "other", type, data}`: the REG_*
+    /// number and the raw bytes, so a caller can still inspect it.
     pub(super) fn typed(kind: u32, buf: &[u8]) -> Result<DynValue, String> {
-        let name =
-            kind_name(kind).ok_or_else(|| format!("unsupported registry value type {kind}"))?;
         let mut m = HashMap::new();
-        m.insert("kind".to_string(), DynValue::String(name.to_string()));
-        m.insert("data".to_string(), decode(kind, buf)?);
+        match kind_name(kind) {
+            Some(name) => {
+                m.insert("kind".to_string(), DynValue::String(name.to_string()));
+                m.insert("data".to_string(), decode(kind, buf)?);
+            }
+            None => {
+                m.insert("kind".to_string(), DynValue::String("other".to_string()));
+                m.insert("type".to_string(), DynValue::Int(i64::from(kind)));
+                m.insert("data".to_string(), byte_list(buf));
+            }
+        }
         Ok(DynValue::Map(m))
+    }
+
+    fn byte_list(buf: &[u8]) -> DynValue {
+        DynValue::List(buf.iter().map(|b| DynValue::Int(*b as i64)).collect())
+    }
+
+    /// Whether a failed open or query means the key or value does not
+    /// exist. Anything else (access denied, a bad handle, ...) is a real
+    /// failure and must not read as absent.
+    pub(super) fn is_absent(code: u32) -> bool {
+        matches!(code, ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND)
+    }
+
+    /// The result of a failed open or query of `what` with Win32 `code`:
+    /// `Ok(None)` when it is absent, otherwise an `Err` naming `what` and
+    /// the error.
+    pub(super) fn absent_or_err<T>(
+        what: &str,
+        code: u32,
+        message: &str,
+    ) -> Result<Option<T>, String> {
+        if is_absent(code) {
+            Ok(None)
+        } else {
+            Err(format!("{what}: {message} (Win32 error {code})"))
+        }
     }
 
     /// A script value to the registry type and raw bytes `write` stores.
@@ -253,14 +292,39 @@ mod codec {
         }
 
         #[test]
-        fn unhandled_types_still_error() {
+        fn read_still_errors_on_unhandled_types() {
             // REG_LINK
             let err = decode(6, &[]).unwrap_err();
             assert!(
                 err.contains("unsupported registry value type 6"),
                 "got: {err}"
             );
-            assert!(typed(6, &[]).is_err());
+        }
+
+        #[test]
+        fn typed_passes_unhandled_types_through_as_other() {
+            // REG_RESOURCE_LIST
+            let v = typed(8, &[1, 2, 255]).unwrap();
+            assert_eq!(kind_of(&v), "other");
+            assert_eq!(v.get("type"), Some(&DynValue::Int(8)));
+            assert_eq!(v.get("data"), Some(&bytes(&[1, 2, 255])));
+            // A handled kind carries no `type`.
+            assert_eq!(typed(REG_DWORD, &[1, 0, 0, 0]).unwrap().get("type"), None);
+        }
+
+        #[test]
+        fn only_not_found_codes_mean_absent() {
+            assert!(is_absent(2));
+            assert!(is_absent(3));
+            for code in [5, 6, 87, 1018] {
+                assert!(!is_absent(code), "code {code}");
+            }
+            assert_eq!(
+                absent_or_err::<()>("opening 'HKLM\\X'", 2, "gone"),
+                Ok(None)
+            );
+            let err = absent_or_err::<()>("opening 'HKLM\\X'", 5, "Access is denied.").unwrap_err();
+            assert_eq!(err, "opening 'HKLM\\X': Access is denied. (Win32 error 5)");
         }
 
         #[test]
@@ -378,6 +442,9 @@ mod codec {
             assert_eq!(REG_QWORD, r::REG_QWORD.0);
             assert_eq!(KEY_WOW64_32KEY, r::KEY_WOW64_32KEY.0);
             assert_eq!(KEY_WOW64_64KEY, r::KEY_WOW64_64KEY.0);
+            use windows::Win32::Foundation as f;
+            assert_eq!(ERROR_FILE_NOT_FOUND, f::ERROR_FILE_NOT_FOUND.0);
+            assert_eq!(ERROR_PATH_NOT_FOUND, f::ERROR_PATH_NOT_FOUND.0);
         }
     }
 }
@@ -391,7 +458,10 @@ pub fn module() -> Module {
     m.const_("HKU", "HKU");
     m.const_("HKCC", "HKCC");
 
-    m.doc_next("Read a value (None when the key or value is absent)");
+    m.doc_next(
+        "Read a value (None when the key or value is absent; any other failure, such as \
+         access denied, is an Err)",
+    );
     #[cfg(windows)]
     m.fn_(
         "read",
@@ -422,7 +492,8 @@ pub fn module() -> Module {
     );
 
     m.doc_next(
-        "Read a value with its kind: {kind, data} (None when absent). \
+        "Read a value with its kind: {kind, data} (None when absent). A type read cannot \
+         decode is {kind: \"other\", type: REG_* number, data: raw bytes}. \
          opts: view (native | wow64_32 | wow64_64)",
     );
     #[cfg(windows)]
@@ -552,7 +623,7 @@ pub fn module() -> Module {
         |_: &str, _: DynValue| -> Result<(), String> { Err(NOT_WINDOWS.to_string()) },
     );
 
-    m.doc_next("Whether a key exists");
+    m.doc_next("Whether a key exists (any failure other than not-found is an Err)");
     #[cfg(windows)]
     m.fn_("key_exists", |key: &str| -> Result<bool, String> {
         win::key_exists(key, View::Native)
@@ -582,6 +653,8 @@ pub fn module() -> Module {
 #[cfg(windows)]
 mod win {
     use super::View;
+    use super::codec::absent_or_err;
+    use windows::Win32::Foundation::{ERROR_SUCCESS, WIN32_ERROR};
     use windows::Win32::System::Registry::{
         HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_CONFIG, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
         HKEY_USERS, KEY_ALL_ACCESS, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS,
@@ -608,11 +681,21 @@ mod win {
         access | REG_SAM_FLAGS(view.sam_flag())
     }
 
-    fn open(key: &str, access: REG_SAM_FLAGS, view: View) -> Result<HKEY, String> {
+    /// The text of a Win32 error, without the HRESULT the `Display` of
+    /// `windows::core::Error` appends.
+    fn message(rc: WIN32_ERROR) -> String {
+        windows::core::Error::from_hresult(rc.to_hresult()).message()
+    }
+
+    fn open_raw(
+        key: &str,
+        access: REG_SAM_FLAGS,
+        view: View,
+    ) -> Result<(WIN32_ERROR, HKEY), String> {
         let (hive, path) = split_hive(key)?;
         let wide = HSTRING::from(path);
         let mut out = HKEY::default();
-        unsafe {
+        let rc = unsafe {
             RegOpenKeyExW(
                 hive,
                 PCWSTR(wide.as_ptr()),
@@ -620,10 +703,29 @@ mod win {
                 sam(access, view),
                 &mut out,
             )
-            .ok()
-            .map_err(|e| format!("opening '{key}': {e}"))?;
+        };
+        Ok((rc, out))
+    }
+
+    /// Open a key that must exist (write, delete).
+    fn open(key: &str, access: REG_SAM_FLAGS, view: View) -> Result<HKEY, String> {
+        match open_raw(key, access, view)? {
+            (ERROR_SUCCESS, h) => Ok(h),
+            (rc, _) => Err(format!("opening '{key}': {}", message(rc))),
         }
-        Ok(out)
+    }
+
+    /// Open a key that may be absent: `None` only when it does not exist,
+    /// an `Err` for any other failure (e.g. access denied).
+    fn open_existing(
+        key: &str,
+        access: REG_SAM_FLAGS,
+        view: View,
+    ) -> Result<Option<Guard>, String> {
+        match open_raw(key, access, view)? {
+            (ERROR_SUCCESS, h) => Ok(Some(Guard(h))),
+            (rc, _) => absent_or_err(&format!("opening '{key}'"), rc.0, &message(rc)),
+        }
     }
 
     struct Guard(HKEY);
@@ -638,9 +740,8 @@ mod win {
     /// The raw type and bytes of a value; None when the key or value is
     /// absent.
     fn query(key: &str, name: &str, view: View) -> Result<Option<(u32, Vec<u8>)>, String> {
-        let handle = match open(key, KEY_READ, view) {
-            Ok(h) => Guard(h),
-            Err(_) => return Ok(None),
+        let Some(handle) = open_existing(key, KEY_READ, view)? else {
+            return Ok(None);
         };
         let wide = HSTRING::from(name);
         let mut kind = REG_VALUE_TYPE::default();
@@ -655,8 +756,12 @@ mod win {
                 Some(&mut size),
             )
         };
-        if probe.is_err() {
-            return Ok(None);
+        if probe != ERROR_SUCCESS {
+            return absent_or_err(
+                &format!("reading '{key}\\{name}'"),
+                probe.0,
+                &message(probe),
+            );
         }
         let mut buf = vec![0u8; size as usize];
         unsafe {
@@ -770,12 +875,6 @@ mod win {
     }
 
     pub fn key_exists(key: &str, view: View) -> Result<bool, String> {
-        match open(key, KEY_READ, view) {
-            Ok(h) => {
-                drop(Guard(h));
-                Ok(true)
-            }
-            Err(_) => Ok(false),
-        }
+        Ok(open_existing(key, KEY_READ, view)?.is_some())
     }
 }

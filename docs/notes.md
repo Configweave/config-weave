@@ -431,7 +431,19 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   vocabulary (`sz`, `expand_sz`, `dword`, `qword`, `multi_sz`, `binary`,
   `none`), so a package can detect a value stored with the wrong kind.
   Binary data (REG_BINARY, REG_NONE) uses the `fs::read_bytes` shape, a
-  list of byte ints.
+  list of byte ints. Any other type (REG_LINK, REG_RESOURCE_LIST, ...) is
+  `{kind: "other", type, data}`: `type` is the REG_* number, `data` the raw
+  bytes in the same list-of-ints shape. `other` is read-only: `write`
+  rejects it, and `read`/`read_with` still return an `Err` for those types,
+  since they have no kind field to carry the distinction.
+- `registry` "absent" is decided by `codec::is_absent`: only
+  ERROR_FILE_NOT_FOUND (2) and ERROR_PATH_NOT_FOUND (3) make `read`,
+  `read_typed` return `None` or `key_exists` return `false`. Any other
+  open or value-query failure (ERROR_ACCESS_DENIED, ...) is an `Err`
+  naming the key and the Win32 error, so a check cannot mistake "cannot
+  see" for "not configured" and an apply cannot then overwrite a key it
+  was never allowed to read. `delete_value`/`delete_key` already failed on
+  a missing key and are unchanged.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:
