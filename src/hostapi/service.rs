@@ -149,22 +149,63 @@ fn parse_opts(opts: &DynValue, dependents: bool) -> Result<Opts, String> {
 /// EnumDependentServicesW returns them, the reverse of start order, which
 /// is a safe stop order even when dependents depend on each other.
 /// Returns the dependents it stopped, in stop order.
+///
+/// `preflight` runs before any dependent is touched and should fail when
+/// `name` itself cannot be stopped (on Windows: it cannot be opened with
+/// stop rights), so a protected service does not leave its dependents
+/// stopped. If stopping `name` still fails, the dependents already stopped
+/// are started again, best effort, and the error says how that went.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn stop_tree(
     name: &str,
     deps: &[(String, u32)],
+    preflight: impl FnOnce(&str) -> Result<(), String>,
     mut converge: impl FnMut(&str, Target) -> Result<(), String>,
 ) -> Result<Vec<String>, String> {
-    let mut stopped = Vec::new();
-    for (dep, state) in deps {
-        if *state != STOPPED {
-            converge(dep, Target::Stopped)
-                .map_err(|e| format!("stopping dependent '{dep}' of '{name}': {e}"))?;
-            stopped.push(dep.clone());
+    let running: Vec<&String> = deps
+        .iter()
+        .filter(|(_, state)| *state != STOPPED)
+        .map(|(dep, _)| dep)
+        .collect();
+    if !running.is_empty() {
+        preflight(name)
+            .map_err(|e| format!("cannot stop '{name}', so no dependents were stopped: {e}"))?;
+    }
+    let mut stopped: Vec<String> = Vec::new();
+    let mut failure = None;
+    for dep in running {
+        match converge(dep, Target::Stopped) {
+            Ok(()) => stopped.push(dep.clone()),
+            Err(e) => {
+                failure = Some(format!("stopping dependent '{dep}' of '{name}': {e}"));
+                break;
+            }
         }
     }
-    converge(name, Target::Stopped)?;
-    Ok(stopped)
+    if failure.is_none() {
+        match converge(name, Target::Stopped) {
+            Ok(()) => return Ok(stopped),
+            Err(e) => failure = Some(e),
+        }
+    }
+    let mut msg = failure.unwrap_or_default();
+    if !stopped.is_empty() {
+        let mut not_restored = Vec::new();
+        for dep in stopped.iter().rev() {
+            if let Err(e) = converge(dep, Target::Running) {
+                not_restored.push(format!("'{dep}' ({e})"));
+            }
+        }
+        if not_restored.is_empty() {
+            msg.push_str("; the dependents it stopped were started again");
+        } else {
+            msg.push_str(&format!(
+                "; could not start these stopped dependents again: {}",
+                not_restored.join(", ")
+            ));
+        }
+    }
+    Err(msg)
 }
 
 /// `restart` with `stop_dependents`: `stop_tree`, start `name`, then start
@@ -173,9 +214,10 @@ fn stop_tree(
 fn restart_tree(
     name: &str,
     deps: &[(String, u32)],
+    preflight: impl FnOnce(&str) -> Result<(), String>,
     mut converge: impl FnMut(&str, Target) -> Result<(), String>,
 ) -> Result<(), String> {
-    let stopped = stop_tree(name, deps, &mut converge)?;
+    let stopped = stop_tree(name, deps, preflight, &mut converge)?;
     converge(name, Target::Running)?;
     for dep in stopped.iter().rev() {
         converge(dep, Target::Running)
@@ -391,7 +433,10 @@ pub fn module() -> Module {
                 return win::converge(name, Target::Stopped, opts.timeout);
             }
             let deps = win::dependents(name)?;
-            stop_tree(name, &deps, |n, t| win::converge(n, t, opts.timeout)).map(|_| ())
+            stop_tree(name, &deps, win::check_stop, |n, t| {
+                win::converge(n, t, opts.timeout)
+            })
+            .map(|_| ())
         },
     );
     #[cfg(not(windows))]
@@ -418,7 +463,9 @@ pub fn module() -> Module {
             } else {
                 Vec::new()
             };
-            restart_tree(name, &deps, |n, t| win::converge(n, t, opts.timeout))
+            restart_tree(name, &deps, win::check_stop, |n, t| {
+                win::converge(n, t, opts.timeout)
+            })
         },
     );
     #[cfg(not(windows))]
@@ -543,6 +590,11 @@ mod win {
             || query(name, &svc),
             |action| act(name, action),
         )
+    }
+
+    /// Whether `name` can be opened with stop rights, without stopping it.
+    pub fn check_stop(name: &str) -> Result<(), String> {
+        open(name, SERVICE_STOP).map(|_| ())
     }
 
     fn act(name: &str, action: Action) -> Result<(), String> {
@@ -859,6 +911,10 @@ mod tests {
         }
     }
 
+    fn ok_preflight(_: &str) -> Result<(), String> {
+        Ok(())
+    }
+
     fn acts(pairs: &[(&str, Action)]) -> Vec<(String, Action)> {
         pairs.iter().map(|(n, a)| (n.to_string(), *a)).collect()
     }
@@ -874,7 +930,7 @@ mod tests {
         // SCM order: reverse start order, so `outer` (which depends on
         // `inner`) comes first.
         let deps = scm.deps(&["outer", "idle", "inner"]);
-        let stopped = stop_tree("svc", &deps, |n, t| scm.converge(n, t)).unwrap();
+        let stopped = stop_tree("svc", &deps, ok_preflight, |n, t| scm.converge(n, t)).unwrap();
         assert_eq!(stopped, vec!["outer".to_string(), "inner".to_string()]);
         assert_eq!(
             scm.log(),
@@ -889,7 +945,7 @@ mod tests {
     #[test]
     fn stop_tree_with_no_dependents_is_a_plain_stop() {
         let scm = FakeScm::new(&[("svc", RUNNING)]);
-        let stopped = stop_tree("svc", &[], |n, t| scm.converge(n, t)).unwrap();
+        let stopped = stop_tree("svc", &[], ok_preflight, |n, t| scm.converge(n, t)).unwrap();
         assert!(stopped.is_empty());
         assert_eq!(scm.log(), acts(&[("svc", Action::Stop)]));
     }
@@ -903,7 +959,7 @@ mod tests {
             ("inner", RUNNING),
         ]);
         let deps = scm.deps(&["outer", "idle", "inner"]);
-        restart_tree("svc", &deps, |n, t| scm.converge(n, t)).unwrap();
+        restart_tree("svc", &deps, ok_preflight, |n, t| scm.converge(n, t)).unwrap();
         assert_eq!(
             scm.log(),
             acts(&[
@@ -921,7 +977,7 @@ mod tests {
     #[test]
     fn restart_tree_without_dependents_is_stop_then_start() {
         let scm = FakeScm::new(&[("svc", RUNNING)]);
-        restart_tree("svc", &[], |n, t| scm.converge(n, t)).unwrap();
+        restart_tree("svc", &[], ok_preflight, |n, t| scm.converge(n, t)).unwrap();
         assert_eq!(
             scm.log(),
             acts(&[("svc", Action::Stop), ("svc", Action::Start)])
@@ -932,7 +988,7 @@ mod tests {
     fn a_failing_dependent_stops_the_tree_and_is_named() {
         let scm = FakeScm::new(&[("svc", RUNNING), ("dep", RUNNING)]);
         let deps = scm.deps(&["dep"]);
-        let err = stop_tree("svc", &deps, |n, t| {
+        let err = stop_tree("svc", &deps, ok_preflight, |n, t| {
             if n == "dep" {
                 Err("access denied".to_string())
             } else {
@@ -942,6 +998,88 @@ mod tests {
         .unwrap_err();
         assert!(err.contains("stopping dependent 'dep' of 'svc'"), "{err}");
         assert!(scm.log().is_empty(), "svc must not be stopped");
+    }
+
+    #[test]
+    fn a_service_that_cannot_be_stopped_leaves_its_dependents_alone() {
+        // WinHttpAutoProxySvc on Windows Server 2025: SYSTEM cannot open it
+        // with stop rights, so stopping its dependents first only broke them.
+        let scm = FakeScm::new(&[("svc", RUNNING), ("dep", RUNNING)]);
+        let deps = scm.deps(&["dep"]);
+        let err = restart_tree(
+            "svc",
+            &deps,
+            |_| Err("opening service 'svc': Access is denied.".to_string()),
+            |n, t| scm.converge(n, t),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("cannot stop 'svc', so no dependents were stopped"),
+            "{err}"
+        );
+        assert!(
+            scm.log().is_empty(),
+            "nothing may be stopped: {:?}",
+            scm.log()
+        );
+    }
+
+    #[test]
+    fn the_preflight_is_skipped_when_no_dependent_is_running() {
+        let scm = FakeScm::new(&[("svc", RUNNING), ("idle", STOPPED)]);
+        let deps = scm.deps(&["idle"]);
+        stop_tree(
+            "svc",
+            &deps,
+            |_| Err("must not run".to_string()),
+            |n, t| scm.converge(n, t),
+        )
+        .unwrap();
+        assert_eq!(scm.log(), acts(&[("svc", Action::Stop)]));
+    }
+
+    #[test]
+    fn a_failed_service_stop_starts_the_stopped_dependents_again() {
+        let scm = FakeScm::new(&[("svc", RUNNING), ("outer", RUNNING), ("inner", RUNNING)]);
+        let deps = scm.deps(&["outer", "inner"]);
+        let err = stop_tree("svc", &deps, ok_preflight, |n, t| {
+            if n == "svc" {
+                Err("stopping 'svc': refused".to_string())
+            } else {
+                scm.converge(n, t)
+            }
+        })
+        .unwrap_err();
+        assert!(err.contains("stopping 'svc': refused"), "{err}");
+        assert!(
+            err.contains("the dependents it stopped were started again"),
+            "{err}"
+        );
+        assert_eq!(
+            scm.log(),
+            acts(&[
+                ("outer", Action::Stop),
+                ("inner", Action::Stop),
+                ("inner", Action::Start),
+                ("outer", Action::Start),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_dependent_that_will_not_restart_is_named() {
+        let scm = FakeScm::new(&[("svc", RUNNING), ("dep", RUNNING)]);
+        let deps = scm.deps(&["dep"]);
+        let err = stop_tree("svc", &deps, ok_preflight, |n, t| match (n, t) {
+            ("svc", _) => Err("refused".to_string()),
+            ("dep", Target::Running) => Err("crashed".to_string()),
+            _ => scm.converge(n, t),
+        })
+        .unwrap_err();
+        assert!(
+            err.contains("could not start these stopped dependents again: 'dep' (crashed)"),
+            "{err}"
+        );
     }
 
     #[test]

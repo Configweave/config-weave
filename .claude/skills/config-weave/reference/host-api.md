@@ -519,7 +519,11 @@ surface.
 `stop_dependents` stops dependents in the order the SCM lists them (reverse
 start order, so a dependent of a dependent stops first), each with the same
 timeout, then the service. A dependent that was already stopped is left
-alone. A dependent that fails ends the call with an `Err` naming it.
+alone. A dependent that fails ends the call with an `Err` naming it. The
+service is checked for stop rights before any dependent is touched, so a
+service the caller cannot stop fails without stopping anything. If the
+service itself then fails to stop, the dependents already stopped are
+started again and the `Err` names any that would not start.
 `start_with` rejects `stop_dependents`.
 
 A wait that runs out returns an `Err` naming the last state seen. A service

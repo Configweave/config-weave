@@ -426,7 +426,12 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   start order, which is the only safe stop order when dependents depend on
   each other. `restart` restarts the ones it stopped in the reverse of
   that. `service::dependents` sorts its result for determinism; it is for
-  inspection, not for driving a stop order.
+  inspection, not for driving a stop order. Before touching a dependent
+  it opens the service itself with stop rights, so a protected service
+  (Windows Server 2025's `WinHttpAutoProxySvc` refuses SYSTEM) fails up
+  front instead of leaving its dependents stopped. If stopping the service
+  still fails, the dependents already stopped are started again, best
+  effort, and the `Err` says which could not be.
 - `registry::read_typed` returns `{kind, data}` with `kind` from `write`'s
   vocabulary (`sz`, `expand_sz`, `dword`, `qword`, `multi_sz`, `binary`,
   `none`), so a package can detect a value stored with the wrong kind.
