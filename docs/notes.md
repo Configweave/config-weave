@@ -533,7 +533,7 @@ runs each in a disposable **vmlab** instance. vmlab is the only backend
 below). Bindings fixed here:
 
 - **Shape.** `test "name" { description, image | template, memory?,
-  group?, setup?, verify?, step…, gather… }`. Exactly one of `image` (an
+  group?, jobs?, setup?, verify?, step…, gather… }`. Exactly one of `image` (an
   OCI ref → a vmlab **container**) or `template` (a vmlab template ref →
   a full **VM**) is required; neither and both are validation errors that
   name the fix. `memory` is a WCL byte size emitted **unquoted** into the
@@ -564,8 +564,11 @@ below). Bindings fixed here:
   selection index so output stays in declaration order despite parallel
   runs.
 - **Three-run protocol.** Inside the instance the runner executes
-  `check`, `apply`, `apply` (all `--json --continue-on-error`, `--jobs`
-  forwarded). Run 2's internal re-check proves convergence within one
+  `check`, `apply`, `apply` (all `--json --continue-on-error`). `--jobs`
+  is `config-weave test --jobs` when given on the command line, else the
+  test's own `jobs` (an int >= 1), else omitted so the guest engine
+  defaults; the CLI flag is an `Option`, so "given" and "defaulted" are
+  told apart by `None` with no sentinel. Run 2's internal re-check proves convergence within one
   process; run 3 proves *cross-process idempotence* and that re-apply is
   a true no-op (a check that only passes on in-process state re-applies
   and surfaces as `configured`, failing the test). Expectation table
@@ -667,8 +670,8 @@ below). Bindings fixed here:
   containers: `--container-jobs` (default `min(cpu, 8)`) and `--vm-jobs`
   (default 2). Total live instances ≤ container_cap + vm_cap. Within a
   group tests stay sequential (shared state). `--jobs` is unchanged — the
-  in-instance engine pool, still forwarded as `--jobs` to each
-  check/apply run. Provision/smoke failure errors every test in the
+  in-instance engine pool, forwarded as `--jobs` to each check/apply
+  run and overriding a test's own `jobs`. Provision/smoke failure errors every test in the
   group; a single test's transport trouble errors only that test and the
   rest of the group proceeds.
 - **Why vmlab only.** Docker bought fast linux containers at the cost of

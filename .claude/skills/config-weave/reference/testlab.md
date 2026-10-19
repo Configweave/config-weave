@@ -43,6 +43,7 @@ test "file_present_converges" {
 | `template` | string | one of `image`, `template` | A vmlab template reference such as `x86_64/ubuntu-24.04`. The test runs in a full VM: Linux or Windows, with a real init system, kernel and reboots. |
 | `memory` | string | no | Guest RAM as a WCL byte size, for example `"4GiB"`. Omitted, a container gets vmlab's default of 256MiB and a VM gets its template's sizing. Tests in one group must agree. |
 | `group` | string | no | Tests in the same package with the same non-empty group run sequentially inside one shared instance. They must agree on `image` or `template`, and they share OS state with no reset between them. Absent or empty, the test gets its own instance. |
+| `jobs` | int | no | Worker pool size, at least 1, for this test's three in-guest runs. An explicit `config-weave test --jobs N` overrides it. Omitted, the guest engine uses its default, the smaller of the CPU count and 8. |
 | `setup` | string | no | A shell command run inside the instance before the three runs, through `sh -c` on Linux or `cmd /C` on Windows, with the test's working directory as the current directory. |
 | `verify` | string | no | Path of a verify script relative to the package directory. Exports `verify(facts: Value) -> bool` (entry-point signatures: scripts.md). |
 | `step` | block, repeatable | no | Resource invocations with an expectation. |
@@ -154,7 +155,7 @@ test "file_present_converges" {
 
 ## The three-run protocol
 
-Inside the instance the runner executes the synthesized playbook three times as three separate processes, each with `--json` and `--continue-on-error`, and `--jobs` forwarded.
+Inside the instance the runner executes the synthesized playbook three times as three separate processes, each with `--json` and `--continue-on-error`. `--jobs` comes from `config-weave test --jobs` when given, else the test's own `jobs`, else it is omitted.
 
 1. **Run 1, check.** Reports the initial status and mutates nothing. A step expected to converge reports `not_configured` here.
 2. **Run 2, apply.** Converges. The engine's own re-check after each apply proves convergence within one process.
@@ -337,7 +338,7 @@ config-weave test [OPTIONS] <PLAYBOOK_DIR> [FILTER]
 
 A filter that matches nothing is an error, and the message lists every available `pkg:name`. A playbook in which no package declares a test or scenario is also an error.
 
-Global options apply: `--json` selects the JSON report, `--no-color` the plain one, and `--jobs` is forwarded to the config-weave runs inside each instance. This is the whole set of `test`-specific options.
+Global options apply: `--json` selects the JSON report, `--no-color` the plain one, and `--jobs` is forwarded to the config-weave runs inside each instance, overriding any test's own `jobs`. This is the whole set of `test`-specific options.
 
 | Option | Value | Meaning |
 |---|---|---|

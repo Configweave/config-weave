@@ -1922,6 +1922,7 @@ fn load_test(
     let memory = string_field_optional(block, "memory", ctx).filter(|m| !m.is_empty());
     // Empty `group = ""` reads as ungrouped (its own instance).
     let group = string_field_optional(block, "group", ctx).filter(|g| !g.is_empty());
+    let jobs = positive_int_field_optional(block, "jobs", ctx).map(|n| n as usize);
     let setup = string_field_optional(block, "setup", ctx);
     let verify = string_field_optional(block, "verify", ctx).and_then(|rel| {
         let path = pkg_dir.join(&rel);
@@ -2139,6 +2140,7 @@ fn load_test(
         target,
         memory,
         group,
+        jobs,
         setup,
         verify,
         steps,
@@ -2480,6 +2482,28 @@ fn bool_field(block: &Block<'_>, name: &str, ctx: &mut Ctx<'_>) -> Option<bool> 
             None
         }
     }
+}
+
+/// An optional whole-number field that must be at least 1; absent is
+/// `None` (no diag).
+fn positive_int_field_optional(block: &Block<'_>, name: &str, ctx: &mut Ctx<'_>) -> Option<u64> {
+    block.fields().find(|f| f.name() == name)?;
+    let v = field_value(block, name, ctx)?;
+    let Ok(DynValue::Int(n)) = wcl_to_dyn(&v) else {
+        ctx.err(
+            format!("field '{name}' must be a whole number, got {v:?}"),
+            wcl_span(block.span()),
+        );
+        return None;
+    };
+    if n < 1 {
+        ctx.err(
+            format!("field '{name}' must be at least 1, got {n}"),
+            wcl_span(block.span()),
+        );
+        return None;
+    }
+    Some(n as u64)
 }
 
 fn string_list_field(block: &Block<'_>, name: &str, ctx: &mut Ctx<'_>) -> Option<Vec<String>> {

@@ -411,6 +411,9 @@ pub struct TestDecl {
     /// Tests sharing a non-empty group (within a package) run in one
     /// shared instance; `None`/empty means the test gets its own.
     pub group: Option<String>,
+    /// Worker pool size for the in-guest check/apply runs; an explicit
+    /// `config-weave test --jobs` overrides it.
+    pub jobs: Option<usize>,
     /// Optional shell provisioning, run via `sh -c` before anything else.
     pub setup: Option<String>,
     /// Absolute path to the optional wscript verify script.

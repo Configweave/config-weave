@@ -291,7 +291,7 @@ Same shape as `param`, under its own block kind. Each argument binds twice in th
 
 ### test
 
-An isolated convergence test run by `config-weave test` in a disposable vmlab instance with the three-run protocol. Fields (`image` or `template`, `memory`, `group`, `setup`, `verify`, nested `step` and `gather`) and the expectation table: testlab.md.
+An isolated convergence test run by `config-weave test` in a disposable vmlab instance with the three-run protocol. Fields (`image` or `template`, `memory`, `group`, `jobs`, `setup`, `verify`, nested `step` and `gather`) and the expectation table: testlab.md.
 
 ### scenario
 

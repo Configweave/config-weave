@@ -6,7 +6,7 @@ page cmd_test {
   chapter_header "config-weave test" {
     kicker       = "Commands · reference"
     reading_time = "5 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -35,7 +35,7 @@ SRC
 
   h2 "Options"
 
-  p "All [global options](cmd_root) apply. `--json` selects the JSON report, `--no-color` the plain one, and `--jobs` is forwarded to the config-weave runs inside each instance."
+  p "All [global options](cmd_root) apply. `--json` selects the JSON report, `--no-color` the plain one, and `--jobs` is forwarded to the config-weave runs inside each instance, overriding a test's own `jobs` field."
 
   table {
     rows:

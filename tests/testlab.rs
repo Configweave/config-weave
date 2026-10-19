@@ -248,6 +248,44 @@ fn a_vm_template_is_accepted_by_validation() {
     assert_eq!(code, 0, "{stderr}");
 }
 
+/// Fixture whose `converges` test declares `field` (e.g. `jobs = 4`).
+fn fixture_with_test_field(field: &str) -> tempfile::TempDir {
+    fixture_with(|s| {
+        s.replace(
+            "image = \"debian:12\"",
+            &format!("image = \"debian:12\"\n    {field}"),
+        )
+    })
+}
+
+#[test]
+fn a_test_may_declare_its_jobs() {
+    let dir = fixture_with_test_field("jobs = 4");
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 0, "{stderr}");
+}
+
+#[test]
+fn a_test_jobs_below_one_fails() {
+    for bad in ["jobs = 0", "jobs = -2"] {
+        let dir = fixture_with_test_field(bad);
+        let (code, _, stderr) = validate(dir.path());
+        assert_eq!(code, 2, "{bad}: {stderr}");
+        assert!(
+            stderr.contains("'jobs' must be at least 1"),
+            "{bad}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn a_test_jobs_that_is_not_a_number_fails() {
+    let dir = fixture_with_test_field("jobs = \"4\"");
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("'jobs' declared as i64"), "{stderr}");
+}
+
 /// Helper: rewrite the fixture so the `converges` test joins group `g`,
 /// then inject a sibling test in the same group built by `sibling`.
 fn fixture_with_group_sibling(sibling: &str) -> tempfile::TempDir {

@@ -225,6 +225,9 @@ pub struct TestDoc {
     pub memory: Option<String>,
     #[serde(default, skip_serializing_if = "is_none")]
     pub group: Option<String>,
+    /// Worker pool size for the in-guest runs.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub jobs: Option<i64>,
     #[serde(default, skip_serializing_if = "is_none")]
     pub setup: Option<String>,
     #[serde(default, skip_serializing_if = "is_none")]

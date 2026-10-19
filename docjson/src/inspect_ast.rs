@@ -266,6 +266,7 @@ fn extract_test(b: &Block, diags: &mut Diags) -> TestDoc {
         template: opt_lit_string(b, "template", &ctx, diags),
         memory: opt_lit_string(b, "memory", &ctx, diags),
         group: opt_lit_string(b, "group", &ctx, diags),
+        jobs: opt_lit_int(b, "jobs", &ctx, diags),
         setup: opt_lit_string(b, "setup", &ctx, diags),
         verify: opt_lit_string(b, "verify", &ctx, diags),
         steps,
@@ -412,6 +413,18 @@ fn opt_lit_bool(b: &Block, name: &str, ctx: &str, diags: &mut Diags) -> Option<b
         _ => {
             diags.push(format!(
                 "{ctx}: field '{name}' is not a plain bool — not editable visually"
+            ));
+            None
+        }
+    }
+}
+
+fn opt_lit_int(b: &Block, name: &str, ctx: &str, diags: &mut Diags) -> Option<i64> {
+    match field_expr(b, name)? {
+        Expr::I64(v) => Some(*v),
+        _ => {
+            diags.push(format!(
+                "{ctx}: field '{name}' is not a plain integer — not editable visually"
             ));
             None
         }

@@ -36,7 +36,8 @@ pub struct RunnerOptions {
     pub binaries: synth::BinaryResolver,
     /// Leave instances running for post-mortem debugging.
     pub keep: bool,
-    /// Forwarded to the in-instance check/apply runs.
+    /// `config-weave test --jobs`, when given on the command line: it
+    /// overrides every test's own `jobs` (see [`jobs_for`]).
     pub jobs: Option<usize>,
     /// Receives every lifecycle event; the human progress renderer and
     /// the `--events-ndjson` emitter are both sinks (see testlab::events).
@@ -81,6 +82,13 @@ fn expectations(e: Expect) -> [Option<StepStatus>; 3] {
 }
 
 const RUN_LABELS: [&str; 3] = ["check", "first apply", "second apply"];
+
+/// The `--jobs` a test's in-guest runs get: an explicit `config-weave test
+/// --jobs` wins, then the test's own `jobs`, else none — the guest
+/// engine's default.
+fn jobs_for(cli: Option<usize>, test: &TestDecl) -> Option<usize> {
+    cli.or(test.jobs)
+}
 
 /// One shared-instance unit of work: what to provision, and the ordered
 /// tests that run sequentially inside that one instance. The `usize` in
@@ -386,7 +394,7 @@ fn drive_one(
     wd.stage(synthesized.dir.path())?;
 
     let facts = run_gathers(test, ctx, &mut report.gathers, &wd)?;
-    run_steps(test, opts, ctx, &mut report.steps, &wd)?;
+    run_steps(test, jobs_for(opts.jobs, test), ctx, &mut report.steps, &wd)?;
     report.verify = run_verify(test, ctx, &facts, &wd)?;
     Ok(())
 }
@@ -456,7 +464,7 @@ fn run_gathers(
 /// The three engine runs and the expectation table.
 fn run_steps(
     test: &TestDecl,
-    opts: &RunnerOptions,
+    jobs: Option<usize>,
     ctx: &TestCtx,
     results: &mut Vec<TestStepResult>,
     wd: &Workdir,
@@ -475,7 +483,7 @@ fn run_steps(
     let mut reports: Vec<JsonRunReport> = Vec::with_capacity(3);
     for (i, mode) in ["check", "apply", "apply"].iter().enumerate() {
         ctx.phase(RUN_PHASES[i].clone());
-        let out = wd.run(mode, Some(synth::PLAY), opts.jobs, RUN_LABELS[i])?;
+        let out = wd.run(mode, Some(synth::PLAY), jobs, RUN_LABELS[i])?;
         ctx.log(RUN_IDS[i], &out.stderr);
         reports.push(out.report);
     }
@@ -761,6 +769,84 @@ fn wscript_err(e: wscript::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::TestStep;
+    use crate::testlab::backend::GuestOs;
+    use crate::testlab::guest::fake::{FakeGuest, printed};
+
+    const EMPTY_REPORT: &str = r#"{"playbook":"p","version":"0","play":"test","mode":"apply","exit_code":0,"duration_secs":0.0,"gathered":[],"steps":[]}"#;
+
+    /// A one-step test, with `jobs` as declared.
+    fn test_decl(jobs: Option<usize>) -> TestDecl {
+        TestDecl {
+            name: "t".into(),
+            description: String::new(),
+            target: TestTarget::Container("debian:12".into()),
+            memory: None,
+            group: None,
+            jobs,
+            setup: None,
+            verify: None,
+            steps: vec![TestStep {
+                name: "s".into(),
+                description: String::new(),
+                package: "core".into(),
+                resource: "r".into(),
+                expect: Expect::Converge,
+                requires: Vec::new(),
+                condition_src: None,
+                properties_src: None,
+                span: (0, 0),
+            }],
+            gathers: Vec::new(),
+            span: (0, 0),
+        }
+    }
+
+    /// The `--jobs` value each of the three engine runs was given, from
+    /// driving `run_steps` with `cli` against a test declaring `declared`.
+    fn jobs_seen(cli: Option<usize>, declared: Option<usize>) -> Vec<Option<String>> {
+        let test = test_decl(declared);
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__t").unwrap();
+        fake.queue([
+            printed(EMPTY_REPORT),
+            printed(EMPTY_REPORT),
+            printed(EMPTY_REPORT),
+        ]);
+        let sink = super::super::events::null_sink();
+        let ctx = TestCtx {
+            sink: &sink,
+            package: "core",
+            test: "t",
+        };
+        let mut results = Vec::new();
+        run_steps(&test, jobs_for(cli, &test), &ctx, &mut results, &wd).unwrap();
+
+        // [0] is the workdir mkdir; the three runs follow.
+        fake.argvs()[1..]
+            .iter()
+            .map(|argv| {
+                let at = argv.iter().position(|a| a == "--jobs")?;
+                argv.get(at + 1).cloned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_tests_own_jobs_reaches_every_run() {
+        assert_eq!(jobs_seen(None, Some(3)), vec![Some("3".to_string()); 3]);
+    }
+
+    #[test]
+    fn an_explicit_cli_jobs_overrides_the_tests_own() {
+        assert_eq!(jobs_seen(Some(8), Some(3)), vec![Some("8".to_string()); 3]);
+        assert_eq!(jobs_seen(Some(8), None), vec![Some("8".to_string()); 3]);
+    }
+
+    #[test]
+    fn neither_leaves_the_guest_engine_default() {
+        assert_eq!(jobs_seen(None, None), vec![None; 3]);
+    }
 
     #[test]
     fn expectation_table_matches_the_design() {

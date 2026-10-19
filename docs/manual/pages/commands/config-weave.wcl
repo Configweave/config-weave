@@ -6,7 +6,7 @@ page cmd_root {
   chapter_header "config-weave" {
     kicker       = "Commands · reference"
     reading_time = "7 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -46,7 +46,7 @@ SRC
       | "`--var-file`" | "`PATH`" | "Merge a WCL file's top-level `name = value` fields into scope. Each field is evaluated on its own and cannot reference other variables. `--var` wins over `--var-file`." |
       | "`--password-stdin`" | "" | "Read the secrets password from stdin. Trailing newline is stripped." |
       | "`--password-file`" | "`PATH`" | "Read the secrets password from a file. Trailing newline is stripped." |
-      | "`--jobs`" | "`N`" | "Worker pool size for step execution. Default is the smaller of the CPU count and 8. `test` forwards it into the instances." |
+      | "`--jobs`" | "`N`" | "Worker pool size for step execution. Default is the smaller of the CPU count and 8. `test` forwards it into the instances, overriding a test's own `jobs`." |
       | "`--continue-on-error`" | "" | "Keep dispatching steps after a step reports Error. Without it the scheduler stops dispatching, lets in-flight steps finish and halts." |
       | "`--json`" | "" | "JSON output mode: one object on stdout at completion and nothing else on stdout." |
       | "`--no-color`" | "" | "Plain ASCII output. Also selected automatically when stdout is not a terminal." |

@@ -33,7 +33,7 @@ This is the whole surface. Every option is accepted by every subcommand; only th
 | `--var-file` | `PATH` | Merge a WCL file's top-level `name = value` fields into scope. Each field is evaluated on its own and cannot reference other variables. `--var` wins over `--var-file`. |
 | `--password-stdin` | | Read the secrets password from stdin (one line). Trailing newline stripped. |
 | `--password-file` | `PATH` | Read the secrets password from a file. Trailing newline stripped. |
-| `--jobs` | `N` | Worker pool size for step execution. Default `min(cpu_count, 8)`. `test` forwards it into the instances. |
+| `--jobs` | `N` | Worker pool size for step execution. Default `min(cpu_count, 8)`. `test` forwards it into the instances, overriding a test's own `jobs`. |
 | `--continue-on-error` | | Keep dispatching steps after a step reports Error. Without it the scheduler stops dispatching, lets in-flight steps finish and halts; steps that required the failed step report `not run`. |
 | `--json` | | JSON output mode: one object on stdout at completion and nothing else on stdout. |
 | `--no-color` | | Plain ASCII output. Also selected automatically when stdout is not a terminal. |
@@ -168,7 +168,7 @@ config-weave test [OPTIONS] <PLAYBOOK_DIR> [FILTER]
 | `PLAYBOOK_DIR` | The playbook directory. Validated first. |
 | `FILTER` | Optional. `pkg` selects every test and scenario in one package. `pkg:name` selects one test or scenario. No filter selects everything. A filter that matches nothing is an error listing every available `pkg:name`. A playbook with no tests or scenarios is an error. |
 
-This is the whole surface of command-specific options. `--json` selects the JSON report, `--no-color` the plain one, and `--jobs` is forwarded into the config-weave runs inside each instance.
+This is the whole surface of command-specific options. `--json` selects the JSON report, `--no-color` the plain one, and `--jobs` is forwarded into the config-weave runs inside each instance, overriding a test's own `jobs`.
 
 | Option | Value | Meaning |
 |---|---|---|
