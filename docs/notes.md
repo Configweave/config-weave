@@ -417,9 +417,16 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   options to an existing function would break every caller, so it gets a
   `_with` sibling that takes the trailing `opts` and the original keeps
   its signature and default behaviour: `registry::read_with` and friends
-  (`{view}`), `service::start_with` / `stop_with` (`{timeout}`). A
-  function added new takes `opts` from the start (`registry::read_typed`,
-  `service::restart`). Unknown option keys are an `Err`.
+  (`{view}`), `service::start_with` (`{timeout}`) / `stop_with`
+  (`{timeout, stop_dependents}`). A function added new takes `opts` from
+  the start (`registry::read_typed`, `service::restart`). Unknown option
+  keys are an `Err`, including `stop_dependents` on `start_with`.
+- `service` `stop_dependents` stops dependents in EnumDependentServicesW's
+  order, not sorted: the SCM returns transitive dependents in reverse
+  start order, which is the only safe stop order when dependents depend on
+  each other. `restart` restarts the ones it stopped in the reverse of
+  that. `service::dependents` sorts its result for determinism; it is for
+  inspection, not for driving a stop order.
 - `registry::read_typed` returns `{kind, data}` with `kind` from `write`'s
   vocabulary (`sz`, `expand_sz`, `dword`, `qword`, `multi_sz`, `binary`,
   `none`), so a package can detect a value stored with the wrong kind.

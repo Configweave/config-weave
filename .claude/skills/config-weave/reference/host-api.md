@@ -497,11 +497,18 @@ surface.
 | `status` | `service::status(name: string) -> Result[string, string]` | one of the status strings below |
 | `start` | `service::start(name: string) -> Result[unit, string]` | waits (60s) until `running`; waits out pending states first, continues a `paused` service, no-op when already running |
 | `stop` | `service::stop(name: string) -> Result[unit, string]` | waits (60s) until `stopped`; waits out pending states first, no-op when already stopped |
-| `restart` | `service::restart(name: string, opts: Value) -> Result[unit, string]` | `stop` then `start`, each waiting; `opts` as for `start_with`, `timeout` applies to each phase |
+| `restart` | `service::restart(name: string, opts: Value) -> Result[unit, string]` | `stop` then `start`, each waiting; `opts` as for `stop_with`, `timeout` applies to each phase; with `stop_dependents` the stopped dependents are started again afterwards, in reverse stop order |
 | `start_with` | `service::start_with(name: string, opts: Value) -> Result[unit, string]` | as `start`; `opts` is `Value::Null` or `{timeout: secs}` |
-| `stop_with` | `service::stop_with(name: string, opts: Value) -> Result[unit, string]` | as `stop`, same `opts` |
+| `stop_with` | `service::stop_with(name: string, opts: Value) -> Result[unit, string]` | as `stop`; `opts` is `Value::Null` or `{timeout: secs, stop_dependents: bool}` (default `false`; `true` first stops every dependent not already stopped, in SCM order) |
+| `dependents` | `service::dependents(name: string) -> Result[List[string], string]` | names of the services that depend on `name`, directly or transitively, in any state, sorted |
 | `set_startup` | `service::set_startup(name: string, mode: string) -> Result[unit, string]` | `mode` is `automatic`, `automatic_delayed`, `manual` or `disabled`; anything else is an `Err`. `automatic` clears the delayed-start flag |
 | `startup` | `service::startup(name: string) -> Result[string, string]` | `automatic`, `automatic_delayed`, `manual`, `disabled`, `boot`, `system`, or `other` for any other startup type |
+
+`stop_dependents` stops dependents in the order the SCM lists them (reverse
+start order, so a dependent of a dependent stops first), each with the same
+timeout, then the service. A dependent that was already stopped is left
+alone. A dependent that fails ends the call with an `Err` naming it.
+`start_with` rejects `stop_dependents`.
 
 A wait that runs out returns an `Err` naming the last state seen. A service
 that goes pending and then drops back (for example it crashes while starting)
