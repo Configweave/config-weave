@@ -120,6 +120,8 @@ unchanged. This is the whole surface.
 |---|---|---|
 | `read` | `fs::read(path: string) -> Result[string, string]` | file as text |
 | `read_bytes` | `fs::read_bytes(path: string) -> Result[List[int], string]` | raw bytes as ints |
+| `read_with` | `fs::read_with(path: string, opts: Value) -> Result[string, string]` | `read` with the `write_with` options `{follow_symlinks: bool}`; `false` refuses a final symlink with `Err` (Unix: `O_NOFOLLOW`, race-free; Windows: check then open) |
+| `read_bytes_with` | `fs::read_bytes_with(path: string, opts: Value) -> Result[List[int], string]` | `read_bytes` with the same options as `read_with` |
 | `write` | `fs::write(path: string, content: string) -> Result[unit, string]` | replaces contents |
 | `write_bytes` | `fs::write_bytes(path: string, bytes: List[int]) -> Result[unit, string]` | replaces contents |
 | `write_with` | `fs::write_with(path: string, content: string, opts: Value) -> Result[unit, string]` | `write` with options `{follow_symlinks: bool}` (default `true`; `Value::Null` = `write`); `false` refuses a final symlink with `Err` and leaves its target untouched (Unix: `O_NOFOLLOW`, race-free; Windows: check then open, not atomic); unknown key is `Err` |

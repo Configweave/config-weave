@@ -29,7 +29,27 @@ fs::read_bytes(path: string) -> Result[List[int], string]
 SRC
   }
 
-  p "`read` returns the file as text. `read_bytes` returns the raw bytes as a list of integers."
+  p "`read` returns the file as text. `read_bytes` returns the raw bytes as a list of integers. Both follow a final symlink."
+
+  h2 "read_with and read_bytes_with"
+
+  code rust {
+    source = <<'SRC'
+fs::read_with(path: string, opts: Value) -> Result[string, string]
+fs::read_bytes_with(path: string, opts: Value) -> Result[List[int], string]
+SRC
+  }
+
+  p <<'PROSE'
+The same as `read` and `read_bytes`, with the options `write_with` takes:
+`Value::Null` for the defaults, or `{follow_symlinks: bool}`. An unknown key
+returns `Err`. With `follow_symlinks` set to `false`, a path whose final
+component is a symlink returns
+`Err("cannot read <path>: it is a symlink and follow_symlinks is false")`.
+Use it when a root-run script reads a file in a user-owned directory, where a
+planted symlink could point the read at a file such as `/etc/shadow`. The
+Unix and Windows guarantees are the same as for `write_with` below.
+PROSE
 
   h2 "write, write_bytes and append"
 
