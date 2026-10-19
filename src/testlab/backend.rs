@@ -162,6 +162,7 @@ pub enum GuestOs {
 
 /// Output of one exec inside an instance. A nonzero exit code is data
 /// for the caller, never an `Err` — errors mean the transport failed.
+#[derive(Clone)]
 pub struct ExecOutput {
     pub exit_code: i32,
     pub stdout: String,

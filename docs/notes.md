@@ -714,6 +714,18 @@ below). Bindings fixed here:
   is required because `vmlab up` only blocks on agent readiness for VMs
   something *depends on*, and this lab's single VM has no dependents, so
   a slow (Windows) boot would otherwise hit osinfo's own 30s agent wait.
+  Answering `osinfo` is not the same as answering execs: right after a
+  boot or an agent refresh the agent can take one exec and drop the next
+  ("agent channel closed during exec", exit 137). So once the OS is known
+  `Guest::await_steady_agent` probes a trivial exec (`true`; `cmd.exe /C
+  exit 0` on windows) until it succeeds **3 times in a row**, any failure
+  restarting the count, 1s apart, under its own 300s deadline
+  (`READY_DEADLINE`); expiry errors naming the machine and the last
+  failure. Each probe carries a 30s vmlab exec timeout rather than the
+  3600s run one (the `Probing` transport adapter), so a hung probe cannot
+  outlive the deadline. It runs for generated test instances after `up`,
+  for scenario machines in `lab.machine(name)`, and after
+  `machine.reboot()`.
   `osinfo`'s `id` picks the protocol: **`windows`** (what the vmlab agent
   reports) or `mswindows` (what the QEMU guest agent reported before
   vmlab replaced it, still accepted) → windows, anything else → linux.

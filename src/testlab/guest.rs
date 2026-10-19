@@ -14,6 +14,7 @@
 
 use std::io::Write as _;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::diag::Diag;
 use crate::hostapi::shell::{powershell_argv, write_ps_script};
@@ -110,6 +111,20 @@ fn shell_path(os: GuestOs, path: &str) -> String {
     }
 }
 
+/// How many trivial execs in a row the guest agent must answer before an
+/// instance counts as ready. One answer is not enough: right after a boot
+/// or an agent refresh the agent can answer once and then drop the next
+/// exec ("agent channel closed during exec", or exit 137).
+pub const AGENT_STEADY_STREAK: usize = 3;
+
+/// The trivial exec [`Guest::await_steady_agent`] probes with.
+fn probe_argv(os: GuestOs) -> &'static [&'static str] {
+    match os {
+        GuestOs::Linux => &["true"],
+        GuestOs::Windows => &["cmd.exe", "/C", "exit 0"],
+    }
+}
+
 /// A machine, bound to the guest OS running inside it.
 ///
 /// Cheap to construct and to copy: borrow a transport and make one where
@@ -165,6 +180,48 @@ impl<'a> Guest<'a> {
             )));
         }
         Ok(())
+    }
+
+    /// Block until the guest agent answers a trivial exec successfully
+    /// [`AGENT_STEADY_STREAK`] times in a row, pausing `pause` between
+    /// probes. Any failure restarts the count. Gives up once `deadline`
+    /// has passed, naming `whose` machine and the last failure.
+    pub fn await_steady_agent(
+        &self,
+        whose: &str,
+        deadline: Duration,
+        pause: Duration,
+    ) -> Result<(), Diag> {
+        let start = Instant::now();
+        let mut streak = 0;
+        let mut last = None;
+        loop {
+            match self.t.exec(probe_argv(self.os)) {
+                Ok(o) if o.exit_code == 0 => {
+                    streak += 1;
+                    if streak == AGENT_STEADY_STREAK {
+                        return Ok(());
+                    }
+                }
+                Ok(o) => {
+                    streak = 0;
+                    last = Some(format!("probe exited {}: {}", o.exit_code, tail_of(&o)));
+                }
+                Err(d) => {
+                    streak = 0;
+                    last = Some(d.message);
+                }
+            }
+            if start.elapsed() >= deadline {
+                return Err(Diag::bare(format!(
+                    "{whose}: the guest agent did not answer {AGENT_STEADY_STREAK} execs in a \
+                     row within {}s (last failure: {})",
+                    deadline.as_secs_f64(),
+                    last.as_deref().unwrap_or("none")
+                )));
+            }
+            std::thread::sleep(pause);
+        }
     }
 
     /// A working directory for one test, named by its path-safe slug.
@@ -463,6 +520,8 @@ pub(crate) mod fake {
         /// happened before the other.
         trail: RefCell<Vec<String>>,
         replies: RefCell<VecDeque<Result<ExecOutput, Diag>>>,
+        /// What an exec beyond the queue gets; a silent success if unset.
+        otherwise: Option<ExecOutput>,
     }
 
     impl FakeGuest {
@@ -474,11 +533,19 @@ pub(crate) mod fake {
                 bodies: RefCell::new(Vec::new()),
                 trail: RefCell::new(Vec::new()),
                 replies: RefCell::new(VecDeque::new()),
+                otherwise: None,
             }
         }
 
+        /// Answer every exec beyond the queue with `out` instead of a
+        /// silent success.
+        pub(crate) fn otherwise(mut self, out: ExecOutput) -> FakeGuest {
+            self.otherwise = Some(out);
+            self
+        }
+
         /// Queue results for the next execs, in order. Anything beyond the
-        /// queue succeeds silently.
+        /// queue succeeds silently, unless [`FakeGuest::otherwise`] says.
         pub(crate) fn replying(self, outs: impl IntoIterator<Item = ExecOutput>) -> FakeGuest {
             self.queue(outs);
             self
@@ -530,7 +597,7 @@ pub(crate) mod fake {
             self.replies
                 .borrow_mut()
                 .pop_front()
-                .unwrap_or_else(|| Ok(exited(0)))
+                .unwrap_or_else(|| Ok(self.otherwise.clone().unwrap_or_else(|| exited(0))))
         }
 
         fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag> {
@@ -674,6 +741,62 @@ mod tests {
         Guest::new(&fake)
             .prepare(&bins, "the group")
             .expect("a failing chmod is best-effort");
+    }
+
+    // ----------------------------------------------------------- readiness
+
+    fn await_agent(fake: &FakeGuest, deadline: Duration) -> Result<(), Diag> {
+        Guest::new(fake).await_steady_agent("machine 'box'", deadline, Duration::ZERO)
+    }
+
+    #[test]
+    fn a_flaky_agent_is_ready_after_three_answers_in_a_row() {
+        // What a freshly booted agent does: drops execs, then settles.
+        let fake = FakeGuest::new(GuestOs::Linux)
+            .breaking("agent channel closed during exec")
+            .replying([failed(137, "")]);
+        await_agent(&fake, Duration::from_secs(60)).expect("ready");
+
+        // Two failures, then exactly the three successes the streak needs.
+        assert_eq!(fake.argvs().len(), 5);
+        assert!(fake.argvs().iter().all(|a| a == &["true"]));
+    }
+
+    #[test]
+    fn a_failure_mid_streak_restarts_the_count() {
+        let fake = FakeGuest::new(GuestOs::Linux).replying([
+            exited(0),
+            exited(0),
+            failed(137, ""),
+            exited(0),
+            exited(0),
+        ]);
+        await_agent(&fake, Duration::from_secs(60)).expect("ready");
+        // 2 good + 1 bad, then a fresh streak of 3: the two queued and one
+        // more.
+        assert_eq!(fake.argvs().len(), 6);
+    }
+
+    #[test]
+    fn a_windows_agent_is_probed_through_cmd() {
+        let fake = FakeGuest::new(GuestOs::Windows);
+        await_agent(&fake, Duration::from_secs(60)).expect("ready");
+        assert_eq!(fake.argvs(), vec![vec!["cmd.exe", "/C", "exit 0"]; 3]);
+    }
+
+    #[test]
+    fn an_agent_that_never_settles_fails_naming_the_machine() {
+        let fake = FakeGuest::new(GuestOs::Linux).otherwise(failed(137, "Killed"));
+        let err =
+            await_agent(&fake, Duration::from_millis(20)).expect_err("never ready must time out");
+        assert!(err.message.contains("machine 'box'"), "{}", err.message);
+        assert!(err.message.contains("3 execs in a row"), "{}", err.message);
+        assert!(err.message.contains("within 0.02s"), "{}", err.message);
+        assert!(
+            err.message.contains("probe exited 137: Killed"),
+            "{}",
+            err.message
+        );
     }
 
     // ------------------------------------------------------------ workdirs

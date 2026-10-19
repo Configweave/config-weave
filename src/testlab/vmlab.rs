@@ -50,6 +50,15 @@ const CONTAINER_UP_DEADLINE: Duration = Duration::from_secs(5 * 60);
 /// Pause between readiness attempts while the agent is still coming up.
 const READY_POLL: Duration = Duration::from_secs(3);
 
+/// Pause between the probe execs of the steady-agent check
+/// (`Guest::await_steady_agent`).
+const AGENT_PROBE_PAUSE: Duration = Duration::from_secs(1);
+
+/// Guest-exec timeout for one steady-agent probe. A probe is `true`; one
+/// that has not answered in this long counts as a failure, so a hung exec
+/// cannot hold the check past its deadline.
+const PROBE_TIMEOUT_SECS: &str = "30";
+
 /// The fixed machine name inside a single-instance synthesized lab.
 const MACHINE: &str = "box";
 
@@ -178,6 +187,10 @@ impl VmlabBackend {
         // path/shell scheme, so ask the guest agent.
         if instance.is_vm() {
             instance.os = guest_os(&instance.osinfo()?);
+        }
+        if let Err(d) = instance.await_steady_agent(&format!("machine '{MACHINE}' ({target})")) {
+            let _ = instance.teardown();
+            return Err(d);
         }
 
         Ok(instance)
@@ -376,6 +389,7 @@ impl VmlabLab {
             ))
         })?;
         instance.os = guest_os(&instance.osinfo()?);
+        instance.await_steady_agent(&format!("machine '{name}' in lab {}", self.lab))?;
         Ok(instance)
     }
 
@@ -431,6 +445,25 @@ pub struct VmlabInstance {
     /// must destroy it on teardown; false when a `VmlabLab` owns teardown.
     owns_lab: bool,
     gone: bool,
+}
+
+/// A [`VmlabInstance`] whose execs carry [`PROBE_TIMEOUT_SECS`] instead of
+/// the long run timeout: the transport the steady-agent check probes
+/// through.
+struct Probing<'a>(&'a VmlabInstance);
+
+impl super::backend::Transport for Probing<'_> {
+    fn os(&self) -> GuestOs {
+        self.0.os
+    }
+
+    fn exec(&self, argv: &[&str]) -> Result<ExecOutput, Diag> {
+        self.0.exec_timeout(argv, PROBE_TIMEOUT_SECS)
+    }
+
+    fn copy_in(&self, src: &Path, dest: &str) -> Result<(), Diag> {
+        self.0.copy_in(src, dest)
+    }
 }
 
 /// A live vmlab machine is the production adapter at the `Transport`
@@ -572,14 +605,31 @@ impl VmlabInstance {
         Ok(())
     }
 
+    /// Wait until the guest agent answers trivial execs steadily (see
+    /// `Guest::await_steady_agent`). Needs the guest OS already known: it
+    /// picks the probe command.
+    fn await_steady_agent(&self, whose: &str) -> Result<(), Diag> {
+        super::guest::Guest::new(&Probing(self)).await_steady_agent(
+            whose,
+            READY_DEADLINE,
+            AGENT_PROBE_PAUSE,
+        )
+    }
+
     /// Run argv inside the instance. The working directory is
     /// unspecified — the runner always passes absolute paths.
     pub fn exec(&self, argv: &[&str]) -> Result<ExecOutput, Diag> {
+        self.exec_timeout(argv, EXEC_TIMEOUT_SECS)
+    }
+
+    /// As [`VmlabInstance::exec`], with vmlab's guest-exec timeout set to
+    /// `timeout_secs`.
+    fn exec_timeout(&self, argv: &[&str], timeout_secs: &str) -> Result<ExecOutput, Diag> {
         let mut args = if self.is_vm() {
             vec![
                 "exec",
                 "--timeout",
-                EXEC_TIMEOUT_SECS,
+                timeout_secs,
                 self.machine.as_str(),
                 "--",
             ]
@@ -589,7 +639,7 @@ impl VmlabInstance {
                 "exec",
                 self.machine.as_str(),
                 "--timeout",
-                EXEC_TIMEOUT_SECS,
+                timeout_secs,
                 "--",
             ]
         };
@@ -617,7 +667,9 @@ impl VmlabInstance {
                 stderr_tail(&out)
             )));
         }
-        self.wait_ready_inner(REBOOT_DEADLINE)
+        self.wait_ready_inner(REBOOT_DEADLINE)?;
+        // A rebooted agent is as fresh as a booted one.
+        self.await_steady_agent(&format!("machine '{}' after its reboot", self.machine))
     }
 
     /// Block until the instance is ready for `exec`, up to `secs`.
@@ -786,6 +838,55 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         (script, log)
+    }
+
+    /// A stand-in vmlab CLI whose every verb succeeds, logging as
+    /// [`hanging_vmlab`] does.
+    #[cfg(unix)]
+    fn obliging_vmlab(dir: &Path) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let log = dir.join("calls.log");
+        let script = dir.join("vmlab");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$(pwd) $*\" >> '{}'\nexit 0\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (script, log)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_provisioned_instance_waits_for_a_steady_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cmd, log) = obliging_vmlab(tmp.path());
+        let b = backend(&cmd, Duration::from_secs(60), Duration::from_secs(60));
+        // A just-written stub can be busy while another test thread forks
+        // (ETXTBSY); that says nothing about the code under test.
+        let mut attempts = 0;
+        let mut instance = loop {
+            match b.provision(&TestTarget::Container("debian:12".into()), None, false) {
+                Err(d) if d.message.contains("Text file busy") && attempts < 50 => {
+                    attempts += 1;
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                other => break other.expect("provision"),
+            }
+        };
+        instance.teardown().unwrap();
+
+        // Three short-timeout probes after the readiness exec, before the
+        // instance is handed back.
+        let calls = std::fs::read_to_string(&log).unwrap();
+        let probes = calls
+            .lines()
+            .filter(|l| l.ends_with("container exec box --timeout 30 -- true"))
+            .count();
+        assert_eq!(probes, 3, "{calls}");
     }
 
     #[cfg(unix)]
