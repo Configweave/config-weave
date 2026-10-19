@@ -16,8 +16,9 @@ use codec::{View, parse_opts};
 const NOT_WINDOWS: &str = "the 'registry' module is only available on Windows";
 
 /// The value codec and option parsing: plain Rust with no Windows calls, so
-/// it compiles and is unit-tested on every platform. Only `win` uses it.
-mod codec {
+/// it compiles and is unit-tested on every platform. Only `win` and the
+/// `acl` module (registry views) use it.
+pub(crate) mod codec {
     #![cfg_attr(not(windows), allow(dead_code))]
 
     use std::collections::HashMap;
@@ -251,7 +252,7 @@ mod codec {
     /// Which registry view a key is opened in. `Native` is the process's own
     /// view; the others force the 32-bit (`WOW6432Node`) or 64-bit view.
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-    pub(super) enum View {
+    pub(crate) enum View {
         #[default]
         Native,
         Wow64_32,
@@ -260,12 +261,27 @@ mod codec {
 
     impl View {
         /// The bits OR-ed into the access mask on open, create and delete.
-        pub(super) fn sam_flag(self) -> u32 {
+        pub(crate) fn sam_flag(self) -> u32 {
             match self {
                 View::Native => 0,
                 View::Wow64_32 => KEY_WOW64_32KEY,
                 View::Wow64_64 => KEY_WOW64_64KEY,
             }
+        }
+    }
+
+    /// Parse a `view` option value: `native`, `wow64_32` or `wow64_64`.
+    pub(crate) fn parse_view(value: &DynValue) -> Result<View, String> {
+        match value {
+            DynValue::String(s) => match s.as_str() {
+                "native" => Ok(View::Native),
+                "wow64_32" => Ok(View::Wow64_32),
+                "wow64_64" => Ok(View::Wow64_64),
+                other => Err(format!(
+                    "unknown registry view '{other}' (expected native, wow64_32, wow64_64)"
+                )),
+            },
+            other => Err(format!("registry view must be a string, got {other:?}")),
         }
     }
 
@@ -277,24 +293,9 @@ mod codec {
             DynValue::Null => {}
             DynValue::Map(m) => {
                 for (k, v) in m {
-                    match (k.as_str(), v) {
-                        ("view", DynValue::String(s)) => {
-                            view = match s.as_str() {
-                                "native" => View::Native,
-                                "wow64_32" => View::Wow64_32,
-                                "wow64_64" => View::Wow64_64,
-                                other => {
-                                    return Err(format!(
-                                        "unknown registry view '{other}' \
-                                         (expected native, wow64_32, wow64_64)"
-                                    ));
-                                }
-                            };
-                        }
-                        ("view", other) => {
-                            return Err(format!("registry view must be a string, got {other:?}"));
-                        }
-                        (other, _) => {
+                    match k.as_str() {
+                        "view" => view = parse_view(v)?,
+                        other => {
                             return Err(format!(
                                 "unknown registry option '{other}' (expected view)"
                             ));
@@ -740,7 +741,7 @@ pub fn module() -> Module {
 }
 
 #[cfg(windows)]
-mod win {
+pub(crate) mod win {
     use super::View;
     use super::codec::{EnumNext, absent_or_err};
     use windows::Win32::Foundation::{ERROR_SUCCESS, WIN32_ERROR};
@@ -754,7 +755,9 @@ mod win {
     use windows::core::{HSTRING, PCWSTR, PWSTR};
     use wscript_std::DynValue;
 
-    fn split_hive(key: &str) -> Result<(HKEY, String), String> {
+    /// Split `HKLM\Software\App` into the predefined hive handle and the
+    /// subkey path. The `acl` module parses registry paths with it too.
+    pub(crate) fn split_hive(key: &str) -> Result<(HKEY, String), String> {
         let (hive, rest) = key.split_once('\\').unwrap_or((key, ""));
         let h = match hive.to_ascii_uppercase().as_str() {
             "HKLM" | "HKEY_LOCAL_MACHINE" => HKEY_LOCAL_MACHINE,

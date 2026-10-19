@@ -57,6 +57,7 @@ import "./pages/reference/mod-toml.wcl"
 import "./pages/reference/mod-xml.wcl"
 import "./pages/reference/mod-regex.wcl"
 import "./pages/reference/mod-registry.wcl"
+import "./pages/reference/mod-acl.wcl"
 import "./pages/reference/mod-service.wcl"
 import "./pages/reference/mod-com.wcl"
 import "./pages/reference/mod-testlab.wcl"
@@ -150,6 +151,7 @@ site manual {
       chapter "xml module"               { page = ref_mod_xml }
       chapter "regex module"             { page = ref_mod_regex }
       chapter "registry module (Windows)" { page = ref_mod_registry }
+      chapter "acl module (Windows)"     { page = ref_mod_acl }
       chapter "service module (Windows)" { page = ref_mod_service }
       chapter "com module (Windows)"     { page = ref_mod_com }
       chapter "testlab module"           { page = ref_mod_testlab }

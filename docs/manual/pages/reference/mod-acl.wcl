@@ -1,0 +1,286 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_acl {
+  sites = [:manual]
+  title = "acl module (Windows)"
+
+  chapter_header "acl module (Windows)" {
+    kicker       = "Reference · reference"
+    reading_time = "4 min read"
+    updated      = "2026-10-20"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use acl` reads, compares and sets the owner and the DACL (the access
+control list) of Windows files, directories and registry keys, without
+starting PowerShell for `Get-Acl` or `Set-Acl`. The module is registered on
+every platform, so a playbook compiles and validates identically
+everywhere; on Linux and macOS every call returns a runtime error. It does
+not handle POSIX ACLs. Guard a call with a step condition on `os.family` or
+with `sys::family()` from the [sys module](ref_mod_sys). Every function
+returns `Result[…, string]`.
+
+A `check` script calls `diff` and an `apply` script calls `set` with the
+same spec. `diff` makes exactly the comparison `set` converges, so `set`
+followed by `diff` returns an empty list.
+PROSE
+
+  h2 "read"
+
+  code rust {
+    source = <<'SRC'
+acl::read(path: string, opts: Value) -> Result[Value, string]
+SRC
+  }
+
+  p "Reads the owner and the DACL of `path`. It returns a map with these keys."
+
+  table {
+    rows:
+      | "Key" | "Value" |
+      | "`owner`" | "A map `{sid, name}`, or `Value::Null` when the descriptor has no owner." |
+      | "`protected`" | "`true` when inheritance is disabled on the object." |
+      | "`entries`" | "A list of entry maps, in the order Windows stores them, inherited entries included." |
+  }
+
+  p "Each entry map has these keys."
+
+  table {
+    rows:
+      | "Key" | "Value" |
+      | "`sid`" | "The SID string, such as `S-1-5-32-545`." |
+      | "`name`" | "The account name, such as `BUILTIN\\Users` or `Everyone`, or `Value::Null` when the SID does not resolve (an app capability SID, a deleted account)." |
+      | "`kind`" | "`allow` or `deny`. An entry of any other ACE type (object or callback ACEs) is `other`, with its ACE type number in an extra `type` key and `sid` and `name` set to `Value::Null`." |
+      | "`rights`" | "The right names the mask contains (see Rights below)." |
+      | "`mask`" | "The access mask as an int, with generic bits mapped (see Rights below)." |
+      | "`inherit`" | "The inherit flags: `object`, `container`, `no_propagate`, `inherit_only`. An empty list means the entry applies to this object only." |
+      | "`inherited`" | "`true` when the entry was inherited from the parent." |
+  }
+
+  p "A NULL DACL, which grants everyone full access, reads as an empty `entries` list. `diff` reports it as a difference."
+
+  h2 "set"
+
+  code rust {
+    source = <<'SRC'
+acl::set(path: string, spec: Value, opts: Value) -> Result[unit, string]
+SRC
+  }
+
+  p "Writes `spec` to `path`. The spec is a map with these keys."
+
+  table {
+    rows:
+      | "Key" | "Value" |
+      | "`owner`" | "Optional. A principal. Omitted, the owner is left as it is." |
+      | "`protected`" | "Optional. `true` disables inheritance, `false` enables it. Omitted, the current setting is kept." |
+      | "`entries`" | "Required. The list of explicit entries. Pass `[]` to remove every explicit entry." |
+  }
+
+  p "Each entry is a map with these keys."
+
+  table {
+    rows:
+      | "Key" | "Value" |
+      | "`principal`" | "Required. A SID string or an account name (see Principals below)." |
+      | "`kind`" | "Required. `allow` or `deny`." |
+      | "`rights`" | "A list of right names for the target." |
+      | "`mask`" | "An access mask int, for bits that have no name. When both `rights` and `mask` are given, the entry grants their union. At least one is required." |
+      | "`inherit`" | "Optional. A list of inherit flags; omitted or empty, the entry applies to this object only." |
+  }
+
+  p <<'PROSE'
+`set` replaces every explicit entry on the object with `entries`. It writes
+them in the Windows canonical order, deny entries before allow entries,
+each group in spec order, and drops exact duplicates. It never writes
+inherited entries: while inheritance is enabled, Windows recomputes them
+from the parent, and a directory or key passes its own inheritable entries
+on to its children.
+
+`protected: true` disables inheritance and drops the inherited entries. It
+does not copy them in as explicit entries, unlike the Explorer dialog; list
+every entry the object needs. `protected: false` enables inheritance again,
+and Windows restores the inherited entries from the parent.
+
+Changing the owner needs SeRestorePrivilege and SeTakeOwnershipPrivilege.
+`set` enables both on a thread-local copy of the process token for the
+call only, which works when config-weave runs as SYSTEM or as an
+administrator. When they cannot be enabled and the owner differs from the
+spec, `set` returns an `Err` naming the privileges and changes nothing.
+
+Inherit flags mean something only on a container. Windows strips them from
+the entries of a plain file, so an entry with inherit flags on a file is an
+`Err` from `set` and `diff`, rather than a change that never converges.
+PROSE
+
+  h2 "diff"
+
+  code rust {
+    source = <<'SRC'
+acl::diff(path: string, spec: Value, opts: Value) -> Result[List[string], string]
+SRC
+  }
+
+  p <<'PROSE'
+Returns the differences between the object's descriptor and `spec`, one
+human-readable line each. An empty list means converged. The comparison is
+exactly the one `set` makes converge:
+
+- The owner is compared by SID, when the spec gives one.
+- The `protected` flag is compared when the spec gives it.
+- Explicit entries are compared as a set. Each entry is keyed by its SID,
+  its kind, its mask with generic bits mapped, and its inherit flags. Order
+  and duplicates do not count. A missing entry and an entry the spec does
+  not list are each one line, so a changed right shows as both.
+- Inherited entries are ignored, unless the spec has `protected: true` and
+  the DACL is already protected; then each inherited entry left over is a
+  difference.
+
+`diff` takes the same spec and options as `set` and fails on the same
+errors.
+PROSE
+
+  h2 "Options"
+
+  p <<'PROSE'
+`opts` is `Value::Null` or a map. `target` selects what `path` names:
+`"file"` (the default) for a file or directory, or `"registry"` for a
+registry key. `view` selects the registry view, as in the
+[registry module](ref_mod_registry): `"native"` (the default), `"wow64_32"`
+or `"wow64_64"`. `view` is valid only with `target: "registry"`. An unknown
+key or value is an `Err`.
+
+A registry path uses the registry module's syntax, `HKLM\Software\Vendor\App`.
+A file path is passed to Windows as written. `acl` does not follow a final
+symlink or junction: it opens the path with FILE_FLAG_OPEN_REPARSE_POINT,
+refuses any reparse point with an `Err`, and reads and writes the
+descriptor through that one handle, so the object cannot be swapped between
+the check and the write. Name the link's target instead. A missing file or
+key is an `Err` naming it.
+PROSE
+
+  h2 "Principals"
+
+  p <<'PROSE'
+A principal in a spec is a SID string (`S-1-5-32-544`) or an account name:
+`BUILTIN\Administrators`, `Administrators`, `NT AUTHORITY\SYSTEM`,
+`DOMAIN\user`, or `.\user` for an account on this computer. Account names
+are resolved with LookupAccountNameW. A principal that does not resolve is
+an `Err` naming it. Every comparison is by SID, so a spec may name an
+account either way.
+PROSE
+
+  h2 "Rights"
+
+  p "Rights are lists of names, because wscript has no bitwise operators. The names are the .NET `FileSystemRights` and `RegistryRights` names in snake_case. A right name that is not valid for the target is an `Err` listing the valid names."
+
+  table {
+    rows:
+      | "File right" | "Mask" |
+      | "`full_control`" | "`0x1F01FF`" |
+      | "`modify`" | "`0x0301BF`: `read_and_execute`, `write` and `delete`" |
+      | "`read_and_execute`" | "`0x0200A9`: `read` and `execute_file`" |
+      | "`read`" | "`0x020089`: `read_data`, `read_extended_attributes`, `read_attributes`, `read_permissions`" |
+      | "`write`" | "`0x000116`: `write_data`, `append_data`, `write_extended_attributes`, `write_attributes`" |
+      | "`read_data` (alias `list_directory`)" | "`0x000001`" |
+      | "`write_data` (alias `create_files`)" | "`0x000002`" |
+      | "`append_data` (alias `create_directories`)" | "`0x000004`" |
+      | "`read_extended_attributes`" | "`0x000008`" |
+      | "`write_extended_attributes`" | "`0x000010`" |
+      | "`execute_file` (alias `traverse`)" | "`0x000020`" |
+      | "`delete_subdirectories_and_files`" | "`0x000040`" |
+      | "`read_attributes`" | "`0x000080`" |
+      | "`write_attributes`" | "`0x000100`" |
+      | "`delete`" | "`0x010000`" |
+      | "`read_permissions`" | "`0x020000`" |
+      | "`change_permissions`" | "`0x040000`" |
+      | "`take_ownership`" | "`0x080000`" |
+      | "`synchronize`" | "`0x100000`" |
+  }
+
+  table {
+    rows:
+      | "Registry right" | "Mask" |
+      | "`full_control`" | "`0xF003F`" |
+      | "`read_key` (alias `execute_key`)" | "`0x20019`: `query_values`, `enumerate_subkeys`, `notify`, `read_permissions`" |
+      | "`write_key`" | "`0x20006`: `set_value`, `create_subkey`, `read_permissions`" |
+      | "`query_values`" | "`0x00001`" |
+      | "`set_value`" | "`0x00002`" |
+      | "`create_subkey`" | "`0x00004`" |
+      | "`enumerate_subkeys`" | "`0x00008`" |
+      | "`notify`" | "`0x00010`" |
+      | "`create_link`" | "`0x00020`" |
+      | "`delete`" | "`0x10000`" |
+      | "`read_permissions`" | "`0x20000`" |
+      | "`change_permissions`" | "`0x40000`" |
+      | "`take_ownership`" | "`0x80000`" |
+  }
+
+  p <<'PROSE'
+`read` turns a mask into names in two passes. First it takes each composite
+name, largest first (files: `full_control`, `modify`, `read_and_execute`,
+`read`, `write`; registry keys: `full_control`, `read_key`, `write_key`),
+when all of its bits are in the mask and it covers at least one bit no
+earlier name did. Then it adds the single-bit name of each bit still not
+covered, in bit order. So `0x1F01FF` reads as `["full_control"]` and
+`0x1200A9` as `["read_and_execute", "synchronize"]`. Aliases are accepted
+in a spec but never reported. A bit with no name, such as
+ACCESS_SYSTEM_SECURITY, appears only in `mask`.
+
+Windows writes the generic bits (GENERIC_READ, GENERIC_WRITE,
+GENERIC_EXECUTE, GENERIC_ALL) into some entries, typically the inherit-only
+`CREATOR OWNER` entry. `read` maps them to the rights they grant on the
+target before reporting `rights` and `mask`: GENERIC_ALL on a file reads as
+`full_control` with mask `0x1F01FF`, where `Get-Acl` shows `268435456`.
+`diff` compares mapped masks too, and `set` writes a spec's generic bits
+already mapped.
+
+`set` writes the mask the spec gives and adds nothing. Explorer and .NET
+add `synchronize` to every file allow entry, and a process needs it to open
+a file for synchronous IO, so a file allow entry normally lists
+`synchronize` alongside its other rights.
+PROSE
+
+  p "A resource whose `path` parameter names the object and whose `acl` parameter holds the spec map checks with `diff` and applies with `set`."
+
+  code rust {
+    source = <<'SRC'
+use acl
+use log
+use value
+
+fn target(params: Value) -> Result[string, string] {
+    if let Some(v) = params.get("path") {
+        if let Some(s) = v.as_string() {
+            return Ok(s)
+        }
+    }
+    Err("missing 'path' parameter")
+}
+
+fn want(params: Value) -> Result[Value, string] {
+    match params.get("acl") {
+        Some(v) => Ok(v),
+        None => Err("missing 'acl' parameter"),
+    }
+}
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let changes = acl::diff(target(params)?, want(params)?, Value::Null)?
+    for line in changes {
+        log::info(line)
+    }
+    if changes.len() == 0 {
+        Ok(CheckResult::AlreadyConfigured)
+    } else {
+        Ok(CheckResult::NotConfigured)
+    }
+}
+
+fn apply(params: Value) -> Result[ApplyResult, string] {
+    acl::set(target(params)?, want(params)?, Value::Null)?
+    Ok(ApplyResult::Success)
+}
+SRC
+  }
+}

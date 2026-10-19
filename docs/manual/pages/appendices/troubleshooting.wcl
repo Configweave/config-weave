@@ -105,7 +105,7 @@ PROSE
   h2 "a Windows function errors on Linux"
 
   p <<'PROSE'
-**Symptom.** A step calling `registry`, `service` or `com` compiles and validates, then reports *error* at run time on a Linux host.
+**Symptom.** A step calling `registry`, `acl`, `service` or `com` compiles and validates, then reports *error* at run time on a Linux host.
 
 **Cause.** Every host module is registered on every platform so that a playbook validates the same everywhere. Calling a foreign-platform function at run time returns an error.
 

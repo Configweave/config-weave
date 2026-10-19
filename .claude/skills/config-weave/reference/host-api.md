@@ -20,8 +20,8 @@ not exist. Names and signatures follow `weave.wscripti`, the interface
   error. Propagate with `?` from an entry point that returns
   `Result[..., string]`; the step then reports Error with that message.
 - **Platform rule:** every module is registered on every platform, so a
-  playbook compiles and validates identically everywhere. The three
-  Windows-only modules (`registry`, `service`, `com`) exist on Linux and macOS
+  playbook compiles and validates identically everywhere. The four
+  Windows-only modules (`registry`, `acl`, `service`, `com`) exist on Linux and macOS
   and every call there returns `Err("the '<module>' module is only available on Windows…")`.
   Guard such calls with a step `condition` (`os.family == "windows"`) or in the
   script with `sys::family() == "windows"`.
@@ -60,12 +60,13 @@ This is the whole set of registered modules.
 | `regex` | regular expressions | all | wscript-std |
 | `value` | the shared `Value` type (no functions) | all | wscript-std |
 | `registry` | Windows registry | Windows only | config-weave |
+| `acl` | owner and DACL of files, directories, registry keys | Windows only | config-weave |
 | `service` | Windows services via the SCM | Windows only | config-weave |
 | `com` | COM via IDispatch, WMI queries | Windows only | config-weave |
 | `testlab` | scenario driver handles (`Lab`, `Machine`) | scenario scripts only | config-weave |
 
 `testlab` is registered only in the context scenario driver scripts compile
-and run against. Every other script sees the twenty-one modules above it.
+and run against. Every other script sees the twenty-two modules above it.
 
 ### The Value type
 
@@ -500,6 +501,90 @@ REG_DWORD and REG_QWORD as `Value::Int`, REG_MULTI_SZ as a list of strings,
 REG_BINARY and REG_NONE as a list of byte ints. Any other registry type
 (REG_LINK, ...) is an `Err` from `read`; `read_typed` returns it as `other`. `read` cannot tell REG_SZ from REG_EXPAND_SZ or
 REG_DWORD from REG_QWORD; `read_typed` can.
+
+## acl (Windows only)
+
+`use acl`. Reads, compares and sets the owner and DACL of files, directories
+and registry keys, replacing PowerShell `Get-Acl`/`Set-Acl`. Registered
+everywhere; on Linux and macOS every call returns `Err`. No POSIX ACLs. This
+is the whole surface.
+
+| Function | Signature | Notes |
+|---|---|---|
+| `read` | `acl::read(path: string, opts: Value) -> Result[Value, string]` | `{owner: {sid, name}, protected: bool, entries: [{sid, name, kind, rights, mask, inherit, inherited}]}`, entries in stored order, inherited ones included |
+| `set` | `acl::set(path: string, spec: Value, opts: Value) -> Result[unit, string]` | replaces every explicit entry with `spec.entries`, deny before allow; never writes inherited entries |
+| `diff` | `acl::diff(path: string, spec: Value, opts: Value) -> Result[List[string], string]` | one line per difference; `[]` = converged. Exactly the comparison `set` converges, so `set` then `diff` is `[]`. Use it in `check` |
+
+`opts` is `Value::Null` or `{target, view}`: `target` is `"file"` (default,
+a file or directory) or `"registry"`; `view` (`"native"`, `"wow64_32"`,
+`"wow64_64"`, as in `registry`) is valid only with `target: "registry"`. A
+registry path uses the `registry` syntax (`"HKLM\\Software\\Vendor\\App"`).
+An unknown key is an `Err`. A missing file or key is an `Err` naming it. A
+final symlink or junction (any reparse point) is refused with an `Err`:
+name its target.
+
+Read entry keys: `sid` (`"S-1-5-32-545"`); `name` (`"BUILTIN\\Users"`,
+`"Everyone"`, or `Value::Null` when the SID does not resolve); `kind`
+(`"allow"`, `"deny"`, or `"other"` for object/callback ACEs, which also
+carry `type` and have null `sid`/`name`); `rights` (names, below); `mask`
+(int); `inherit` (subset of `object`, `container`, `no_propagate`,
+`inherit_only`; `[]` = this object only); `inherited` (bool). Generic bits
+(GENERIC_ALL on a `CREATOR OWNER` entry) are mapped to the target's rights
+in both `rights` and `mask`.
+
+Spec: `{owner?: principal, protected?: bool, entries: [{principal, kind, rights?, mask?, inherit?}]}`.
+
+- `entries` is required (`[]` removes every explicit entry). Each entry
+  needs `principal`, `kind` (`allow`/`deny`) and `rights` or `mask`; both
+  given = their union.
+- Omitted `owner` / `protected` are left unchanged and not compared.
+- `protected: true` disables inheritance and drops inherited entries (it
+  does not copy them in: list everything the object needs). `protected:
+  false` re-enables inheritance; Windows recomputes inherited entries from
+  the parent, and a directory passes its inheritable entries to children.
+- Owner changes enable SeRestorePrivilege + SeTakeOwnershipPrivilege on a
+  thread-local token for the call (works as SYSTEM or admin); if they
+  cannot be enabled and the owner differs, `Err`.
+- Inherit flags on a plain file (not a directory) are an `Err`: Windows
+  strips them, so the entry could never converge.
+- A principal is a SID string or an account name: `"BUILTIN\\Administrators"`,
+  `"Administrators"`, `"NT AUTHORITY\\SYSTEM"`, `"DOMAIN\\user"`,
+  `".\\user"` (local account). Unresolvable = `Err` naming it. Comparison
+  is always by SID.
+
+`diff` compares: owner by SID (when given), `protected` (when given), and
+explicit entries as a set of (SID, kind, mask with generic bits mapped,
+inherit flags); order and duplicates do not count, so a changed right shows
+as one `missing entry` line plus one `unexpected entry` line. Inherited
+entries are ignored unless the spec has `protected: true` and the DACL is
+already protected.
+
+### acl rights
+
+| Target | Composite names (reported first, largest first) | Single-bit names (bit order) | Aliases (spec only) |
+|---|---|---|---|
+| file | `full_control` 0x1F01FF, `modify` 0x301BF, `read_and_execute` 0x200A9, `read` 0x20089, `write` 0x116 | `read_data`, `write_data`, `append_data`, `read_extended_attributes`, `write_extended_attributes`, `execute_file`, `delete_subdirectories_and_files`, `read_attributes`, `write_attributes`, `delete`, `read_permissions`, `change_permissions`, `take_ownership`, `synchronize` | `list_directory` = `read_data`, `create_files` = `write_data`, `create_directories` = `append_data`, `traverse` = `execute_file` |
+| registry | `full_control` 0xF003F, `read_key` 0x20019, `write_key` 0x20006 | `query_values`, `set_value`, `create_subkey`, `enumerate_subkeys`, `notify`, `create_link`, `delete`, `read_permissions`, `change_permissions`, `take_ownership` | `execute_key` = `read_key` |
+
+On read a mask becomes: each composite whose bits are all present and that
+covers a bit no earlier name did, then the single name of each bit left.
+`0x1F01FF` reads `["full_control"]`; `0x1200A9` reads
+`["read_and_execute", "synchronize"]`. Unnamed bits appear only in `mask`.
+An unknown right name is an `Err` listing the target's valid names. `set`
+adds nothing to the mask: a file allow entry normally wants `synchronize`
+too (Explorer and .NET always add it).
+
+```rust
+use acl
+use value
+
+// check: params.acl is the spec map, params.path the directory.
+fn check(params: Value) -> Result[CheckResult, string] {
+    let p = params.get("path").unwrap().as_string().unwrap()
+    let changes = acl::diff(p, params.get("acl").unwrap(), Value::Null)?
+    if changes.len() == 0 { Ok(CheckResult::AlreadyConfigured) } else { Ok(CheckResult::NotConfigured) }
+}
+```
 
 ## service (Windows only)
 
