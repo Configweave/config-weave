@@ -468,6 +468,10 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   `std::fs::OpenOptions` that still writes the file, so it lstats and
   refuses any symlink or reparse point, then opens: check-then-open, not
   atomic. `write`, `write_bytes`, `append` and `read` still follow.
+- `fs::read_with` / `read_bytes_with` take the same `{follow_symlinks}`
+  option and bind it the same way (`O_NOFOLLOW` read-only open on Unix,
+  check-then-open on Windows). `read_with` errors on invalid UTF-8, as
+  `read` does.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:

@@ -26,6 +26,27 @@ pub fn module() -> Module {
             .map(|b| b.into_iter().map(|x| x as i64).collect())
             .map_err(err)
     });
+    m.doc_next(
+        "Read a file as text, with options {follow_symlinks: bool}. follow_symlinks false \
+         refuses a final symlink instead of reading through it",
+    );
+    m.fn_(
+        "read_with",
+        |path: &str, opts: DynValue| -> Result<String, String> {
+            let bytes = read_with(path, &opts)?;
+            String::from_utf8(bytes).map_err(|_| format!("cannot read {path}: not valid UTF-8"))
+        },
+    );
+    m.doc_next(
+        "Read a file as bytes, with options {follow_symlinks: bool}. follow_symlinks false \
+         refuses a final symlink instead of reading through it",
+    );
+    m.fn_(
+        "read_bytes_with",
+        |path: &str, opts: DynValue| -> Result<Vec<i64>, String> {
+            read_with(path, &opts).map(|b| b.into_iter().map(|x| x as i64).collect())
+        },
+    );
     m.doc_next("Write text to a file, replacing its contents");
     m.fn_("write", |path: &str, content: &str| -> Result<(), String> {
         std::fs::write(path, content).map_err(err)
@@ -193,6 +214,15 @@ fn lexists(path: &str) -> bool {
 }
 
 fn parse_write_opts(opts: &DynValue) -> Result<bool, String> {
+    parse_follow_opts(opts, "write")
+}
+
+fn parse_read_opts(opts: &DynValue) -> Result<bool, String> {
+    parse_follow_opts(opts, "read")
+}
+
+/// `what` names the operation in errors: "write" or "read".
+fn parse_follow_opts(opts: &DynValue, what: &str) -> Result<bool, String> {
     let mut follow = true;
     match opts {
         DynValue::Null => {}
@@ -205,7 +235,7 @@ fn parse_write_opts(opts: &DynValue) -> Result<bool, String> {
                     }
                     (other, _) => {
                         return Err(format!(
-                            "unknown write option '{other}' (expected follow_symlinks)"
+                            "unknown {what} option '{other}' (expected follow_symlinks)"
                         ));
                     }
                 }
@@ -213,7 +243,7 @@ fn parse_write_opts(opts: &DynValue) -> Result<bool, String> {
         }
         other => {
             return Err(format!(
-                "write options must be a map or null, got {other:?}"
+                "{what} options must be a map or null, got {other:?}"
             ));
         }
     }
@@ -227,6 +257,55 @@ fn write_with(path: &str, content: &[u8], opts: &DynValue) -> Result<(), String>
         return std::fs::write(path, content).map_err(err);
     }
     write_no_follow(path, content)
+}
+
+/// With `follow_symlinks: false` a root-run read cannot be pointed at a
+/// file the caller should not see (`/etc/shadow`) by a planted link.
+fn read_with(path: &str, opts: &DynValue) -> Result<Vec<u8>, String> {
+    if parse_read_opts(opts)? {
+        return std::fs::read(path).map_err(err);
+    }
+    read_no_follow(path)
+}
+
+fn refuse_symlink_read(path: &str) -> String {
+    format!("cannot read {path}: it is a symlink and follow_symlinks is false")
+}
+
+/// O_NOFOLLOW makes the open itself fail on a final symlink, so there is
+/// no window between a check and the read.
+#[cfg(unix)]
+fn read_no_follow(path: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path);
+    match file {
+        Ok(mut f) => {
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).map_err(err)?;
+            Ok(buf)
+        }
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => Err(refuse_symlink_read(path)),
+        Err(e) => Err(err(e)),
+    }
+}
+
+/// Check-then-open, not atomic: a link swapped in between the check and
+/// the open is followed. Any reparse point (symlink or junction) counts.
+#[cfg(windows)]
+fn read_no_follow(path: &str) -> Result<Vec<u8>, String> {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    if let Ok(meta) = std::fs::symlink_metadata(path)
+        && (meta.file_type().is_symlink()
+            || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    {
+        return Err(refuse_symlink_read(path));
+    }
+    std::fs::read(path).map_err(err)
 }
 
 fn refuse_symlink_write(path: &str) -> String {
@@ -604,6 +683,41 @@ mod tests {
         let (target, link) = planted_link(dir.path());
         write_with(&link, b"through", &DynValue::Null).unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "through");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_with_no_follow_refuses_a_planted_symlink() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (target, link) = planted_link(dir.path());
+        let opts = DynValue::Map(HashMap::from([(
+            "follow_symlinks".to_string(),
+            DynValue::Bool(false),
+        )]));
+        assert_eq!(
+            read_with(&link, &opts).unwrap_err(),
+            refuse_symlink_read(&link)
+        );
+        // The target itself, and the link with default options, read normally.
+        assert_eq!(
+            read_with(target.to_str().unwrap(), &opts).unwrap(),
+            b"original"
+        );
+        assert_eq!(read_with(&link, &DynValue::Null).unwrap(), b"original");
+    }
+
+    #[test]
+    fn read_opts_name_the_read_operation() {
+        let err = parse_read_opts(&DynValue::Map(HashMap::from([(
+            "follow".to_string(),
+            DynValue::Bool(false),
+        )])))
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "unknown read option 'follow' (expected follow_symlinks)"
+        );
+        assert!(parse_read_opts(&DynValue::Null).unwrap());
     }
 
     #[test]
