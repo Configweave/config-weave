@@ -6,7 +6,7 @@ page ref_mod_fs {
   chapter_header "fs module" {
     kicker       = "Reference · reference"
     reading_time = "3 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -42,6 +42,48 @@ SRC
   }
 
   p "`write` and `write_bytes` replace the file's contents. `append` adds text to the end of the file and creates the file when it is absent."
+
+  p "`write`, `write_bytes` and `append` follow a final symlink: they change the file the link points to."
+
+  h2 "write_with and write_bytes_with"
+
+  code rust {
+    source = <<'SRC'
+fs::write_with(path: string, content: string, opts: Value) -> Result[unit, string]
+fs::write_bytes_with(path: string, bytes: List[int], opts: Value) -> Result[unit, string]
+SRC
+  }
+
+  p <<'PROSE'
+The same as `write` and `write_bytes`, with options. `opts` is `Value::Null`
+for the defaults or a map with the key below. An unknown key returns `Err`.
+With `Value::Null` each call behaves exactly like `write` or `write_bytes`.
+PROSE
+
+  table {
+    rows:
+      | "Key" | "Type" | "Default" | "Meaning" |
+      | "`follow_symlinks`" | "bool" | "`true`" | "`false` refuses a final symlink with `Err` instead of writing through it" |
+  }
+
+  p <<'PROSE'
+With `follow_symlinks` set to `false`, a path whose final component is a
+symlink returns
+`Err("cannot write <path>: it is a symlink and follow_symlinks is false")` and
+the link's target is not touched. Use it when a root-run script writes into a
+user-owned directory, where a planted symlink would otherwise redirect the
+write onto another file. Symlinks earlier in the path are followed. On Unix
+the refusal is part of the open (`O_NOFOLLOW`), so it has no race. On Windows
+the path is checked for a symlink or other reparse point first and then
+opened, so a link swapped in between the two steps is followed.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+let no_follow = Value::Map(#{"follow_symlinks": Value::Bool(false)})
+fs::write_with("/home/alice/.ssh/authorized_keys", keys, no_follow)?
+SRC
+  }
 
   h2 "copy and move"
 
@@ -125,7 +167,9 @@ SRC
       | "`is_file`" | "bool" | "the path is a regular file" |
       | "`is_dir`" | "bool" | "the path is a directory" |
       | "`is_symlink`" | "bool" | "the path is a symlink" |
-      | "`mode`" | "int" | "Unix permission bits, `0` on other platforms" |
+      | "`mode`" | "int" | "Unix permission bits (`st_mode & 0o7777`, so `0o644` reads as `420`), `0` on other platforms" |
+      | "`uid`" | "int" | "Unix owner user id, `Value::Null` on other platforms" |
+      | "`gid`" | "int" | "Unix owner group id, `Value::Null` on other platforms" |
   }
 
   h2 "glob"
@@ -193,6 +237,37 @@ PROSE
     source = <<'SRC'
 fs::write("/home/alice/.ssh/known_hosts", content)?
 fs::chown("/home/alice/.ssh/known_hosts", Value::String("alice"), Value::Null)?
+SRC
+  }
+
+  h2 "chmod"
+
+  code rust {
+    source = <<'SRC'
+fs::chmod(path: string, mode: Value) -> Result[unit, string]
+SRC
+  }
+
+  p <<'PROSE'
+Sets the permission bits of a path. Unix only: on Windows every call returns
+`Err`. `mode` is `Value::Int(n)`, where `448` is `0o700`, or `Value::String`
+of octal digits, as `chmod(1)` reads them: `"700"`, `"0700"` and `"0440"` all
+work. Any other value, a string with a non-octal digit, or a mode above
+`0o7777` returns `Err`. Read the result back from the `mode` key of
+`metadata`.
+PROSE
+
+  p <<'PROSE'
+`chmod` refuses a final symlink instead of following it, and returns
+`Err("cannot chmod <path>: it is a symlink, which chmod does not follow")`.
+Linux cannot change the mode of a link itself, and following it would let a
+symlink planted in a user-owned directory redirect a root-run `chmod` onto
+another file, as with `chown`. Symlinks earlier in the path are followed.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+fs::chmod("/home/alice/.ssh", Value::String("0700"))?
 SRC
   }
 

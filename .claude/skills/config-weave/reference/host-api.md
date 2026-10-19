@@ -122,7 +122,9 @@ unchanged. This is the whole surface.
 | `read_bytes` | `fs::read_bytes(path: string) -> Result[List[int], string]` | raw bytes as ints |
 | `write` | `fs::write(path: string, content: string) -> Result[unit, string]` | replaces contents |
 | `write_bytes` | `fs::write_bytes(path: string, bytes: List[int]) -> Result[unit, string]` | replaces contents |
-| `append` | `fs::append(path: string, content: string) -> Result[unit, string]` | creates the file when absent |
+| `write_with` | `fs::write_with(path: string, content: string, opts: Value) -> Result[unit, string]` | `write` with options `{follow_symlinks: bool}` (default `true`; `Value::Null` = `write`); `false` refuses a final symlink with `Err` and leaves its target untouched (Unix: `O_NOFOLLOW`, race-free; Windows: check then open, not atomic); unknown key is `Err` |
+| `write_bytes_with` | `fs::write_bytes_with(path: string, bytes: List[int], opts: Value) -> Result[unit, string]` | `write_bytes` with the same options as `write_with` |
+| `append` | `fs::append(path: string, content: string) -> Result[unit, string]` | creates the file when absent; `write`, `write_bytes` and `append` follow a final symlink |
 | `copy` | `fs::copy(from: string, to: string) -> Result[unit, string]` | one file |
 | `move` | `fs::move(from: string, to: string) -> Result[unit, string]` | renames a file or a directory |
 | `delete` | `fs::delete(path: string) -> Result[unit, string]` | a file or a symlink |
@@ -140,6 +142,7 @@ unchanged. This is the whole surface.
 | `symlink` | `fs::symlink(target: string, link: string) -> Result[unit, string]` | link at `link` pointing to `target` |
 | `read_link` | `fs::read_link(path: string) -> Result[string, string]` | the target of a symlink |
 | `chown` | `fs::chown(path: string, owner: Value, group: Value) -> Result[unit, string]` | Unix only (`Err` on Windows); each of `owner`/`group` is `Value::String(name)`, `Value::Int(id)` or `Value::Null` to leave it unchanged; unknown name is `Err("unknown owner '<name>'")`; does not follow a final symlink |
+| `chmod` | `fs::chmod(path: string, mode: Value) -> Result[unit, string]` | Unix only (`Err` on Windows); `mode` is `Value::Int(448)` (= `0o700`) or `Value::String` of octal digits (`"700"`, `"0700"`); other values or a mode above `0o7777` are `Err`; refuses a final symlink with `Err` instead of following it |
 
 ### `fs::metadata` map keys
 
@@ -151,7 +154,9 @@ unchanged. This is the whole surface.
 | `is_file` | bool | regular file |
 | `is_dir` | bool | directory |
 | `is_symlink` | bool | symlink |
-| `mode` | int | Unix permission bits, `0` on other platforms |
+| `mode` | int | Unix permission bits (`st_mode & 0o7777`, no file-type bits: `0o644` reads as `420`), `0` on other platforms |
+| `uid` | int | Unix owner user id, `Value::Null` on other platforms |
+| `gid` | int | Unix owner group id, `Value::Null` on other platforms |
 
 Read them with the `Value` accessors:
 `meta.get("modified").unwrap().as_int().unwrap()`.

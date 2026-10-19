@@ -425,6 +425,25 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   `none`), so a package can detect a value stored with the wrong kind.
   Binary data (REG_BINARY, REG_NONE) uses the `fs::read_bytes` shape, a
   list of byte ints.
+- `fs::metadata` reports `mode` as the permission bits only
+  (`st_mode & 0o7777`); before 2026-10 it leaked the file-type bits
+  (`33188` for a `0644` file) despite documenting permission bits. `uid`
+  and `gid` are the owner ids on Unix and `Null` on Windows, where `0`
+  would claim root; `mode` stays `0` there so existing `as_int()` readers
+  keep working.
+- `fs::chmod` refuses a final symlink rather than following it: Linux
+  has no `lchmod`, and following would let a planted link redirect a
+  root-run chmod (`chown`'s reason for `lchown`). It lstats for a clear
+  error, then calls `fchmodat(…, AT_SYMLINK_NOFOLLOW)`, which returns
+  `EOPNOTSUPP` if a link is swapped in between, so the refusal holds
+  without a race. A string mode is octal digits only (`"0700"`, no `0o`).
+- `fs::write_with` / `write_bytes_with` take `{follow_symlinks}`
+  (default `true`, so `Null` is `write`). `false` opens with `O_NOFOLLOW`
+  on Unix, so a final symlink fails the open itself (`ELOOP`, reported as
+  a named refusal) with no race. Windows has no equivalent flag on
+  `std::fs::OpenOptions` that still writes the file, so it lstats and
+  refuses any symlink or reparse point, then opens: check-then-open, not
+  atomic. `write`, `write_bytes`, `append` and `read` still follow.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:
