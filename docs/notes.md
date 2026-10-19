@@ -417,14 +417,33 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   options to an existing function would break every caller, so it gets a
   `_with` sibling that takes the trailing `opts` and the original keeps
   its signature and default behaviour: `registry::read_with` and friends
-  (`{view}`), `service::start_with` / `stop_with` (`{timeout}`). A
-  function added new takes `opts` from the start (`registry::read_typed`,
-  `service::restart`). Unknown option keys are an `Err`.
+  (`{view}`), `service::start_with` (`{timeout}`) / `stop_with`
+  (`{timeout, stop_dependents}`). A function added new takes `opts` from
+  the start (`registry::read_typed`, `service::restart`). Unknown option
+  keys are an `Err`, including `stop_dependents` on `start_with`.
+- `service` `stop_dependents` stops dependents in EnumDependentServicesW's
+  order, not sorted: the SCM returns transitive dependents in reverse
+  start order, which is the only safe stop order when dependents depend on
+  each other. `restart` restarts the ones it stopped in the reverse of
+  that. `service::dependents` sorts its result for determinism; it is for
+  inspection, not for driving a stop order.
 - `registry::read_typed` returns `{kind, data}` with `kind` from `write`'s
   vocabulary (`sz`, `expand_sz`, `dword`, `qword`, `multi_sz`, `binary`,
   `none`), so a package can detect a value stored with the wrong kind.
   Binary data (REG_BINARY, REG_NONE) uses the `fs::read_bytes` shape, a
-  list of byte ints.
+  list of byte ints. Any other type (REG_LINK, REG_RESOURCE_LIST, ...) is
+  `{kind: "other", type, data}`: `type` is the REG_* number, `data` the raw
+  bytes in the same list-of-ints shape. `other` is read-only: `write`
+  rejects it, and `read`/`read_with` still return an `Err` for those types,
+  since they have no kind field to carry the distinction.
+- `registry` "absent" is decided by `codec::is_absent`: only
+  ERROR_FILE_NOT_FOUND (2) and ERROR_PATH_NOT_FOUND (3) make `read`,
+  `read_typed` return `None` or `key_exists` return `false`. Any other
+  open or value-query failure (ERROR_ACCESS_DENIED, ...) is an `Err`
+  naming the key and the Win32 error, so a check cannot mistake "cannot
+  see" for "not configured" and an apply cannot then overwrite a key it
+  was never allowed to read. `delete_value`/`delete_key` already failed on
+  a missing key and are unchanged.
 - `fs::metadata` reports `mode` as the permission bits only
   (`st_mode & 0o7777`); before 2026-10 it leaked the file-type bits
   (`33188` for a `0644` file) despite documenting permission bits. `uid`

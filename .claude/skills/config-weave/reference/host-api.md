@@ -454,12 +454,12 @@ prefix is case-insensitive and accepts the short or the long name
 | Function | Signature | Notes |
 |---|---|---|
 | `read` | `registry::read(key: string, name: string) -> Result[Option[Value], string]` | `None` when the key or the value is absent; `Value` typed by kind (below); a kind outside the table is an `Err` |
-| `read_typed` | `registry::read_typed(key: string, name: string, opts: Value) -> Result[Option[Value], string]` | `None` when absent, else a map `{kind, data}`: `kind` is the `write` kind name (table below), `data` is what `read` returns; tells `sz` from `expand_sz` and `dword` from `qword` |
+| `read_typed` | `registry::read_typed(key: string, name: string, opts: Value) -> Result[Option[Value], string]` | `None` when absent, else a map `{kind, data}`: `kind` is the `write` kind name (table below), `data` is what `read` returns; tells `sz` from `expand_sz` and `dword` from `qword`. A kind outside the table is `{kind: "other", type: <REG_* int>, data: <raw bytes as List[int]>}`, not an `Err` |
 | `write` | `registry::write(key: string, name: string, value: Value, kind: string) -> Result[unit, string]` | `kind` must match the shape of `value` |
 | `delete_value` | `registry::delete_value(key: string, name: string) -> Result[unit, string]` | one value |
 | `create_key` | `registry::create_key(key: string) -> Result[unit, string]` | creates missing parents |
 | `delete_key` | `registry::delete_key(key: string) -> Result[unit, string]` | the key and its whole subtree |
-| `key_exists` | `registry::key_exists(key: string) -> Result[bool, string]` | |
+| `key_exists` | `registry::key_exists(key: string) -> Result[bool, string]` | `false` only when the key is not found |
 | `read_with` | `registry::read_with(key: string, name: string, opts: Value) -> Result[Option[Value], string]` | `read` in the view `opts` selects |
 | `write_with` | `registry::write_with(key: string, name: string, value: Value, kind: string, opts: Value) -> Result[unit, string]` | |
 | `delete_value_with` | `registry::delete_value_with(key: string, name: string, opts: Value) -> Result[unit, string]` | |
@@ -473,6 +473,11 @@ map with one key, `view`: `"native"` (default, the process's own view),
 view). An unknown key or view is an `Err`. The functions without `_with`
 always use the native view.
 
+"Absent" (`None` from `read`/`read_typed`, `false` from `key_exists`) means
+only ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND. Any other failure to
+open the key or query the value, such as ERROR_ACCESS_DENIED, is an `Err`
+naming the key and the Win32 error.
+
 ### Registry value kinds
 
 | `kind` string | Registry type | `Value` shape |
@@ -484,11 +489,12 @@ always use the native view.
 | `multi_sz` | REG_MULTI_SZ | `Value::List` of `Value::String` |
 | `binary` | REG_BINARY | `Value::List` of `Value::Int`, one per byte, 0-255 (the `fs::read_bytes` shape) |
 | `none` | REG_NONE | as `binary` |
+| `other` | any other type (REG_LINK, REG_RESOURCE_LIST, ...) | `read_typed` only: the map also carries `type` (the REG_* int); `data` is the raw bytes as for `binary`. Not accepted by `write` |
 
 `read` returns the same shapes: REG_SZ and REG_EXPAND_SZ as `Value::String`,
 REG_DWORD and REG_QWORD as `Value::Int`, REG_MULTI_SZ as a list of strings,
 REG_BINARY and REG_NONE as a list of byte ints. Any other registry type
-(REG_LINK, ...) is an `Err`. `read` cannot tell REG_SZ from REG_EXPAND_SZ or
+(REG_LINK, ...) is an `Err` from `read`; `read_typed` returns it as `other`. `read` cannot tell REG_SZ from REG_EXPAND_SZ or
 REG_DWORD from REG_QWORD; `read_typed` can.
 
 ## service (Windows only)
@@ -503,11 +509,18 @@ surface.
 | `status` | `service::status(name: string) -> Result[string, string]` | one of the status strings below |
 | `start` | `service::start(name: string) -> Result[unit, string]` | waits (60s) until `running`; waits out pending states first, continues a `paused` service, no-op when already running |
 | `stop` | `service::stop(name: string) -> Result[unit, string]` | waits (60s) until `stopped`; waits out pending states first, no-op when already stopped |
-| `restart` | `service::restart(name: string, opts: Value) -> Result[unit, string]` | `stop` then `start`, each waiting; `opts` as for `start_with`, `timeout` applies to each phase |
+| `restart` | `service::restart(name: string, opts: Value) -> Result[unit, string]` | `stop` then `start`, each waiting; `opts` as for `stop_with`, `timeout` applies to each phase; with `stop_dependents` the stopped dependents are started again afterwards, in reverse stop order |
 | `start_with` | `service::start_with(name: string, opts: Value) -> Result[unit, string]` | as `start`; `opts` is `Value::Null` or `{timeout: secs}` |
-| `stop_with` | `service::stop_with(name: string, opts: Value) -> Result[unit, string]` | as `stop`, same `opts` |
+| `stop_with` | `service::stop_with(name: string, opts: Value) -> Result[unit, string]` | as `stop`; `opts` is `Value::Null` or `{timeout: secs, stop_dependents: bool}` (default `false`; `true` first stops every dependent not already stopped, in SCM order) |
+| `dependents` | `service::dependents(name: string) -> Result[List[string], string]` | names of the services that depend on `name`, directly or transitively, in any state, sorted |
 | `set_startup` | `service::set_startup(name: string, mode: string) -> Result[unit, string]` | `mode` is `automatic`, `automatic_delayed`, `manual` or `disabled`; anything else is an `Err`. `automatic` clears the delayed-start flag |
 | `startup` | `service::startup(name: string) -> Result[string, string]` | `automatic`, `automatic_delayed`, `manual`, `disabled`, `boot`, `system`, or `other` for any other startup type |
+
+`stop_dependents` stops dependents in the order the SCM lists them (reverse
+start order, so a dependent of a dependent stops first), each with the same
+timeout, then the service. A dependent that was already stopped is left
+alone. A dependent that fails ends the call with an `Err` naming it.
+`start_with` rejects `stop_dependents`.
 
 A wait that runs out returns an `Err` naming the last state seen. A service
 that goes pending and then drops back (for example it crashes while starting)

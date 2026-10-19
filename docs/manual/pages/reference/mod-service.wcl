@@ -6,7 +6,7 @@ page ref_mod_service {
   chapter_header "service module (Windows)" {
     kicker       = "Reference · reference"
     reading_time = "2 min read"
-    updated      = "2026-10-13"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -44,7 +44,19 @@ SRC
 
   p "Starts, stops or restarts a service and returns once it has reached the target state, so a re-check straight after apply sees `running` or `stopped`, never a `*_pending` state. Each first waits out any pending state. `start` on a `paused` service continues it. `start` on a running service and `stop` on a stopped one are no-ops. `restart` stops the service, waits, starts it and waits again."
 
-  p "The wait polls the service at a tenth of the wait hint it reports, between 100 ms and 1 s, for up to 60 seconds. `restart` and the `_with` forms take an options map whose only key is `timeout` (seconds, int or float; in `restart` it applies to each phase); `Value::Null` keeps the default. On timeout the call returns an `Err` naming the last state it saw. If the service drops back to its starting state after going pending (for example it crashes while starting), the call fails at once."
+  p "The wait polls the service at a tenth of the wait hint it reports, between 100 ms and 1 s, for up to 60 seconds. `restart` and the `_with` forms take an options map with the key `timeout` (seconds, int or float; in `restart` it applies to each phase); `Value::Null` keeps the defaults. On timeout the call returns an `Err` naming the last state it saw. If the service drops back to its starting state after going pending (for example it crashes while starting), the call fails at once."
+
+  p "`stop_with` and `restart` also take `stop_dependents` (bool, default `false`). When it is `true`, the call first stops every dependent service that is not already stopped, in the order the SCM lists them (the reverse of start order, so a dependent of a dependent stops first), each with the same timeout and wait. It then stops the service. `restart` starts the service again and then starts the dependents it stopped, in reverse stop order. A dependent that was already stopped stays stopped. A dependent that fails to stop or start ends the call with an `Err` naming it. `start_with` does not take `stop_dependents`; passing it is an `Err`."
+
+  h2 "dependents"
+
+  code rust {
+    source = <<'SRC'
+service::dependents(name: string) -> Result[List[string], string]
+SRC
+  }
+
+  p "The names of the services that depend on `name`, directly or through another dependent, in any state, sorted. An empty list means nothing depends on it."
 
   h2 "set_startup and startup"
 

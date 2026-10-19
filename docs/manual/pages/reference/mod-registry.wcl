@@ -6,7 +6,7 @@ page ref_mod_registry {
   chapter_header "registry module (Windows)" {
     kicker       = "Reference · reference"
     reading_time = "2 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -19,6 +19,12 @@ error. Guard a call with a step condition on `os.family` or with
 `Result[…, string]`. A key is a hive-prefixed path such as
 `HKLM\Software\Vendor\App`; the hive names are also available as the
 constants `registry::HKLM`, `HKCU`, `HKCR`, `HKU` and `HKCC`.
+
+A key or value counts as absent only when Windows reports it as not found
+(ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND). Any other failure, such as
+access denied, is an `Err` naming the key and the Win32 error, so `read`
+never returns `None` and `key_exists` never returns `false` for a key the
+process cannot open.
 PROSE
 
   h2 "read"
@@ -50,7 +56,7 @@ registry::read_typed(key: string, name: string, opts: Value) -> Result[Option[Va
 SRC
   }
 
-  p "Reads a value together with its kind. It returns `None` when the key or the value is absent, and otherwise a map `{kind, data}`. `kind` is the name `write` accepts: `sz`, `expand_sz`, `dword`, `qword`, `multi_sz`, `binary` or `none`. `data` has the shape `read` returns. Use `read_typed` when a REG_SZ must be told apart from a REG_EXPAND_SZ, or a REG_DWORD from a REG_QWORD. `opts` is the view map described under Registry views below; pass `Value::Null` for the native view."
+  p "Reads a value together with its kind. It returns `None` when the key or the value is absent, and otherwise a map `{kind, data}`. `kind` is the name `write` accepts: `sz`, `expand_sz`, `dword`, `qword`, `multi_sz`, `binary` or `none`. `data` has the shape `read` returns. A registry type outside that list, such as REG_LINK or REG_RESOURCE_LIST, is not an `Err` here: the map is `{kind: \"other\", type, data}`, where `type` is the REG_* number as an int and `data` is the raw bytes as a list of ints. `write` does not accept `other`. Use `read_typed` when a REG_SZ must be told apart from a REG_EXPAND_SZ, or a REG_DWORD from a REG_QWORD. `opts` is the view map described under Registry views below; pass `Value::Null` for the native view."
 
   h2 "write"
 
@@ -91,7 +97,7 @@ registry::key_exists(key: string) -> Result[bool, string]
 SRC
   }
 
-  p "Whether a key exists."
+  p "Whether a key exists. It returns `false` only when the key is not found; any other failure is an `Err`."
 
   h2 "Registry views"
 

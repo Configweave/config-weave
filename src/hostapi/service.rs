@@ -82,20 +82,36 @@ fn parse_startup(mode: &str) -> Result<(u32, Option<bool>), String> {
     })
 }
 
-/// The `opts` argument of `start_with`/`stop_with`/`restart`: null or
-/// a map with `timeout` (seconds).
-fn parse_timeout(opts: &DynValue) -> Result<Duration, String> {
-    let mut out = DEFAULT_TIMEOUT;
+/// The `opts` argument of `start_with`/`stop_with`/`restart`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Opts {
+    timeout: Duration,
+    /// Stop running dependents first (`stop_with`/`restart` only).
+    stop_dependents: bool,
+}
+
+/// Parse `opts`: null or a map with `timeout` (seconds) and, where
+/// `dependents` allows it, `stop_dependents` (bool).
+fn parse_opts(opts: &DynValue, dependents: bool) -> Result<Opts, String> {
+    let mut out = Opts {
+        timeout: DEFAULT_TIMEOUT,
+        stop_dependents: false,
+    };
+    let expected = if dependents {
+        "timeout, stop_dependents"
+    } else {
+        "timeout"
+    };
     match opts {
         DynValue::Null => {}
         DynValue::Map(m) => {
             for (k, v) in m {
                 match (k.as_str(), v) {
                     ("timeout", DynValue::Int(secs)) if *secs >= 0 => {
-                        out = Duration::from_secs(*secs as u64);
+                        out.timeout = Duration::from_secs(*secs as u64);
                     }
                     ("timeout", DynValue::Float(secs)) if secs.is_finite() && *secs >= 0.0 => {
-                        out = Duration::from_secs_f64(*secs);
+                        out.timeout = Duration::from_secs_f64(*secs);
                     }
                     ("timeout", other) => {
                         return Err(format!(
@@ -103,9 +119,17 @@ fn parse_timeout(opts: &DynValue) -> Result<Duration, String> {
                              got {other:?}"
                         ));
                     }
+                    ("stop_dependents", DynValue::Bool(b)) if dependents => {
+                        out.stop_dependents = *b;
+                    }
+                    ("stop_dependents", other) if dependents => {
+                        return Err(format!(
+                            "service option 'stop_dependents' must be a bool, got {other:?}"
+                        ));
+                    }
                     (other, _) => {
                         return Err(format!(
-                            "unknown service option '{other}' (expected timeout)"
+                            "unknown service option '{other}' (expected {expected})"
                         ));
                     }
                 }
@@ -118,6 +142,55 @@ fn parse_timeout(opts: &DynValue) -> Result<Duration, String> {
         }
     }
     Ok(out)
+}
+
+/// Stop `name`, first stopping each dependent in `deps` that is not
+/// already stopped. `deps` is `(name, state)` in the order
+/// EnumDependentServicesW returns them, the reverse of start order, which
+/// is a safe stop order even when dependents depend on each other.
+/// Returns the dependents it stopped, in stop order.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn stop_tree(
+    name: &str,
+    deps: &[(String, u32)],
+    mut converge: impl FnMut(&str, Target) -> Result<(), String>,
+) -> Result<Vec<String>, String> {
+    let mut stopped = Vec::new();
+    for (dep, state) in deps {
+        if *state != STOPPED {
+            converge(dep, Target::Stopped)
+                .map_err(|e| format!("stopping dependent '{dep}' of '{name}': {e}"))?;
+            stopped.push(dep.clone());
+        }
+    }
+    converge(name, Target::Stopped)?;
+    Ok(stopped)
+}
+
+/// `restart` with `stop_dependents`: `stop_tree`, start `name`, then start
+/// the dependents it stopped again in reverse stop order.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn restart_tree(
+    name: &str,
+    deps: &[(String, u32)],
+    mut converge: impl FnMut(&str, Target) -> Result<(), String>,
+) -> Result<(), String> {
+    let stopped = stop_tree(name, deps, &mut converge)?;
+    converge(name, Target::Running)?;
+    for dep in stopped.iter().rev() {
+        converge(dep, Target::Running)
+            .map_err(|e| format!("restarting dependent '{dep}' of '{name}': {e}"))?;
+    }
+    Ok(())
+}
+
+/// The names `dependents()` reports: sorted, so the result does not depend
+/// on SCM ordering.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn sorted_names(deps: &[(String, u32)]) -> Vec<String> {
+    let mut names: Vec<String> = deps.iter().map(|(n, _)| n.clone()).collect();
+    names.sort();
+    names
 }
 
 /// The state a converging call drives a service to.
@@ -280,14 +353,14 @@ pub fn module() -> Module {
     m.fn_(
         "start_with",
         |name: &str, opts: DynValue| -> Result<(), String> {
-            win::converge(name, Target::Running, parse_timeout(&opts)?)
+            win::converge(name, Target::Running, parse_opts(&opts, false)?.timeout)
         },
     );
     #[cfg(not(windows))]
     m.fn_(
         "start_with",
         |_: &str, opts: DynValue| -> Result<(), String> {
-            parse_timeout(&opts)?;
+            parse_opts(&opts, false)?;
             Err(NOT_WINDOWS.to_string())
         },
     );
@@ -305,39 +378,65 @@ pub fn module() -> Module {
         Err(NOT_WINDOWS.to_string())
     });
 
-    m.doc_next("Like stop. opts: timeout (secs, default 60)");
+    m.doc_next(
+        "Like stop. opts: timeout (secs, default 60), stop_dependents (bool, default false: \
+         stop running dependents first)",
+    );
     #[cfg(windows)]
     m.fn_(
         "stop_with",
         |name: &str, opts: DynValue| -> Result<(), String> {
-            win::converge(name, Target::Stopped, parse_timeout(&opts)?)
+            let opts = parse_opts(&opts, true)?;
+            if !opts.stop_dependents {
+                return win::converge(name, Target::Stopped, opts.timeout);
+            }
+            let deps = win::dependents(name)?;
+            stop_tree(name, &deps, |n, t| win::converge(n, t, opts.timeout)).map(|_| ())
         },
     );
     #[cfg(not(windows))]
     m.fn_(
         "stop_with",
         |_: &str, opts: DynValue| -> Result<(), String> {
-            parse_timeout(&opts)?;
+            parse_opts(&opts, true)?;
             Err(NOT_WINDOWS.to_string())
         },
     );
 
     m.doc_next(
         "Stop then start a service, waiting for each state. opts: timeout (secs per phase, \
-         default 60)",
+         default 60), stop_dependents (bool, default false: stop running dependents first, \
+         start them again afterwards)",
     );
     #[cfg(windows)]
     m.fn_(
         "restart",
         |name: &str, opts: DynValue| -> Result<(), String> {
-            let timeout = parse_timeout(&opts)?;
-            win::converge(name, Target::Stopped, timeout)?;
-            win::converge(name, Target::Running, timeout)
+            let opts = parse_opts(&opts, true)?;
+            let deps = if opts.stop_dependents {
+                win::dependents(name)?
+            } else {
+                Vec::new()
+            };
+            restart_tree(name, &deps, |n, t| win::converge(n, t, opts.timeout))
         },
     );
     #[cfg(not(windows))]
     m.fn_("restart", |_: &str, opts: DynValue| -> Result<(), String> {
-        parse_timeout(&opts)?;
+        parse_opts(&opts, true)?;
+        Err(NOT_WINDOWS.to_string())
+    });
+
+    m.doc_next(
+        "Names of the services that depend on a service, directly or through another \
+         dependent, sorted",
+    );
+    #[cfg(windows)]
+    m.fn_("dependents", |name: &str| -> Result<Vec<String>, String> {
+        Ok(sorted_names(&win::dependents(name)?))
+    });
+    #[cfg(not(windows))]
+    m.fn_("dependents", |_: &str| -> Result<Vec<String>, String> {
         Err(NOT_WINDOWS.to_string())
     });
 
@@ -373,15 +472,17 @@ pub fn module() -> Module {
 mod win {
     use std::time::Duration;
 
+    use windows::Win32::Foundation::ERROR_MORE_DATA;
     use windows::Win32::System::Services::{
         ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, ControlService,
-        ENUM_SERVICE_TYPE, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW,
-        QueryServiceConfig2W, QueryServiceConfigW, QueryServiceStatusEx, SC_HANDLE,
-        SC_MANAGER_CONNECT, SC_STATUS_PROCESS_INFO, SERVICE_CHANGE_CONFIG,
-        SERVICE_CONFIG_DELAYED_AUTO_START_INFO, SERVICE_CONTROL_CONTINUE, SERVICE_CONTROL_STOP,
-        SERVICE_DELAYED_AUTO_START_INFO, SERVICE_ERROR, SERVICE_NO_CHANGE, SERVICE_PAUSE_CONTINUE,
-        SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_START_TYPE,
-        SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP, StartServiceW,
+        ENUM_SERVICE_STATUSW, ENUM_SERVICE_TYPE, EnumDependentServicesW, OpenSCManagerW,
+        OpenServiceW, QUERY_SERVICE_CONFIGW, QueryServiceConfig2W, QueryServiceConfigW,
+        QueryServiceStatusEx, SC_HANDLE, SC_MANAGER_CONNECT, SC_STATUS_PROCESS_INFO,
+        SERVICE_CHANGE_CONFIG, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, SERVICE_CONTROL_CONTINUE,
+        SERVICE_CONTROL_STOP, SERVICE_DELAYED_AUTO_START_INFO, SERVICE_ENUMERATE_DEPENDENTS,
+        SERVICE_ERROR, SERVICE_NO_CHANGE, SERVICE_PAUSE_CONTINUE, SERVICE_QUERY_CONFIG,
+        SERVICE_QUERY_STATUS, SERVICE_START, SERVICE_START_TYPE, SERVICE_STATE_ALL, SERVICE_STATUS,
+        SERVICE_STATUS_PROCESS, SERVICE_STOP, StartServiceW,
     };
     use windows::core::{BOOL, HSTRING, PCWSTR};
 
@@ -465,6 +566,52 @@ mod win {
         }
     }
 
+    /// `(name, state)` of every service that depends on `name`, in the
+    /// SCM's order (reverse start order, so a safe stop order).
+    pub fn dependents(name: &str) -> Result<Vec<(String, u32)>, String> {
+        let (_scm, svc) = open(name, SERVICE_ENUMERATE_DEPENDENTS)?;
+        let mut needed = 0u32;
+        let mut count = 0u32;
+        // Entries point at strings later in the same buffer, so it is sized
+        // in whole entries to keep it aligned. Starts empty: the first call
+        // sizes it (ERROR_MORE_DATA), and succeeds outright with no dependents.
+        let entry = size_of::<ENUM_SERVICE_STATUSW>();
+        let mut buf: Vec<ENUM_SERVICE_STATUSW> = Vec::new();
+        unsafe {
+            loop {
+                let ptr = (!buf.is_empty()).then_some(buf.as_mut_ptr());
+                match EnumDependentServicesW(
+                    svc.0,
+                    SERVICE_STATE_ALL,
+                    ptr,
+                    (buf.len() * entry) as u32,
+                    &mut needed,
+                    &mut count,
+                ) {
+                    Ok(()) => break,
+                    // Also covers a dependent added between the two calls.
+                    Err(e) if e.code() == ERROR_MORE_DATA.to_hresult() => {
+                        buf = vec![
+                            ENUM_SERVICE_STATUSW::default();
+                            (needed as usize).div_ceil(entry)
+                        ];
+                    }
+                    Err(e) => return Err(format!("listing dependents of '{name}': {e}")),
+                }
+            }
+            buf[..count as usize]
+                .iter()
+                .map(|s| {
+                    let dep = s
+                        .lpServiceName
+                        .to_string()
+                        .map_err(|e| format!("reading a dependent name of '{name}': {e}"))?;
+                    Ok((dep, s.ServiceStatus.dwCurrentState.0))
+                })
+                .collect()
+        }
+    }
+
     pub fn set_startup(name: &str, mode: &str) -> Result<(), String> {
         let (ty, delayed) = parse_startup(mode)?;
         let (_scm, svc) = open(name, SERVICE_CHANGE_CONFIG)?;
@@ -530,6 +677,7 @@ mod win {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::collections::HashMap;
 
     use super::*;
 
@@ -601,20 +749,209 @@ mod tests {
         assert!(parse_startup("boot").is_err());
     }
 
+    fn timeout(opts: &DynValue) -> Result<Duration, String> {
+        parse_opts(opts, false).map(|o| o.timeout)
+    }
+
     #[test]
     fn timeout_defaults_and_parses() {
-        assert_eq!(parse_timeout(&DynValue::Null), Ok(DEFAULT_TIMEOUT));
+        assert_eq!(timeout(&DynValue::Null), Ok(DEFAULT_TIMEOUT));
         assert_eq!(
-            parse_timeout(&map(&[("timeout", DynValue::Int(5))])),
+            timeout(&map(&[("timeout", DynValue::Int(5))])),
             Ok(Duration::from_secs(5))
         );
         assert_eq!(
-            parse_timeout(&map(&[("timeout", DynValue::Float(1.5))])),
+            timeout(&map(&[("timeout", DynValue::Float(1.5))])),
             Ok(Duration::from_millis(1500))
         );
-        assert!(parse_timeout(&map(&[("timeout", DynValue::Int(-1))])).is_err());
-        assert!(parse_timeout(&map(&[("wait", DynValue::Int(1))])).is_err());
-        assert!(parse_timeout(&DynValue::Int(5)).is_err());
+        assert!(timeout(&map(&[("timeout", DynValue::Int(-1))])).is_err());
+        assert!(timeout(&map(&[("wait", DynValue::Int(1))])).is_err());
+        assert!(timeout(&DynValue::Int(5)).is_err());
+    }
+
+    #[test]
+    fn stop_dependents_defaults_off_and_parses_where_allowed() {
+        assert_eq!(
+            parse_opts(&DynValue::Null, true),
+            Ok(Opts {
+                timeout: DEFAULT_TIMEOUT,
+                stop_dependents: false
+            })
+        );
+        assert_eq!(
+            parse_opts(
+                &map(&[
+                    ("stop_dependents", DynValue::Bool(true)),
+                    ("timeout", DynValue::Int(3)),
+                ]),
+                true
+            ),
+            Ok(Opts {
+                timeout: Duration::from_secs(3),
+                stop_dependents: true
+            })
+        );
+        let err = parse_opts(&map(&[("stop_dependents", DynValue::Int(1))]), true).unwrap_err();
+        assert!(err.contains("must be a bool"), "{err}");
+        // start_with does not take it.
+        let err =
+            parse_opts(&map(&[("stop_dependents", DynValue::Bool(true))]), false).unwrap_err();
+        assert!(
+            err.contains("unknown service option 'stop_dependents'"),
+            "{err}"
+        );
+        assert!(err.contains("(expected timeout)"), "{err}");
+        let err = parse_opts(&map(&[("wait", DynValue::Int(1))]), true).unwrap_err();
+        assert!(err.contains("(expected timeout, stop_dependents)"), "{err}");
+    }
+
+    /// A fake SCM of several services: `converge` runs the real `drive`
+    /// loop against it, and each action settles the service at once.
+    /// Records every SCM action as `(service, action)`.
+    struct FakeScm {
+        states: RefCell<HashMap<String, u32>>,
+        log: RefCell<Vec<(String, Action)>>,
+    }
+
+    impl FakeScm {
+        fn new(services: &[(&str, u32)]) -> Self {
+            FakeScm {
+                states: RefCell::new(services.iter().map(|(n, s)| (n.to_string(), *s)).collect()),
+                log: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn converge(&self, name: &str, target: Target) -> Result<(), String> {
+            drive(
+                name,
+                target,
+                DEFAULT_TIMEOUT,
+                || {
+                    Ok(Observed {
+                        state: self.states.borrow()[name],
+                        wait_hint_ms: 0,
+                    })
+                },
+                |action| {
+                    self.log.borrow_mut().push((name.to_string(), action));
+                    let next = if action == Action::Stop {
+                        STOPPED
+                    } else {
+                        RUNNING
+                    };
+                    self.states.borrow_mut().insert(name.to_string(), next);
+                    Ok(())
+                },
+                || Duration::ZERO,
+                |_| {},
+            )
+        }
+
+        fn deps(&self, names: &[&str]) -> Vec<(String, u32)> {
+            names
+                .iter()
+                .map(|n| (n.to_string(), self.states.borrow()[*n]))
+                .collect()
+        }
+
+        fn log(&self) -> Vec<(String, Action)> {
+            self.log.borrow().clone()
+        }
+    }
+
+    fn acts(pairs: &[(&str, Action)]) -> Vec<(String, Action)> {
+        pairs.iter().map(|(n, a)| (n.to_string(), *a)).collect()
+    }
+
+    #[test]
+    fn stop_tree_stops_running_dependents_in_scm_order_first() {
+        let scm = FakeScm::new(&[
+            ("svc", RUNNING),
+            ("outer", RUNNING),
+            ("idle", STOPPED),
+            ("inner", PAUSED),
+        ]);
+        // SCM order: reverse start order, so `outer` (which depends on
+        // `inner`) comes first.
+        let deps = scm.deps(&["outer", "idle", "inner"]);
+        let stopped = stop_tree("svc", &deps, |n, t| scm.converge(n, t)).unwrap();
+        assert_eq!(stopped, vec!["outer".to_string(), "inner".to_string()]);
+        assert_eq!(
+            scm.log(),
+            acts(&[
+                ("outer", Action::Stop),
+                ("inner", Action::Stop),
+                ("svc", Action::Stop)
+            ])
+        );
+    }
+
+    #[test]
+    fn stop_tree_with_no_dependents_is_a_plain_stop() {
+        let scm = FakeScm::new(&[("svc", RUNNING)]);
+        let stopped = stop_tree("svc", &[], |n, t| scm.converge(n, t)).unwrap();
+        assert!(stopped.is_empty());
+        assert_eq!(scm.log(), acts(&[("svc", Action::Stop)]));
+    }
+
+    #[test]
+    fn restart_tree_starts_only_the_stopped_dependents_in_reverse() {
+        let scm = FakeScm::new(&[
+            ("svc", RUNNING),
+            ("outer", RUNNING),
+            ("idle", STOPPED),
+            ("inner", RUNNING),
+        ]);
+        let deps = scm.deps(&["outer", "idle", "inner"]);
+        restart_tree("svc", &deps, |n, t| scm.converge(n, t)).unwrap();
+        assert_eq!(
+            scm.log(),
+            acts(&[
+                ("outer", Action::Stop),
+                ("inner", Action::Stop),
+                ("svc", Action::Stop),
+                ("svc", Action::Start),
+                ("inner", Action::Start),
+                ("outer", Action::Start),
+            ])
+        );
+        assert_eq!(scm.states.borrow()["idle"], STOPPED);
+    }
+
+    #[test]
+    fn restart_tree_without_dependents_is_stop_then_start() {
+        let scm = FakeScm::new(&[("svc", RUNNING)]);
+        restart_tree("svc", &[], |n, t| scm.converge(n, t)).unwrap();
+        assert_eq!(
+            scm.log(),
+            acts(&[("svc", Action::Stop), ("svc", Action::Start)])
+        );
+    }
+
+    #[test]
+    fn a_failing_dependent_stops_the_tree_and_is_named() {
+        let scm = FakeScm::new(&[("svc", RUNNING), ("dep", RUNNING)]);
+        let deps = scm.deps(&["dep"]);
+        let err = stop_tree("svc", &deps, |n, t| {
+            if n == "dep" {
+                Err("access denied".to_string())
+            } else {
+                scm.converge(n, t)
+            }
+        })
+        .unwrap_err();
+        assert!(err.contains("stopping dependent 'dep' of 'svc'"), "{err}");
+        assert!(scm.log().is_empty(), "svc must not be stopped");
+    }
+
+    #[test]
+    fn dependent_names_are_sorted() {
+        let deps = vec![
+            ("b".to_string(), RUNNING),
+            ("a".to_string(), STOPPED),
+            ("c".to_string(), RUNNING),
+        ];
+        assert_eq!(sorted_names(&deps), vec!["a", "b", "c"]);
     }
 
     #[test]
