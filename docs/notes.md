@@ -468,6 +468,63 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   look like a key with no values. The name buffer is sized from
   RegQueryInfoKeyW's longest name and grown on ERROR_MORE_DATA (a value
   added mid-enumeration) up to the 16,383-unit name limit.
+- `acl` (Windows only; Linux/macOS calls are `Err`, no POSIX ACLs) reads
+  and sets the owner and DACL of files, directories and registry keys so
+  packages stop paying 0.4-3 s per PowerShell `Get-Acl`/`Set-Acl`; a
+  `__verify` run of `acl::read` on Server 2025 took 85 ms, process start
+  included, against 2.3 s for `Get-Acl`. Three functions, all taking `opts`
+  from the start: `read(path, opts)`, `set(path, spec, opts)`,
+  `diff(path, spec, opts) -> List[string]`. `opts` is `{target: file |
+  registry, view}`; `view` reuses `registry::codec::parse_view` and is an
+  `Err` for files, registry paths reuse `registry::win::split_hive`.
+  Bindings:
+  - Shape: `read` is `{owner: {sid, name}, protected, entries: [{sid,
+    name, kind, rights, mask, inherit, inherited}]}` in stored order;
+    `name` is `Null` when LookupAccountSidW fails for any reason (the SID
+    stays authoritative). Object and callback ACEs read as `kind: "other"`
+    with a `type`; `set` cannot write them and `diff` reports them. A NULL
+    DACL reads as `entries: []` and is always a `diff` line.
+  - `set` replaces all explicit entries, writes deny before allow (each
+    group in spec order, exact duplicates dropped), and never writes
+    inherited entries: it always passes PROTECTED_ or
+    UNPROTECTED_DACL_SECURITY_INFORMATION (the spec's `protected`, else
+    the current flag), and unprotected SetSecurityInfo recomputes the
+    inherited entries from the parent and propagates a directory's
+    inheritable entries to its children (both observed on Server 2025).
+    `protected: true` drops inherited entries rather than copying them in.
+    `entries` is required, unlike `owner`/`protected`, so a spec cannot
+    wipe the DACL by omission.
+  - `diff` is the convergence test for `set`: owner by SID, `protected`
+    when given, explicit entries as a set of (SID, kind, mask with
+    GENERIC_* mapped, inherit flags). Inherited entries count only when
+    the spec says `protected: true` and the DACL already is protected.
+  - Inherit flags on a plain file are an `Err` in `set` and `diff`:
+    Windows silently strips OI/CI from a non-container's ACEs (observed),
+    so such a spec would never converge. Registry keys keep every flag.
+  - Principals: SID strings are parsed in the codec (no
+    ConvertStringSidToSidW, so SDDL aliases like `BA` are not accepted);
+    anything else goes to LookupAccountNameW, with `.\user` rewritten to
+    `<NetBIOS computer name>\user` because LookupAccountNameW does not
+    understand `.`. SIDs and ACLs are encoded and decoded in the pure
+    codec from their binary layouts, so the Win32 side only moves bytes.
+  - Rights: named after .NET FileSystemRights / RegistryRights in
+    snake_case, plus `mask` for unnamed bits; `rights` and `mask` unite.
+    On read: composites largest first, each taken when all its bits are
+    present and it covers a bit no earlier name did, then single-bit names
+    for what is left, in bit order; aliases (`list_directory`, `traverse`,
+    `execute_key`, ...) are accepted but never reported; unnamed bits stay
+    only in `mask`. GENERIC_* bits are mapped to the target's specific
+    rights on read and on spec parsing. `set` adds nothing to the mask:
+    .NET adds `synchronize` to every file allow rule, `acl` does not, and
+    the docs tell authors to list it.
+  - Files are opened with FILE_FLAG_OPEN_REPARSE_POINT |
+    FILE_FLAG_BACKUP_SEMANTICS; any reparse point (symlink, junction) is
+    refused, and GetSecurityInfo/SetSecurityInfo work on that one handle,
+    so there is no check-then-use race (`fs::chown`/`chmod`'s reasoning).
+  - Owner changes call ImpersonateSelf and enable SeRestorePrivilege and
+    SeTakeOwnershipPrivilege on the thread token only, reverted after the
+    call, so other worker threads never hold them. A failure to enable
+    them is an `Err` only when the owner actually differs.
 - `fs::metadata` reports `mode` as the permission bits only
   (`st_mode & 0o7777`); before 2026-10 it leaked the file-type bits
   (`33188` for a `0644` file) despite documenting permission bits. `uid`

@@ -50,6 +50,7 @@ PROSE
 
   list {
     li "[registry](ref_mod_registry) reads and writes registry keys and values."
+    li "[acl](ref_mod_acl) reads, compares and sets the owner and DACL of files, directories and registry keys."
     li "[service](ref_mod_service) queries and controls Windows services."
     li "[com](ref_mod_com) drives COM objects through IDispatch and runs WMI queries. Each WMI row is flattened into a property map host-side, so scripts never touch enumerators."
   }
