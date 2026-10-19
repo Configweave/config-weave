@@ -437,6 +437,13 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   error, then calls `fchmodat(…, AT_SYMLINK_NOFOLLOW)`, which returns
   `EOPNOTSUPP` if a link is swapped in between, so the refusal holds
   without a race. A string mode is octal digits only (`"0700"`, no `0o`).
+- `fs::write_with` / `write_bytes_with` take `{follow_symlinks}`
+  (default `true`, so `Null` is `write`). `false` opens with `O_NOFOLLOW`
+  on Unix, so a final symlink fails the open itself (`ELOOP`, reported as
+  a named refusal) with no race. Windows has no equivalent flag on
+  `std::fs::OpenOptions` that still writes the file, so it lstats and
+  refuses any symlink or reparse point, then opens: check-then-open, not
+  atomic. `write`, `write_bytes`, `append` and `read` still follow.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:

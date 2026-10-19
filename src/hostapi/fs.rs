@@ -38,6 +38,27 @@ pub fn module() -> Module {
             std::fs::write(path, bytes).map_err(err)
         },
     );
+    m.doc_next(
+        "Write text to a file, replacing its contents, with options {follow_symlinks: bool}. \
+         follow_symlinks false refuses a final symlink instead of writing through it",
+    );
+    m.fn_(
+        "write_with",
+        |path: &str, content: &str, opts: DynValue| -> Result<(), String> {
+            write_with(path, content.as_bytes(), &opts)
+        },
+    );
+    m.doc_next(
+        "Write bytes to a file, replacing its contents, with options {follow_symlinks: bool}. \
+         follow_symlinks false refuses a final symlink instead of writing through it",
+    );
+    m.fn_(
+        "write_bytes_with",
+        |path: &str, content: Vec<i64>, opts: DynValue| -> Result<(), String> {
+            let bytes: Vec<u8> = content.iter().map(|b| *b as u8).collect();
+            write_with(path, &bytes, &opts)
+        },
+    );
     m.doc_next("Append text to a file, creating it if absent");
     m.fn_(
         "append",
@@ -169,6 +190,81 @@ pub fn module() -> Module {
 
 fn lexists(path: &str) -> bool {
     std::fs::symlink_metadata(path).is_ok()
+}
+
+fn parse_write_opts(opts: &DynValue) -> Result<bool, String> {
+    let mut follow = true;
+    match opts {
+        DynValue::Null => {}
+        DynValue::Map(m) => {
+            for (k, v) in m {
+                match (k.as_str(), v) {
+                    ("follow_symlinks", DynValue::Bool(b)) => follow = *b,
+                    ("follow_symlinks", other) => {
+                        return Err(format!("follow_symlinks must be a bool, got {other:?}"));
+                    }
+                    (other, _) => {
+                        return Err(format!(
+                            "unknown write option '{other}' (expected follow_symlinks)"
+                        ));
+                    }
+                }
+            }
+        }
+        other => {
+            return Err(format!(
+                "write options must be a map or null, got {other:?}"
+            ));
+        }
+    }
+    Ok(follow)
+}
+
+/// With `follow_symlinks: false` a root-run write into a user-owned tree
+/// cannot be redirected by a planted link, as with `chown`.
+fn write_with(path: &str, content: &[u8], opts: &DynValue) -> Result<(), String> {
+    if parse_write_opts(opts)? {
+        return std::fs::write(path, content).map_err(err);
+    }
+    write_no_follow(path, content)
+}
+
+fn refuse_symlink_write(path: &str) -> String {
+    format!("cannot write {path}: it is a symlink and follow_symlinks is false")
+}
+
+/// O_NOFOLLOW makes the open itself fail on a final symlink, so there is
+/// no window between a check and the write.
+#[cfg(unix)]
+fn write_no_follow(path: &str, content: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path);
+    match file {
+        Ok(mut f) => f.write_all(content).map_err(err),
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => Err(refuse_symlink_write(path)),
+        Err(e) => Err(err(e)),
+    }
+}
+
+/// Check-then-open, not atomic: a link swapped in between the check and
+/// the open is followed. Any reparse point (symlink or junction) counts.
+#[cfg(windows)]
+fn write_no_follow(path: &str, content: &[u8]) -> Result<(), String> {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    if let Ok(meta) = std::fs::symlink_metadata(path)
+        && (meta.file_type().is_symlink()
+            || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    {
+        return Err(refuse_symlink_write(path));
+    }
+    std::fs::write(path, content).map_err(err)
 }
 
 /// `mode` keeps its `0` off Unix so existing `as_int()` readers still
@@ -470,6 +566,58 @@ mod tests {
         assert!(err.contains("is a symlink"), "{err}");
         assert!(err.contains(link), "{err}");
         assert_eq!(meta_int(target.to_str().unwrap(), "mode"), 0o600);
+    }
+
+    #[cfg(unix)]
+    fn planted_link(dir: &Path) -> (std::path::PathBuf, String) {
+        let target = dir.join("target");
+        std::fs::write(&target, "original").unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        (target, link.to_str().unwrap().to_string())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_with_no_follow_refuses_a_planted_symlink() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (target, link) = planted_link(dir.path());
+        let opts = DynValue::Map(HashMap::from([(
+            "follow_symlinks".to_string(),
+            DynValue::Bool(false),
+        )]));
+        let err = write_with(&link, b"evil", &opts).unwrap_err();
+        assert_eq!(err, refuse_symlink_write(&link));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
+        // A regular file is written normally, created when absent.
+        let plain = dir.path().join("plain");
+        let plain = plain.to_str().unwrap();
+        write_with(plain, b"one", &opts).unwrap();
+        write_with(plain, b"two", &opts).unwrap();
+        assert_eq!(std::fs::read_to_string(plain).unwrap(), "two");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_with_null_opts_writes_through_a_symlink() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (target, link) = planted_link(dir.path());
+        write_with(&link, b"through", &DynValue::Null).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "through");
+    }
+
+    #[test]
+    fn write_opts_reject_unknown_keys_and_bad_values() {
+        let bad = |k: &str, v: DynValue| {
+            parse_write_opts(&DynValue::Map(HashMap::from([(k.to_string(), v)]))).unwrap_err()
+        };
+        assert_eq!(
+            bad("follow_symlink", DynValue::Bool(false)),
+            "unknown write option 'follow_symlink' (expected follow_symlinks)"
+        );
+        assert!(bad("follow_symlinks", DynValue::Int(0)).starts_with("follow_symlinks must be"));
+        assert!(parse_write_opts(&DynValue::Int(1)).is_err());
+        assert!(parse_write_opts(&DynValue::Null).unwrap());
     }
 
     #[cfg(unix)]
