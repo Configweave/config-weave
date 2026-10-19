@@ -95,40 +95,11 @@ pub fn module() -> Module {
     });
     m.doc_next(
         "File metadata as a map: size, modified (unix secs), readonly, is_file, is_dir, \
-         is_symlink, mode (unix permission bits; 0 elsewhere). Does not follow a final \
-         symlink: for a link it describes the link itself",
+         is_symlink, mode (unix permission bits, st_mode & 0o7777; 0 elsewhere), uid and gid \
+         (unix owner ids; null elsewhere). Does not follow a final symlink: for a link it \
+         describes the link itself",
     );
-    m.fn_("metadata", |path: &str| -> Result<DynValue, String> {
-        let meta = std::fs::symlink_metadata(path).map_err(err)?;
-        let mut map = HashMap::new();
-        map.insert("size".into(), DynValue::Int(meta.len() as i64));
-        let modified = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        map.insert("modified".into(), DynValue::Int(modified));
-        map.insert(
-            "readonly".into(),
-            DynValue::Bool(meta.permissions().readonly()),
-        );
-        map.insert("is_file".into(), DynValue::Bool(meta.is_file()));
-        map.insert("is_dir".into(), DynValue::Bool(meta.is_dir()));
-        map.insert(
-            "is_symlink".into(),
-            DynValue::Bool(meta.file_type().is_symlink()),
-        );
-        #[cfg(unix)]
-        let mode = {
-            use std::os::unix::fs::PermissionsExt;
-            meta.permissions().mode() as i64
-        };
-        #[cfg(not(unix))]
-        let mode = 0i64;
-        map.insert("mode".into(), DynValue::Int(mode));
-        Ok(DynValue::Map(map))
-    });
+    m.fn_("metadata", |path: &str| metadata(path));
     m.doc_next("Expand a glob pattern to matching paths (sorted)");
     m.fn_("glob", |pattern: &str| -> Result<Vec<String>, String> {
         let paths = glob::glob(pattern).map_err(|e| e.to_string())?;
@@ -189,6 +160,46 @@ pub fn module() -> Module {
 
 fn lexists(path: &str) -> bool {
     std::fs::symlink_metadata(path).is_ok()
+}
+
+/// `mode` keeps its `0` off Unix so existing `as_int()` readers still
+/// work; `uid`/`gid` are `Null` there because `0` would claim root.
+fn metadata(path: &str) -> Result<DynValue, String> {
+    let meta = std::fs::symlink_metadata(path).map_err(err)?;
+    let mut map = HashMap::new();
+    map.insert("size".into(), DynValue::Int(meta.len() as i64));
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    map.insert("modified".into(), DynValue::Int(modified));
+    map.insert(
+        "readonly".into(),
+        DynValue::Bool(meta.permissions().readonly()),
+    );
+    map.insert("is_file".into(), DynValue::Bool(meta.is_file()));
+    map.insert("is_dir".into(), DynValue::Bool(meta.is_dir()));
+    map.insert(
+        "is_symlink".into(),
+        DynValue::Bool(meta.file_type().is_symlink()),
+    );
+    #[cfg(unix)]
+    let (mode, uid, gid) = {
+        use std::os::unix::fs::MetadataExt;
+        (
+            DynValue::Int((meta.mode() & 0o7777) as i64),
+            DynValue::Int(meta.uid() as i64),
+            DynValue::Int(meta.gid() as i64),
+        )
+    };
+    #[cfg(not(unix))]
+    let (mode, uid, gid) = (DynValue::Int(0), DynValue::Null, DynValue::Null);
+    map.insert("mode".into(), mode);
+    map.insert("uid".into(), uid);
+    map.insert("gid".into(), gid);
+    Ok(DynValue::Map(map))
 }
 
 /// `lchown`, not `chown`: config-weave runs as root and writes into
@@ -311,6 +322,32 @@ mod tests {
         assert!(!Path::new(link).exists(), "exists follows the link");
         assert!(lexists(link));
         assert!(!lexists(dir.path().join("missing").to_str().unwrap()));
+    }
+
+    #[cfg(unix)]
+    fn meta_int(path: &str, key: &str) -> i64 {
+        match metadata(path).unwrap() {
+            DynValue::Map(m) => match m.get(key) {
+                Some(DynValue::Int(n)) => *n,
+                other => panic!("{key}: {other:?}"),
+            },
+            other => panic!("not a map: {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn metadata_reports_permission_bits_and_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let path = f.path().to_str().unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o4751)).unwrap();
+        // Only the permission bits: no S_IFREG (0o100000) file-type bits.
+        assert_eq!(meta_int(path, "mode"), 0o4751);
+        // SAFETY: plain id queries with no arguments.
+        let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+        assert_eq!(meta_int(path, "uid"), uid as i64);
+        assert_eq!(meta_int(path, "gid"), gid as i64);
     }
 
     #[cfg(unix)]

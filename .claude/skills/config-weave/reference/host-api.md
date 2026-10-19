@@ -151,7 +151,9 @@ unchanged. This is the whole surface.
 | `is_file` | bool | regular file |
 | `is_dir` | bool | directory |
 | `is_symlink` | bool | symlink |
-| `mode` | int | Unix permission bits, `0` on other platforms |
+| `mode` | int | Unix permission bits (`st_mode & 0o7777`, no file-type bits: `0o644` reads as `420`), `0` on other platforms |
+| `uid` | int | Unix owner user id, `Value::Null` on other platforms |
+| `gid` | int | Unix owner group id, `Value::Null` on other platforms |
 
 Read them with the `Value` accessors:
 `meta.get("modified").unwrap().as_int().unwrap()`.

@@ -425,6 +425,12 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   `none`), so a package can detect a value stored with the wrong kind.
   Binary data (REG_BINARY, REG_NONE) uses the `fs::read_bytes` shape, a
   list of byte ints.
+- `fs::metadata` reports `mode` as the permission bits only
+  (`st_mode & 0o7777`); before 2026-10 it leaked the file-type bits
+  (`33188` for a `0644` file) despite documenting permission bits. `uid`
+  and `gid` are the owner ids on Unix and `Null` on Windows, where `0`
+  would claim root; `mode` stays `0` there so existing `as_int()` readers
+  keep working.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:

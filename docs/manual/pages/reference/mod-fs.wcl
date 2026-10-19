@@ -125,7 +125,9 @@ SRC
       | "`is_file`" | "bool" | "the path is a regular file" |
       | "`is_dir`" | "bool" | "the path is a directory" |
       | "`is_symlink`" | "bool" | "the path is a symlink" |
-      | "`mode`" | "int" | "Unix permission bits, `0` on other platforms" |
+      | "`mode`" | "int" | "Unix permission bits (`st_mode & 0o7777`, so `0o644` reads as `420`), `0` on other platforms" |
+      | "`uid`" | "int" | "Unix owner user id, `Value::Null` on other platforms" |
+      | "`gid`" | "int" | "Unix owner group id, `Value::Null` on other platforms" |
   }
 
   h2 "glob"
