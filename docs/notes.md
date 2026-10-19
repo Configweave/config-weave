@@ -539,7 +539,14 @@ below). Bindings fixed here:
   `PT_INTERP` header → newest static workspace cross-build artifact;
   windows = `--binary-windows` / `$CONFIG_WEAVE_TEST_BINARY_WINDOWS` →
   newest workspace `x86_64-pc-windows-gnu` artifact (`MZ`-magic
-  checked). It also copies a synthesized playbook (one play `test`,
+  checked). Both then fall back to the `just install` layout: the
+  platform file (`config-weave-linux-x86_64` /
+  `config-weave-windows-x86_64.exe`) beside the canonicalized running
+  exe, then `$XDG_DATA_HOME` (else `$HOME/.local/share`)
+  `/config-weave/bin/`, under the same static-ELF / `MZ` checks. The
+  install symlinks only the linux binary onto PATH, so resolving the
+  symlink is what lands beside the windows one. The not-found error
+  lists every path searched. It also copies a synthesized playbook (one play `test`,
   properties/conditions spliced verbatim, referenced packages copied
   in). A `version` smoke test turns arch mismatches into one clear
   diagnostic. The binary is copied to a shared path

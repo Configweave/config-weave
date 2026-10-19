@@ -6,7 +6,7 @@ page apx_troubleshooting {
   chapter_header "Troubleshooting" {
     kicker       = "Appendices · explanation"
     reading_time = "11 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -149,7 +149,7 @@ PROSE
 
 **Cause.** The testlab shells out to the `vmlab` command for every instance and probes it once, up front. The command is found on the path, or through `$CONFIG_WEAVE_VMLAB_CMD`. A container test needs an OCI image vmlab can pull. A VM test needs a template that ships the vmlab guest agent, because the runner polls the agent for readiness and gives up after 300 seconds. `vmlab up` itself is given 30 minutes for a VM and 5 minutes for a container; past that the runner kills it, tears the lab down and errors the group with a message naming the machine, what it was made from and the limit. A guest stuck at boot is the usual cause. After provisioning, the runner copies a config-weave binary matched to the guest OS and runs `version` inside it; an architecture or OS mismatch fails there.
 
-**Fix.** Confirm `vmlab --version` works on the host. For a VM, use a template with a working agent; for an apt-family VM test, `x86_64/ubuntu-24.04` is known to work. For a Linux guest the binary comes from `--binary`, `$CONFIG_WEAVE_TEST_BINARY`, the running executable if it is static, or the newest static cross-build; for a Windows guest, from `--binary-windows` or `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`. Pass `--keep` to leave the lab up and inspect it with `vmlab exec` or `vmlab console`; that includes a lab whose `vmlab up` timed out. The requirements table is in [The test block](ref_test_block).
+**Fix.** Confirm `vmlab --version` works on the host. For a VM, use a template with a working agent; for an apt-family VM test, `x86_64/ubuntu-24.04` is known to work. For a Linux guest the binary comes from `--binary`, `$CONFIG_WEAVE_TEST_BINARY`, the running executable if it is static, the newest static cross-build, or the `just install` folder; for a Windows guest, from `--binary-windows`, `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, the newest Windows cross-build, or the `just install` folder. A not-found error lists every path searched. Pass `--keep` to leave the lab up and inspect it with `vmlab exec` or `vmlab console`; that includes a lab whose `vmlab up` timed out. The requirements table is in [The test block](ref_test_block).
 PROSE
 
   h2 "a test writes to the wrong home directory"

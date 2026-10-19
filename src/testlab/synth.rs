@@ -52,16 +52,63 @@ impl BinaryResolver {
     }
 }
 
+/// The environment `locate_binary` searches, gathered once so tests can
+/// inject it instead of mutating the process environment.
+pub struct SearchRoots {
+    /// `$CONFIG_WEAVE_TEST_BINARY[_WINDOWS]` for the guest OS, if set.
+    env: Option<String>,
+    /// The running executable with symlinks resolved.
+    exe: Option<PathBuf>,
+    /// `$XDG_DATA_HOME`, else `$HOME/.local/share` — where `just install`
+    /// puts `config-weave/bin/`.
+    data_home: Option<PathBuf>,
+}
+
+impl SearchRoots {
+    pub fn from_env(os: GuestOs) -> Self {
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let exe = std::env::current_exe()
+            .ok()
+            .map(|e| std::fs::canonicalize(&e).unwrap_or(e));
+        let data_home = var("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| var("HOME").map(|h| Path::new(&h).join(".local/share")));
+        SearchRoots {
+            env: var(env_var_for(os)),
+            exe,
+            data_home,
+        }
+    }
+}
+
+fn env_var_for(os: GuestOs) -> &'static str {
+    match os {
+        GuestOs::Linux => "CONFIG_WEAVE_TEST_BINARY",
+        GuestOs::Windows => "CONFIG_WEAVE_TEST_BINARY_WINDOWS",
+    }
+}
+
 /// Find the binary to copy into instances of `os`. Resolution order:
 /// explicit `--binary`/`--binary-windows` / the matching
 /// `$CONFIG_WEAVE_TEST_BINARY[_WINDOWS]` (trusted — the in-instance
 /// smoke test catches mistakes), the running executable when it is a
-/// static ELF (linux only), then the workspace's cross-build artifacts.
+/// static ELF (linux only), the workspace's cross-build artifacts, the
+/// platform binary beside the running executable, then the `just install`
+/// data dir.
 pub fn locate_binary(explicit: Option<&Path>, os: GuestOs) -> Result<PathBuf, Diag> {
-    let (flag, env_var) = match os {
-        GuestOs::Linux => ("--binary", "CONFIG_WEAVE_TEST_BINARY"),
-        GuestOs::Windows => ("--binary-windows", "CONFIG_WEAVE_TEST_BINARY_WINDOWS"),
+    locate_binary_in(explicit, os, &SearchRoots::from_env(os))
+}
+
+fn locate_binary_in(
+    explicit: Option<&Path>,
+    os: GuestOs,
+    roots: &SearchRoots,
+) -> Result<PathBuf, Diag> {
+    let flag = match os {
+        GuestOs::Linux => "--binary",
+        GuestOs::Windows => "--binary-windows",
     };
+    let env_var = env_var_for(os);
     if let Some(p) = explicit {
         return if p.is_file() {
             Ok(p.to_path_buf())
@@ -69,9 +116,7 @@ pub fn locate_binary(explicit: Option<&Path>, os: GuestOs) -> Result<PathBuf, Di
             Err(Diag::bare(format!("{flag} {} does not exist", p.display())))
         };
     }
-    if let Ok(env) = std::env::var(env_var)
-        && !env.is_empty()
-    {
+    if let Some(env) = &roots.env {
         let p = PathBuf::from(env);
         return if p.is_file() {
             Ok(p)
@@ -83,34 +128,36 @@ pub fn locate_binary(explicit: Option<&Path>, os: GuestOs) -> Result<PathBuf, Di
         };
     }
 
-    let exe = std::env::current_exe().ok();
+    let (platform_file, valid): (&str, fn(&Path) -> bool) = match os {
+        GuestOs::Linux => ("config-weave-linux-x86_64", is_static_elf),
+        GuestOs::Windows => ("config-weave-windows-x86_64.exe", is_pe),
+    };
+    let mut searched: Vec<PathBuf> = Vec::new();
+
+    let exe = roots.exe.as_ref();
     if os == GuestOs::Linux
-        && let Some(exe) = &exe
-        && is_static_elf(exe)
+        && let Some(exe) = exe
     {
-        return Ok(exe.clone());
+        searched.push(exe.clone());
+        if is_static_elf(exe) {
+            return Ok(exe.clone());
+        }
     }
 
     // Dev loop: a dynamically linked target/{debug,release} build is
     // running, but `just release` artifacts may exist in the workspace.
-    if let Some(exe) = &exe
+    if let Some(exe) = exe
         && let Some(ws) = exe.ancestors().nth(3)
     {
-        let (candidates, valid): (Vec<PathBuf>, fn(&Path) -> bool) = match os {
-            GuestOs::Linux => (
-                vec![
-                    ws.join("target-cross/x86_64-unknown-linux-musl/release/config-weave"),
-                    ws.join("dist/config-weave-linux-x86_64"),
-                ],
-                is_static_elf,
-            ),
-            GuestOs::Windows => (
-                vec![
-                    ws.join("target-cross/x86_64-pc-windows-gnu/release/config-weave.exe"),
-                    ws.join("dist/config-weave-windows-x86_64.exe"),
-                ],
-                is_pe,
-            ),
+        let candidates = match os {
+            GuestOs::Linux => vec![
+                ws.join("target-cross/x86_64-unknown-linux-musl/release/config-weave"),
+                ws.join("dist").join(platform_file),
+            ],
+            GuestOs::Windows => vec![
+                ws.join("target-cross/x86_64-pc-windows-gnu/release/config-weave.exe"),
+                ws.join("dist").join(platform_file),
+            ],
         };
         let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
         for c in candidates {
@@ -119,27 +166,51 @@ pub fn locate_binary(explicit: Option<&Path>, os: GuestOs) -> Result<PathBuf, Di
                     .and_then(|m| m.modified())
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
-                    best = Some((mtime, c));
+                    best = Some((mtime, c.clone()));
                 }
             }
+            searched.push(c);
         }
         if let Some((_, p)) = best {
             return Ok(p);
         }
     }
 
-    match os {
-        GuestOs::Linux => Err(Diag::bare(
-            "the running binary is dynamically linked and no static artifact was found; \
-             build one with `just release` and pass --binary dist/config-weave-linux-x86_64 \
-             (or set CONFIG_WEAVE_TEST_BINARY)",
-        )),
-        GuestOs::Windows => Err(Diag::bare(
-            "no windows test binary was found; build one with `just release` and pass \
-             --binary-windows dist/config-weave-windows-x86_64.exe \
-             (or set CONFIG_WEAVE_TEST_BINARY_WINDOWS)",
-        )),
+    // An installed release: `just install` puts both platform binaries in
+    // one folder and symlinks the linux one onto PATH, so the running exe
+    // (symlink resolved) sits beside its windows sibling.
+    let installed = [
+        exe.and_then(|e| e.parent()).map(|d| d.join(platform_file)),
+        roots
+            .data_home
+            .as_ref()
+            .map(|d| d.join("config-weave/bin").join(platform_file)),
+    ];
+    for c in installed.into_iter().flatten() {
+        if searched.contains(&c) {
+            continue;
+        }
+        if c.is_file() && valid(&c) {
+            return Ok(c);
+        }
+        searched.push(c);
     }
+
+    let searched = searched
+        .iter()
+        .map(|p| format!("  {}", p.display()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lead = match os {
+        GuestOs::Linux => {
+            "the running binary is dynamically linked and no static artifact was found"
+        }
+        GuestOs::Windows => "no windows test binary was found",
+    };
+    Err(Diag::bare(format!(
+        "{lead}; build one with `just release` (or install one with `just install`) \
+         and pass {flag} dist/{platform_file} (or set {env_var}); searched:\n{searched}"
+    )))
 }
 
 /// A 64-bit ELF with no `PT_INTERP` program header runs in any container
@@ -741,22 +812,165 @@ fn apply(params: Value) -> ApplyResult {
         assert_eq!(r.resolve(GuestOs::Linux).unwrap(), linux);
     }
 
+    /// Minimal 64-bit LE ELF header + one program header.
+    fn elf(p_type: u32) -> Vec<u8> {
+        let mut d = vec![0u8; 64 + 56];
+        d[..4].copy_from_slice(b"\x7fELF");
+        d[4] = 2; // 64-bit
+        d[5] = 1; // little-endian
+        d[32..40].copy_from_slice(&64u64.to_le_bytes()); // phoff
+        d[54..56].copy_from_slice(&56u16.to_le_bytes()); // phentsize
+        d[56..58].copy_from_slice(&1u16.to_le_bytes()); // phnum
+        d[64..68].copy_from_slice(&p_type.to_le_bytes());
+        d
+    }
+
     #[test]
     fn static_elf_detection_on_crafted_headers() {
-        // Minimal 64-bit LE ELF header + one program header.
-        fn elf(p_type: u32) -> Vec<u8> {
-            let mut d = vec![0u8; 64 + 56];
-            d[..4].copy_from_slice(b"\x7fELF");
-            d[4] = 2; // 64-bit
-            d[5] = 1; // little-endian
-            d[32..40].copy_from_slice(&64u64.to_le_bytes()); // phoff
-            d[54..56].copy_from_slice(&56u16.to_le_bytes()); // phentsize
-            d[56..58].copy_from_slice(&1u16.to_le_bytes()); // phnum
-            d[64..68].copy_from_slice(&p_type.to_le_bytes());
-            d
-        }
         assert!(is_static_elf_bytes(&elf(1))); // PT_LOAD only
         assert!(!is_static_elf_bytes(&elf(3))); // PT_INTERP
         assert!(!is_static_elf_bytes(b"#!/bin/sh\n"));
+    }
+
+    /// A dev-build layout (`<ws>/target/debug/config-weave`, dynamic), an
+    /// install dir with the running exe's siblings, and a data home.
+    struct Layout {
+        _dir: tempfile::TempDir,
+        ws: PathBuf,
+        dev_exe: PathBuf,
+        install: PathBuf,
+        data_home: PathBuf,
+    }
+
+    fn layout() -> Layout {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path().join("ws");
+        let dev_exe = ws.join("target/debug/config-weave");
+        let install = dir.path().join("opt/cw/bin");
+        let data_home = dir.path().join("data");
+        for d in [dev_exe.parent().unwrap(), &install, &data_home] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(&dev_exe, elf(3)).unwrap();
+        Layout {
+            _dir: dir,
+            ws,
+            dev_exe,
+            install,
+            data_home,
+        }
+    }
+
+    fn put(path: &Path, bytes: &[u8]) -> PathBuf {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+        path.to_path_buf()
+    }
+
+    fn roots(env: Option<&Path>, exe: &Path, data_home: &Path) -> SearchRoots {
+        SearchRoots {
+            env: env.map(|p| p.display().to_string()),
+            exe: Some(exe.to_path_buf()),
+            data_home: Some(data_home.to_path_buf()),
+        }
+    }
+
+    #[test]
+    fn windows_binary_found_in_the_data_dir() {
+        let l = layout();
+        let want = put(
+            &l.data_home
+                .join("config-weave/bin/config-weave-windows-x86_64.exe"),
+            b"MZ",
+        );
+        let r = roots(None, &l.dev_exe, &l.data_home);
+        assert_eq!(locate_binary_in(None, GuestOs::Windows, &r).unwrap(), want);
+    }
+
+    #[test]
+    fn windows_binary_found_beside_the_running_exe_before_the_data_dir() {
+        let l = layout();
+        let exe = put(&l.install.join("config-weave-linux-x86_64"), &elf(3));
+        let beside = put(&l.install.join("config-weave-windows-x86_64.exe"), b"MZ");
+        put(
+            &l.data_home
+                .join("config-weave/bin/config-weave-windows-x86_64.exe"),
+            b"MZ",
+        );
+        let r = roots(None, &exe, &l.data_home);
+        assert_eq!(
+            locate_binary_in(None, GuestOs::Windows, &r).unwrap(),
+            beside
+        );
+    }
+
+    #[test]
+    fn installed_linux_binary_must_be_static() {
+        let l = layout();
+        let data = l
+            .data_home
+            .join("config-weave/bin/config-weave-linux-x86_64");
+        put(&data, &elf(3));
+        let r = roots(None, &l.dev_exe, &l.data_home);
+        assert!(locate_binary_in(None, GuestOs::Linux, &r).is_err());
+        put(&data, &elf(1));
+        assert_eq!(locate_binary_in(None, GuestOs::Linux, &r).unwrap(), data);
+    }
+
+    #[test]
+    fn workspace_artifacts_and_explicit_paths_keep_precedence() {
+        let l = layout();
+        put(
+            &l.dev_exe.with_file_name("config-weave-windows-x86_64.exe"),
+            b"MZ",
+        );
+        let data = put(
+            &l.data_home
+                .join("config-weave/bin/config-weave-windows-x86_64.exe"),
+            b"MZ",
+        );
+        let dist = put(&l.ws.join("dist/config-weave-windows-x86_64.exe"), b"MZ");
+        let r = roots(None, &l.dev_exe, &l.data_home);
+        assert_eq!(locate_binary_in(None, GuestOs::Windows, &r).unwrap(), dist);
+
+        let env_bin = put(&l.ws.join("env.exe"), b"MZ");
+        let r = roots(Some(&env_bin), &l.dev_exe, &l.data_home);
+        assert_eq!(
+            locate_binary_in(None, GuestOs::Windows, &r).unwrap(),
+            env_bin
+        );
+        assert_eq!(
+            locate_binary_in(Some(&data), GuestOs::Windows, &r).unwrap(),
+            data
+        );
+    }
+
+    #[test]
+    fn not_found_names_every_searched_path() {
+        let l = layout();
+        let r = roots(None, &l.dev_exe, &l.data_home);
+        let err = locate_binary_in(None, GuestOs::Windows, &r).unwrap_err();
+        for p in [
+            l.ws.join("target-cross/x86_64-pc-windows-gnu/release/config-weave.exe"),
+            l.ws.join("dist/config-weave-windows-x86_64.exe"),
+            l.dev_exe.with_file_name("config-weave-windows-x86_64.exe"),
+            l.data_home
+                .join("config-weave/bin/config-weave-windows-x86_64.exe"),
+        ] {
+            assert!(
+                err.message.contains(&p.display().to_string()),
+                "{} missing from: {}",
+                p.display(),
+                err.message
+            );
+        }
+        assert!(err.message.starts_with("no windows test binary was found"));
+
+        let err = locate_binary_in(None, GuestOs::Linux, &r).unwrap_err();
+        assert!(
+            err.message.contains(&l.dev_exe.display().to_string()),
+            "{}",
+            err.message
+        );
     }
 }

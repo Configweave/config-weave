@@ -6,7 +6,7 @@ page ref_mod_encoding {
   chapter_header "encoding module" {
     kicker       = "Reference · reference"
     reading_time = "1 min read"
-    updated      = "2026-10-13"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -39,15 +39,18 @@ SRC
 
   p "`utf8` returns a string's UTF-8 bytes. `from_utf8` decodes bytes into a string and returns `Err` when they are not valid UTF-8. To base64 a string, encode it to bytes first."
 
-  h2 "utf16le"
+  h2 "utf16le and from_utf16le"
 
   code rust {
     source = <<'SRC'
 encoding::utf16le(s: string) -> List[int]
+encoding::from_utf16le(bytes: List[int]) -> Result[string, string]
 SRC
   }
 
-  p "Returns a string's UTF-16 little-endian bytes, with no byte order mark. Windows APIs and file formats that store wide strings use this form."
+  p "`utf16le` returns a string's UTF-16 little-endian bytes, with no byte order mark. Windows APIs and file formats that store wide strings use this form."
+
+  p "`from_utf16le` decodes UTF-16 little-endian bytes into a string. It strips a leading byte order mark (`FF FE`) if one is present. It returns `Err` when the byte count is odd or the bytes contain an unpaired surrogate; it does not replace bad input with U+FFFD."
 
   p "A Windows unattend file hides a password as `base64(UTF-16LE(password + suffix))`, where the suffix is the element name, such as `Password` or `AdministratorPassword`:"
 

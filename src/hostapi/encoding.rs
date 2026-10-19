@@ -42,6 +42,22 @@ fn from_utf8(values: &[i64]) -> Result<String, String> {
     String::from_utf8(to_bytes(values)?).map_err(|e| format!("invalid UTF-8: {e}"))
 }
 
+/// Strict like `from_utf8`: an unpaired surrogate is an error, not U+FFFD.
+fn from_utf16le(values: &[i64]) -> Result<String, String> {
+    let bytes = to_bytes(values)?;
+    let bytes = bytes.strip_prefix(&[0xFF, 0xFE]).unwrap_or(&bytes);
+    if bytes.len() % 2 != 0 {
+        return Err(format!("invalid UTF-16LE: odd byte length {}", bytes.len()));
+    }
+    let units: Vec<u16> = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
+        .collect();
+    String::from_utf16(&units).map_err(|e| format!("invalid UTF-16LE: {e}"))
+}
+
 pub fn module() -> Module {
     let mut m = Module::new("encoding");
     m.doc("Base64 and text encodings. Bytes are List[int], as in fs::read_bytes");
@@ -63,6 +79,11 @@ pub fn module() -> Module {
     });
     m.doc_next("A string's UTF-16LE bytes, no BOM");
     m.fn_("utf16le", |s: &str| -> Vec<i64> { utf16le(s) });
+    m.doc_next("Decode UTF-16LE bytes to a string, stripping a leading BOM");
+    m.fn_(
+        "from_utf16le",
+        |bytes: Vec<i64>| -> Result<String, String> { from_utf16le(&bytes) },
+    );
     m
 }
 
@@ -91,6 +112,36 @@ mod tests {
     #[test]
     fn utf16le_encodes_surrogate_pairs() {
         assert_eq!(utf16le("A\u{1F600}"), vec![0x41, 0, 0x3D, 0xD8, 0x00, 0xDE]);
+    }
+
+    #[test]
+    fn from_utf16le_round_trips_surrogate_pairs() {
+        let text = "héllo \u{1F600}";
+        assert_eq!(from_utf16le(&utf16le(text)).unwrap(), text);
+    }
+
+    #[test]
+    fn from_utf16le_strips_a_bom() {
+        assert_eq!(from_utf16le(&[0xFF, 0xFE, 0x41, 0]).unwrap(), "A");
+    }
+
+    #[test]
+    fn from_utf16le_odd_length_errors() {
+        let err = from_utf16le(&[0x41, 0, 0x42]).unwrap_err();
+        assert_eq!(err, "invalid UTF-16LE: odd byte length 3");
+    }
+
+    #[test]
+    fn from_utf16le_unpaired_surrogate_errors() {
+        // A lone high surrogate (U+D83D) followed by 'A'.
+        let err = from_utf16le(&[0x3D, 0xD8, 0x41, 0]).unwrap_err();
+        assert!(err.starts_with("invalid UTF-16LE"), "got: {err}");
+    }
+
+    #[test]
+    fn from_utf16le_out_of_range_byte_errors() {
+        let err = from_utf16le(&[0x41, 300]).unwrap_err();
+        assert_eq!(err, "byte 1 is 300, outside 0..=255");
     }
 
     #[test]

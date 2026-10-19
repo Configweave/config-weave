@@ -208,10 +208,10 @@ The runner copies a config-weave binary matched to the guest OS into each instan
 
 | Guest | Order |
 |---|---|
-| Linux | `--binary PATH`, then `$CONFIG_WEAVE_TEST_BINARY`, then the running executable if it is a static ELF, then the newest static cross-build in the workspace (`target-cross/x86_64-unknown-linux-musl/release/config-weave` or `dist/config-weave-linux-x86_64`) |
-| Windows | `--binary-windows PATH`, then `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, then the newest Windows cross-build in the workspace (`target-cross/x86_64-pc-windows-gnu/release/config-weave.exe` or `dist/config-weave-windows-x86_64.exe`) |
+| Linux | `--binary PATH`, then `$CONFIG_WEAVE_TEST_BINARY`, then the running executable if it is a static ELF, then the newest static cross-build in the workspace (`target-cross/x86_64-unknown-linux-musl/release/config-weave` or `dist/config-weave-linux-x86_64`), then `config-weave-linux-x86_64` beside the running executable (symlinks resolved), then `$XDG_DATA_HOME/config-weave/bin/config-weave-linux-x86_64` (default `~/.local/share/config-weave/bin/`, where `just install` puts it); every installed candidate must also be a static ELF |
+| Windows | `--binary-windows PATH`, then `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, then the newest Windows cross-build in the workspace (`target-cross/x86_64-pc-windows-gnu/release/config-weave.exe` or `dist/config-weave-windows-x86_64.exe`), then `config-weave-windows-x86_64.exe` beside the running executable (symlinks resolved), then `$XDG_DATA_HOME/config-weave/bin/config-weave-windows-x86_64.exe` (default `~/.local/share/config-weave/bin/`, where `just install` puts it) |
 
-A dynamically linked development build (`cargo build`) cannot run inside an arbitrary container, so a dev loop usually needs `--binary` pointing at the output of `just release`. Windows guests always need an explicit Windows binary through the flag or the variable. A path given by flag or variable that does not exist is an error.
+A dynamically linked development build (`cargo build`) cannot run inside an arbitrary container, so a dev loop usually needs `--binary` pointing at the output of `just release`. A release installed with `just install` is found without flags: the `~/.local/bin/config-weave` symlink resolves into the install folder, which also holds the Windows binary. A path given by flag or variable that does not exist is an error. When nothing is found, the error lists every path searched.
 
 ## vmlab discovery and requirements
 

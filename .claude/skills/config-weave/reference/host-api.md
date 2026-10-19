@@ -277,6 +277,7 @@ with an element outside `0..=255` is an `Err`. This is the whole surface.
 | `utf8` | `encoding::utf8(s: string) -> List[int]` | a string's UTF-8 bytes; base64 a string with `base64_encode(utf8(s))` |
 | `from_utf8` | `encoding::from_utf8(bytes: List[int]) -> Result[string, string]` | `Err` on invalid UTF-8 |
 | `utf16le` | `encoding::utf16le(s: string) -> List[int]` | UTF-16 little-endian, no BOM |
+| `from_utf16le` | `encoding::from_utf16le(bytes: List[int]) -> Result[string, string]` | strips a leading `FF FE` BOM; `Err` on odd length or an unpaired surrogate |
 
 ```rust
 // Windows unattend hidden password: base64(UTF-16LE(password + element name))
