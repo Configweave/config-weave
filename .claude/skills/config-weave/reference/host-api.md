@@ -462,6 +462,7 @@ prefix is case-insensitive and accepts the short or the long name
 | `create_key` | `registry::create_key(key: string) -> Result[unit, string]` | creates missing parents |
 | `delete_key` | `registry::delete_key(key: string) -> Result[unit, string]` | the key and its whole subtree |
 | `key_exists` | `registry::key_exists(key: string) -> Result[bool, string]` | `false` only when the key is not found |
+| `value_names` | `registry::value_names(key: string, opts: Value) -> Result[List[string], string]` | the key's value names, sorted case-insensitively; the default value is `""` and listed only when set; a missing key is an `Err` (not an empty list) |
 | `read_with` | `registry::read_with(key: string, name: string, opts: Value) -> Result[Option[Value], string]` | `read` in the view `opts` selects |
 | `write_with` | `registry::write_with(key: string, name: string, value: Value, kind: string, opts: Value) -> Result[unit, string]` | |
 | `delete_value_with` | `registry::delete_value_with(key: string, name: string, opts: Value) -> Result[unit, string]` | |
@@ -469,7 +470,7 @@ prefix is case-insensitive and accepts the short or the long name
 | `delete_key_with` | `registry::delete_key_with(key: string, opts: Value) -> Result[unit, string]` | |
 | `key_exists_with` | `registry::key_exists_with(key: string, opts: Value) -> Result[bool, string]` | |
 
-`opts` (on `read_typed` and every `_with` function) is `Value::Null` or a
+`opts` (on `read_typed`, `value_names` and every `_with` function) is `Value::Null` or a
 map with one key, `view`: `"native"` (default, the process's own view),
 `"wow64_32"` (the 32-bit `WOW6432Node` view) or `"wow64_64"` (the 64-bit
 view). An unknown key or view is an `Err`. The functions without `_with`
@@ -478,7 +479,8 @@ always use the native view.
 "Absent" (`None` from `read`/`read_typed`, `false` from `key_exists`) means
 only ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND. Any other failure to
 open the key or query the value, such as ERROR_ACCESS_DENIED, is an `Err`
-naming the key and the Win32 error.
+naming the key and the Win32 error. `value_names` has no absent result: a
+missing key is an `Err` too.
 
 ### Registry value kinds
 

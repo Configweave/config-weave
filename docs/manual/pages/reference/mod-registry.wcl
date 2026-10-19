@@ -99,6 +99,16 @@ SRC
 
   p "Whether a key exists. It returns `false` only when the key is not found; any other failure is an `Err`."
 
+  h2 "value_names"
+
+  code rust {
+    source = <<'SRC'
+registry::value_names(key: string, opts: Value) -> Result[List[string], string]
+SRC
+  }
+
+  p "Lists the names of a key's values. The list is sorted ignoring case, as the registry compares names, so it does not depend on the order Windows stores them in. The unnamed default value appears as `\"\"`, the same name `read` and `write` use for it, and only when it is set; a key whose default value was never written does not list it. A key with no values returns an empty list. A missing key is an `Err` naming the key rather than an empty list, so a mistyped key cannot pass as a key with no values; check `key_exists` first when the key may legitimately be absent. Any other failure to open or enumerate the key is an `Err` naming the key and the Win32 error. `opts` is the view map described under Registry views below; pass `Value::Null` for the native view."
+
   h2 "Registry views"
 
   code rust {
@@ -112,7 +122,7 @@ registry::key_exists_with(key: string, opts: Value) -> Result[bool, string]
 SRC
   }
 
-  p "Each `_with` function behaves like the function without the suffix and takes a trailing `opts` map. The only option is `view`. `\"native\"` (the default) uses the process's own view. `\"wow64_32\"` forces the 32-bit view (`WOW6432Node`), and `\"wow64_64\"` forces the 64-bit view. `read_typed` takes the same map. Pass `Value::Null` for the defaults. An unknown option or view is an `Err`. The functions without the suffix always use the native view."
+  p "Each `_with` function behaves like the function without the suffix and takes a trailing `opts` map. The only option is `view`. `\"native\"` (the default) uses the process's own view. `\"wow64_32\"` forces the 32-bit view (`WOW6432Node`), and `\"wow64_64\"` forces the 64-bit view. `read_typed` and `value_names` take the same map. Pass `Value::Null` for the defaults. An unknown option or view is an `Err`. The functions without the suffix always use the native view."
 
   code rust {
     source = <<'SRC'

@@ -419,8 +419,9 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   its signature and default behaviour: `registry::read_with` and friends
   (`{view}`), `service::start_with` (`{timeout}`) / `stop_with`
   (`{timeout, stop_dependents}`). A function added new takes `opts` from
-  the start (`registry::read_typed`, `service::restart`). Unknown option
-  keys are an `Err`, including `stop_dependents` on `start_with`.
+  the start (`registry::read_typed`, `registry::value_names`,
+  `service::restart`). Unknown option keys are an `Err`, including
+  `stop_dependents` on `start_with`.
 - `service` `stop_dependents` stops dependents in EnumDependentServicesW's
   order, not sorted: the SCM returns transitive dependents in reverse
   start order, which is the only safe stop order when dependents depend on
@@ -449,6 +450,15 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   see" for "not configured" and an apply cannot then overwrite a key it
   was never allowed to read. `delete_value`/`delete_key` already failed on
   a missing key and are unchanged.
+- `registry::value_names(key, opts)` lists a key's value names sorted
+  case-insensitively (the registry's own comparison), so the order does
+  not depend on how Windows stores them. The default value is `""`, the
+  name `read`/`write` already use for it, and is listed only when set. A
+  missing key is an `Err`, not an empty list: a list function has no
+  `None` to carry "absent", and an empty list would make a mistyped key
+  look like a key with no values. The name buffer is sized from
+  RegQueryInfoKeyW's longest name and grown on ERROR_MORE_DATA (a value
+  added mid-enumeration) up to the 16,383-unit name limit.
 - `fs::metadata` reports `mode` as the permission bits only
   (`st_mode & 0o7777`); before 2026-10 it leaked the file-type bits
   (`33188` for a `0644` file) despite documenting permission bits. `uid`
