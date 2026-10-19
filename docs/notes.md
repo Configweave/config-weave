@@ -472,10 +472,10 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   and sets the owner and DACL of files, directories and registry keys so
   packages stop paying 0.4-3 s per PowerShell `Get-Acl`/`Set-Acl`; a
   `__verify` run of `acl::read` on Server 2025 took 85 ms, process start
-  included, against 2.3 s for `Get-Acl`. Three functions, all taking `opts`
-  from the start: `read(path, opts)`, `set(path, spec, opts)`,
-  `diff(path, spec, opts) -> List[string]`. `opts` is `{target: file |
-  registry, view}`; `view` reuses `registry::codec::parse_view` and is an
+  included, against 2.3 s for `Get-Acl`. Three object functions, all
+  taking `opts` from the start: `read(path, opts)`, `set(path, spec,
+  opts)`, `diff(path, spec, opts) -> List[string]`, plus
+  `lookup(principal)`. `opts` is `{target: file | registry, view}`; `view` reuses `registry::codec::parse_view` and is an
   `Err` for files, registry paths reuse `registry::win::split_hive`.
   Bindings:
   - Shape: `read` is `{owner: {sid, name}, protected, entries: [{sid,
@@ -508,6 +508,14 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
     `<NetBIOS computer name>\user` because LookupAccountNameW does not
     understand `.`. SIDs and ACLs are encoded and decoded in the pure
     codec from their binary layouts, so the Win32 side only moves bytes.
+  - `lookup(principal) -> {sid, name}` runs that same classification and
+    resolution (one `principal_sid` helper serves `set`, `diff` and
+    `lookup`), then LookupAccountSidW for the canonical `DOMAIN\name`;
+    `name` is `Null` when the SID does not resolve, so a SID string for a
+    deleted account returns its SID rather than an `Err`, while an
+    unresolvable account name is the `Err` `set` gives. Added so
+    config-weave-pkgs stops resolving names by running `set` then `read`
+    on a private temp file.
   - Rights: named after .NET FileSystemRights / RegistryRights in
     snake_case, plus `mask` for unnamed bits; `rights` and `mask` unite.
     On read: composites largest first, each taken when all its bits are

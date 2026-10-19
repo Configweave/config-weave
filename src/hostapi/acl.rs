@@ -500,6 +500,12 @@ mod codec {
         (DynValue::String(sid.to_string()), name)
     }
 
+    /// `{sid, name}`: `read`'s owner, and what `lookup` returns.
+    pub(super) fn principal_map(sid: &Sid, names: &Names) -> DynValue {
+        let (sid, name) = principal_value(sid, names);
+        DynValue::Map(HashMap::from([("sid".into(), sid), ("name".into(), name)]))
+    }
+
     fn str_list(items: Vec<&str>) -> DynValue {
         DynValue::List(
             items
@@ -514,10 +520,7 @@ mod codec {
     pub(super) fn to_value(desc: &Descriptor, target: Target, names: &Names) -> DynValue {
         let rights = target.rights();
         let owner = match &desc.owner {
-            Some(sid) => {
-                let (sid, name) = principal_value(sid, names);
-                DynValue::Map(HashMap::from([("sid".into(), sid), ("name".into(), name)]))
-            }
+            Some(sid) => principal_map(sid, names),
             None => DynValue::Null,
         };
         let entries = desc
@@ -1364,6 +1367,25 @@ mod codec {
             assert_eq!(entries[2].get("sid"), Some(&s("S-1-5-21-9-9-9-1001")));
         }
 
+        #[test]
+        fn principal_map_has_a_null_name_for_an_unresolved_sid() {
+            let admins = sid("S-1-5-32-544");
+            let names = Names::from([(admins.clone(), Some("BUILTIN\\Administrators".into()))]);
+            assert_eq!(
+                principal_map(&admins, &names),
+                map(&[
+                    ("sid", s("S-1-5-32-544")),
+                    ("name", s("BUILTIN\\Administrators"))
+                ])
+            );
+            let gone = sid("S-1-5-21-1-2-3-9999");
+            let names = Names::from([(gone.clone(), None)]);
+            assert_eq!(
+                principal_map(&gone, &names),
+                map(&[("sid", s("S-1-5-21-1-2-3-9999")), ("name", DynValue::Null)])
+            );
+        }
+
         fn users_read_spec() -> Spec<Principal> {
             resolved(
                 parse_spec(
@@ -1692,6 +1714,20 @@ pub fn module() -> Module {
             Err(NOT_WINDOWS.to_string())
         },
     );
+
+    m.doc_next(
+        "Resolve a principal (a SID string or an account name, as in a spec) to {sid, name}: \
+         name is the canonical DOMAIN\\name, or null when the SID does not resolve. An \
+         account name that does not resolve is an Err",
+    );
+    #[cfg(windows)]
+    m.fn_("lookup", |principal: &str| -> Result<DynValue, String> {
+        win::lookup(principal)
+    });
+    #[cfg(not(windows))]
+    m.fn_("lookup", |_: &str| -> Result<DynValue, String> {
+        Err(NOT_WINDOWS.to_string())
+    });
 
     m
 }
@@ -2062,17 +2098,29 @@ mod win {
         Sid::from_bytes(&bytes)
     }
 
+    /// The SID of a spec principal: a SID string as written, an account
+    /// name through LookupAccountNameW.
+    fn principal_sid(text: &str) -> Result<Sid, String> {
+        match codec::classify(text)? {
+            PrincipalRef::Sid(sid) => Ok(sid),
+            PrincipalRef::Local(name) => {
+                account_sid(&format!("{}\\{name}", computer_name()?), text)
+            }
+            PrincipalRef::Account(name) => account_sid(&name, text),
+        }
+    }
+
     /// Look up a spec principal: a SID string or an account name.
     fn principal(text: &str) -> Result<Principal, String> {
-        let sid = match codec::classify(text)? {
-            PrincipalRef::Sid(sid) => sid,
-            PrincipalRef::Local(name) => {
-                account_sid(&format!("{}\\{name}", computer_name()?), text)?
-            }
-            PrincipalRef::Account(name) => account_sid(&name, text)?,
-        };
+        let sid = principal_sid(text)?;
         let label = account_name(&sid).unwrap_or_else(|| text.to_string());
         Ok(Principal { sid, label })
+    }
+
+    pub fn lookup(text: &str) -> Result<DynValue, String> {
+        let sid = principal_sid(text)?;
+        let names = Names::from([(sid.clone(), account_name(&sid))]);
+        Ok(codec::principal_map(&sid, &names))
     }
 
     pub fn read(path: &str, target: Target) -> Result<DynValue, String> {
@@ -2250,6 +2298,34 @@ mod win {
                 ("protected".to_string(), DynValue::Bool(protected)),
                 ("entries".to_string(), DynValue::List(entries)),
             ]))
+        }
+
+        #[test]
+        fn lookup_resolves_names_and_sid_strings_alike() {
+            let admins = lookup("BUILTIN\\Administrators").unwrap();
+            assert_eq!(admins.get("sid"), Some(&s("S-1-5-32-544")));
+            assert_eq!(admins.get("name"), Some(&s("BUILTIN\\Administrators")));
+            assert_eq!(lookup("S-1-5-32-544").unwrap(), admins);
+            let system = lookup("NT AUTHORITY\\SYSTEM").unwrap();
+            assert_eq!(system.get("sid"), Some(&s("S-1-5-18")));
+            assert_eq!(system.get("name"), Some(&s("NT AUTHORITY\\SYSTEM")));
+            // A SID nobody holds keeps its SID and has no name.
+            let gone = lookup("S-1-5-21-1-2-3-9999").unwrap();
+            assert_eq!(gone.get("sid"), Some(&s("S-1-5-21-1-2-3-9999")));
+            assert_eq!(gone.get("name"), Some(&DynValue::Null));
+            // The same Err set gives for the name.
+            let err = lookup("nobody-here-cw").unwrap_err();
+            assert!(
+                err.starts_with("cannot resolve principal 'nobody-here-cw': "),
+                "{err}"
+            );
+            let spec = spec(
+                false,
+                vec![entry("nobody-here-cw", "allow", &["read"], &[])],
+            );
+            let dir = tempfile::tempdir().unwrap();
+            let set_err = set(dir.path().to_str().unwrap(), &spec, Target::File).unwrap_err();
+            assert_eq!(set_err, err);
         }
 
         fn converge(path: &str, spec: &DynValue, target: Target) {
