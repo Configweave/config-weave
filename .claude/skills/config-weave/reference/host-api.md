@@ -505,7 +505,8 @@ REG_DWORD from REG_QWORD; `read_typed` can.
 ## acl (Windows only)
 
 `use acl`. Reads, compares and sets the owner and DACL of files, directories
-and registry keys, replacing PowerShell `Get-Acl`/`Set-Acl`. Registered
+and registry keys, replacing PowerShell `Get-Acl`/`Set-Acl`, and resolves
+principals to SIDs. Registered
 everywhere; on Linux and macOS every call returns `Err`. No POSIX ACLs. This
 is the whole surface.
 
@@ -514,6 +515,7 @@ is the whole surface.
 | `read` | `acl::read(path: string, opts: Value) -> Result[Value, string]` | `{owner: {sid, name}, protected: bool, null_dacl: bool, entries: [{sid, name, kind, rights, mask, inherit, inherited}]}`, entries in stored order, inherited ones included; `null_dacl: true` means a NULL DACL (everyone full access), which also has no entries |
 | `set` | `acl::set(path: string, spec: Value, opts: Value) -> Result[unit, string]` | replaces every explicit entry with `spec.entries`, deny before allow; never writes inherited entries |
 | `diff` | `acl::diff(path: string, spec: Value, opts: Value) -> Result[List[string], string]` | one line per difference; `[]` = converged. Exactly the comparison `set` converges, so `set` then `diff` is `[]`. Use it in `check` |
+| `lookup` | `acl::lookup(principal: string) -> Result[Value, string]` | `{sid, name}` for a SID string or account name, resolved exactly as `set` resolves a spec principal; `name` is the canonical `DOMAIN\\name` (`"BUILTIN\\Administrators"` for `"Administrators"` and `"S-1-5-32-544"`), or `Value::Null` when the SID does not resolve (a SID string for a deleted account still returns its `sid`). An unresolvable account name is the same `Err` `set` gives |
 
 `opts` is `Value::Null` or `{target, view}`: `target` is `"file"` (default,
 a file or directory) or `"registry"`; `view` (`"native"`, `"wow64_32"`,

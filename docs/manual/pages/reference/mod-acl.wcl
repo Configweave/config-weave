@@ -22,7 +22,8 @@ returns `Result[…, string]`.
 
 A `check` script calls `diff` and an `apply` script calls `set` with the
 same spec. `diff` makes exactly the comparison `set` converges, so `set`
-followed by `diff` returns an empty list.
+followed by `diff` returns an empty list. `lookup` resolves an account
+name or SID string the way `set` does, without touching any object.
 PROSE
 
   h2 "read"
@@ -141,6 +142,47 @@ exactly the one `set` makes converge:
 errors.
 PROSE
 
+  h2 "lookup"
+
+  code rust {
+    source = <<'SRC'
+acl::lookup(principal: string) -> Result[Value, string]
+SRC
+  }
+
+  p <<'PROSE'
+Resolves `principal` and returns a map `{sid, name}`, the shape of `read`'s
+`owner`. `principal` is a SID string or an account name, resolved exactly
+as `set` resolves a spec principal (see Principals below), so the SID
+`lookup` returns is the SID `set` writes. `sid` is the SID string in
+canonical form. `name` is the account name in `DOMAIN\name` form, such as
+`BUILTIN\Administrators` for both `Administrators` and `S-1-5-32-544`, or a
+bare name for a well-known SID with no domain, such as `Everyone`.
+
+A SID string is not checked against the account database: a SID that does
+not resolve, such as one for a deleted account, returns its `sid` with
+`name` set to `Value::Null`. An account name that does not resolve is an
+`Err` with the same message `set` gives for it.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+use acl
+use value
+
+// The SID of an account, to compare against acl::read's entries.
+fn sid_of(name: string) -> Result[string, string] {
+    let found = acl::lookup(name)?
+    if let Some(v) = found.get("sid") {
+        if let Some(s) = v.as_string() {
+            return Ok(s)
+        }
+    }
+    Err("acl::lookup returned no sid for '" + name + "'")
+}
+SRC
+  }
+
   h2 "Options"
 
   p <<'PROSE'
@@ -168,7 +210,8 @@ A principal in a spec is a SID string (`S-1-5-32-544`) or an account name:
 `DOMAIN\user`, or `.\user` for an account on this computer. Account names
 are resolved with LookupAccountNameW. A principal that does not resolve is
 an `Err` naming it. Every comparison is by SID, so a spec may name an
-account either way.
+account either way. `lookup` resolves a principal the same way without
+touching any object.
 PROSE
 
   h2 "Rights"
