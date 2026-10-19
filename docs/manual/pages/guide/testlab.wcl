@@ -34,7 +34,7 @@ SRC
   }
 
   p <<'PROSE'
-A test names its instance with exactly one of `image` or `template`, and holds steps that mirror playbook steps plus an `expect` field, defaulting to `converge`. It may also hold `gather` blocks with static params and an `expect` block of top-level key equality assertions, an optional `setup` command that runs before the protocol, an optional `verify` script that inspects the guest afterwards, a `memory` size, a `jobs` worker count for the in-guest runs, and a `group` name. Every value in a test must be static, because the test runs against a synthesised playbook with no variables. An unqualified `resource` or `from` resolves to the declaring package.
+A test names its instance with exactly one of `image` or `template`, and holds steps that mirror playbook steps plus an `expect` field, defaulting to `converge`. It may also hold `gather` blocks with static params and an `expect` block of top-level key equality assertions, an optional `ready` command retried until the instance is ready for the test, an optional `setup` command that runs after `ready` and before the protocol, an optional `verify` script that inspects the guest afterwards, a `memory` size, a `jobs` worker count for the in-guest runs, and a `group` name. Every value in a test must be static, because the test runs against a synthesised playbook with no variables. An unqualified `resource` or `from` resolves to the declaring package.
 PROSE
 
   h2 "The three-run protocol"

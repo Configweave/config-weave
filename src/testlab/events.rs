@@ -34,6 +34,7 @@ pub struct PlannedTest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum TestPhase {
+    Ready,
     Setup,
     Gather { name: String },
     Check,
@@ -46,6 +47,7 @@ impl TestPhase {
     /// The human progress-line label (matches the pre-event output).
     fn label(&self) -> String {
         match self {
+            TestPhase::Ready => "ready".into(),
             TestPhase::Setup => "setup".into(),
             TestPhase::Gather { name } => format!("gather {name}"),
             TestPhase::Check => "check".into(),

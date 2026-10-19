@@ -257,6 +257,8 @@ fn sync_test(b: &mut Block, doc: &TestDoc, diags: &mut Diags) {
     set_opt_string(b, "memory", doc.memory.as_deref());
     set_opt_string(b, "group", doc.group.as_deref());
     set_opt_int(b, "jobs", doc.jobs);
+    set_opt_string(b, "ready", doc.ready.as_deref());
+    set_opt_int(b, "ready_timeout", doc.ready_timeout);
     set_opt_string(b, "setup", doc.setup.as_deref());
     set_opt_string(b, "verify", doc.verify.as_deref());
 
@@ -592,6 +594,8 @@ package \"demo\" {
     description = \"t\"
     image = \"debian:12\"
     jobs = 2
+    ready = \"true\"
+    ready_timeout = 30
     step \"s\" {
       description = \"s\"
       resource = \"thing\"
@@ -603,6 +607,8 @@ package \"demo\" {
         assert_eq!(doc.tests[0].jobs, Some(2));
         let once = render_package(source, &doc).unwrap();
         assert!(once.contains("jobs = 2"), "{once}");
+        assert_eq!(doc.tests[0].ready.as_deref(), Some("true"));
+        assert!(once.contains("ready_timeout = 30"), "{once}");
     }
 
     /// A composite carries `arg` declarations and a body of steps, neither

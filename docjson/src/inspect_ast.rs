@@ -267,6 +267,8 @@ fn extract_test(b: &Block, diags: &mut Diags) -> TestDoc {
         memory: opt_lit_string(b, "memory", &ctx, diags),
         group: opt_lit_string(b, "group", &ctx, diags),
         jobs: opt_lit_int(b, "jobs", &ctx, diags),
+        ready: opt_lit_string(b, "ready", &ctx, diags),
+        ready_timeout: opt_lit_int(b, "ready_timeout", &ctx, diags),
         setup: opt_lit_string(b, "setup", &ctx, diags),
         verify: opt_lit_string(b, "verify", &ctx, diags),
         steps,

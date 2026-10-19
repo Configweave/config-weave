@@ -286,6 +286,24 @@ fn a_test_jobs_that_is_not_a_number_fails() {
     assert!(stderr.contains("'jobs' declared as i64"), "{stderr}");
 }
 
+#[test]
+fn a_test_may_declare_a_ready_check_and_its_timeout() {
+    let dir = fixture_with_test_field("ready = \"test -e /run/ok\"\n    ready_timeout = 60");
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 0, "{stderr}");
+}
+
+#[test]
+fn a_ready_timeout_below_one_fails() {
+    let dir = fixture_with_test_field("ready = \"true\"\n    ready_timeout = 0");
+    let (code, _, stderr) = validate(dir.path());
+    assert_eq!(code, 2, "{stderr}");
+    assert!(
+        stderr.contains("'ready_timeout' must be at least 1"),
+        "{stderr}"
+    );
+}
+
 /// Helper: rewrite the fixture so the `converges` test joins group `g`,
 /// then inject a sibling test in the same group built by `sibling`.
 fn fixture_with_group_sibling(sibling: &str) -> tempfile::TempDir {

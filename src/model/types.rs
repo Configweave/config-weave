@@ -414,7 +414,13 @@ pub struct TestDecl {
     /// Worker pool size for the in-guest check/apply runs; an explicit
     /// `config-weave test --jobs` overrides it.
     pub jobs: Option<usize>,
-    /// Optional shell provisioning, run via `sh -c` before anything else.
+    /// Optional readiness command, retried until it exits 0 or
+    /// `ready_timeout` passes. Runs before `setup`.
+    pub ready: Option<String>,
+    /// How long `ready` may keep failing, in seconds.
+    pub ready_timeout: u64,
+    /// Optional shell provisioning, run after `ready` and before anything
+    /// else: `sh -c` on linux, a `.cmd` batch file on windows.
     pub setup: Option<String>,
     /// Absolute path to the optional wscript verify script.
     pub verify: Option<PathBuf>,

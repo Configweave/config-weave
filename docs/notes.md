@@ -533,7 +533,8 @@ runs each in a disposable **vmlab** instance. vmlab is the only backend
 below). Bindings fixed here:
 
 - **Shape.** `test "name" { description, image | template, memory?,
-  group?, jobs?, setup?, verify?, step…, gather… }`. Exactly one of `image` (an
+  group?, jobs?, ready?, ready_timeout?, setup?, verify?, step…,
+  gather… }`. Exactly one of `image` (an
   OCI ref → a vmlab **container**) or `template` (a vmlab template ref →
   a full **VM**) is required; neither and both are validation errors that
   name the fix. `memory` is a WCL byte size emitted **unquoted** into the
@@ -607,7 +608,19 @@ below). Bindings fixed here:
   and facts, so grouped tests never clobber each other. `setup` runs via
   `sh -c` on linux, cd'd into that per-test dir
   (created first — exec has no working directory guarantee), and
-  `chmod +x` is linux-only. On windows `Workdir::script` writes it to
+  `chmod +x` is linux-only. Before `setup`, an optional `ready` command
+  runs the same way (`ready.cmd` on windows, staged once and re-run),
+  every 3s until it exits 0; past `ready_timeout` (default 300s) the test
+  is an **error** — "the instance did not become ready", with the last
+  exit code and output tail — never a failure, since no assertion was
+  ever reached. A transport failure counts as one more failed attempt.
+  It is per test (grouped tests each run their own) and comes after the
+  steady-agent wait, so it judges the *workload* (a service started, a
+  first-boot task finished), not the agent. Verified on
+  `x86_64/windows-server-2025` and a `debian:12` container: a passing
+  `ready` (a quoted `powershell -Command`) then `setup` ran in order, and
+  one that never passed errored after its 8s `ready_timeout` with
+  "`ready` still failing after 8s (last exit 1: still waiting)". On windows `Workdir::script` writes it to
   `<dir>/setup.cmd` (`@echo off`, `cd /d <dir> || exit /b 1`, the
   script, CRLF line endings), copies that in, runs `cmd.exe /C <path>`
   and deletes it best effort. Until 2026-10 it ran as `cmd.exe /C "cd /d

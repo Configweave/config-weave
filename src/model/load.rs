@@ -1923,6 +1923,9 @@ fn load_test(
     // Empty `group = ""` reads as ungrouped (its own instance).
     let group = string_field_optional(block, "group", ctx).filter(|g| !g.is_empty());
     let jobs = positive_int_field_optional(block, "jobs", ctx).map(|n| n as usize);
+    let ready = string_field_optional(block, "ready", ctx);
+    let ready_timeout =
+        positive_int_field_optional(block, "ready_timeout", ctx).unwrap_or(READY_TIMEOUT_DEFAULT);
     let setup = string_field_optional(block, "setup", ctx);
     let verify = string_field_optional(block, "verify", ctx).and_then(|rel| {
         let path = pkg_dir.join(&rel);
@@ -2141,6 +2144,8 @@ fn load_test(
         memory,
         group,
         jobs,
+        ready,
+        ready_timeout,
         setup,
         verify,
         steps,
@@ -2483,6 +2488,9 @@ fn bool_field(block: &Block<'_>, name: &str, ctx: &mut Ctx<'_>) -> Option<bool> 
         }
     }
 }
+
+/// A test's `ready_timeout` when it declares none, in seconds.
+const READY_TIMEOUT_DEFAULT: u64 = 300;
 
 /// An optional whole-number field that must be at least 1; absent is
 /// `None` (no diag).

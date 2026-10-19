@@ -44,7 +44,9 @@ test "file_present_converges" {
 | `memory` | string | no | Guest RAM as a WCL byte size, for example `"4GiB"`. Omitted, a container gets vmlab's default of 256MiB and a VM gets its template's sizing. Tests in one group must agree. |
 | `group` | string | no | Tests in the same package with the same non-empty group run sequentially inside one shared instance. They must agree on `image` or `template`, and they share OS state with no reset between them. Absent or empty, the test gets its own instance. |
 | `jobs` | int | no | Worker pool size, at least 1, for this test's three in-guest runs. An explicit `config-weave test --jobs N` overrides it. Omitted, the guest engine uses its default, the smaller of the CPU count and 8. |
-| `setup` | string | no | A shell command run inside the instance before the three runs, with the test's working directory as the current directory. Linux runs it with `sh -c`. Windows writes it to a `setup.cmd` batch file in that directory and runs `cmd /C` on the file, so double quotes reach programs unchanged. Batch-file rules apply: an undefined `%VAR%` expands to nothing, a literal `%` is written `%%`, and a `for` variable is `%%i`. Command echo is off. |
+| `ready` | string | no | A readiness command, run inside the instance the way `setup` is (`sh -c` on Linux, a `ready.cmd` batch file on Windows) and **before** `setup`. It runs every 3 seconds until it exits 0. Still failing after `ready_timeout` seconds, the test is an error, not a failure, with a message saying the instance did not become ready and the last exit code and output. |
+| `ready_timeout` | int | no | Seconds, at least 1, that `ready` may keep failing. Default 300. |
+| `setup` | string | no | A shell command run inside the instance after `ready` and before the three runs, with the test's working directory as the current directory. Linux runs it with `sh -c`. Windows writes it to a `setup.cmd` batch file in that directory and runs `cmd /C` on the file, so double quotes reach programs unchanged. Batch-file rules apply: an undefined `%VAR%` expands to nothing, a literal `%` is written `%%`, and a `for` variable is `%%i`. Command echo is off. |
 | `verify` | string | no | Path of a verify script relative to the package directory. Exports `verify(facts: Value) -> bool` (entry-point signatures: scripts.md). |
 | `step` | block, repeatable | no | Resource invocations with an expectation. |
 | `gather` | block, repeatable | no | Gatherer invocations with equality assertions. |
@@ -163,7 +165,7 @@ Inside the instance the runner executes the synthesized playbook three times as 
 
 A failure on run 3 means the resource's `check` only passes on state the applying process remembered: the fresh process re-applies and the step reports `configured` instead of `already_configured`. Fix the resource's `check` so it reads the real host state.
 
-Order of work per test: `setup` command, gathers, the three runs, verify script. A failure lists each failing step under its test line in the report.
+Order of work per test: `ready` command until it passes, `setup` command, gathers, the three runs, verify script. A failure lists each failing step under its test line in the report.
 
 ## Verify scripts
 

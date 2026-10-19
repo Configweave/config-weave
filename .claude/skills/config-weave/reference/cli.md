@@ -408,7 +408,7 @@ Schema-stable. Steps appear in declaration order whatever order they finished in
 }
 ```
 
-`outcome` is `failed` for a step expectation, gather assertion or verify failure, and `error` for environmental trouble (provisioning, setup, protocol, parse). `kept` carries the instance handle when `--keep` was given.
+`outcome` is `failed` for a step expectation, gather assertion or verify failure, and `error` for environmental trouble (provisioning, a `ready` command that never passed, setup, protocol, parse). `kept` carries the instance handle when `--keep` was given.
 
 ### `--events-ndjson`
 
@@ -416,7 +416,7 @@ Accepted by `check`, `apply` and `test`. One JSON object per line on stderr whil
 
 check/apply: `run_started` (`play`, `mode`, `steps` with `name`, `resource`, `container_path`), `gather_started` (`unique` count), `gather_finished`, `step_started` (`idx`, `name`), `step_phase` (`idx`, `name`, `phase` of `checking`, `applying`, `re-checking`), `step_finished` (`idx`, `name`, `container_path`, `resource`, `status`, `message`, `duration_secs`), `step_resolved` (`idx`, `name`, `status`; a step resolved without running, such as `skipped` or `not_run`).
 
-test (each stamped with `ts`, epoch millis): `run_started` (`playbook`, `groups`, `tests` list with `package`, `test`, `group` index or null for scenarios, `machine_kind`, `source`), `group_provisioning`, `instance_ready` (`group`, `label`, `machine_kind`, `source`, `attach` with the raw vmlab id), `test_started`, `phase` (`phase` of `setup`, `gather` with `name`, `check`, `first_apply`, `second_apply`, `verify`), `log` (`context`, `stream`, `chunk` tail-truncated at 8 KiB, `truncated`), `gather_result`, `step_result`, `verify_result`, `test_finished` (`outcome`, `duration_secs`, `error`), `group_teardown` (`kept`, `handle`, `warning`), `run_finished` (`exit_code`, `passed`, `failed`, `errors`, `duration_secs`). `run_finished` is written before the stdout report. A supervisor that kills the process must remove the instances named in `instance_ready` itself.
+test (each stamped with `ts`, epoch millis): `run_started` (`playbook`, `groups`, `tests` list with `package`, `test`, `group` index or null for scenarios, `machine_kind`, `source`), `group_provisioning`, `instance_ready` (`group`, `label`, `machine_kind`, `source`, `attach` with the raw vmlab id), `test_started`, `phase` (`phase` of `ready`, `setup`, `gather` with `name`, `check`, `first_apply`, `second_apply`, `verify`), `log` (`context`, `stream`, `chunk` tail-truncated at 8 KiB, `truncated`), `gather_result`, `step_result`, `verify_result`, `test_finished` (`outcome`, `duration_secs`, `error`), `group_teardown` (`kept`, `handle`, `warning`), `run_finished` (`exit_code`, `passed`, `failed`, `errors`, `duration_secs`). `run_finished` is written before the stdout report. A supervisor that kills the process must remove the instances named in `instance_ready` itself.
 
 ### `--log-file` and `--log-level`
 

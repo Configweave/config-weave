@@ -375,9 +375,28 @@ fn drive_one(
     slug: &str,
     report: &mut TestReport,
 ) -> Result<(), Diag> {
-    // Its own working dir, created here — setup cd's into it below.
+    // Its own working dir, created here — ready and setup cd into it.
     let wd = Guest::new(instance).test_work(slug)?;
+    prepare_test(test, ctx, &wd, READY_PAUSE)?;
 
+    wd.stage(synthesized.dir.path())?;
+
+    let facts = run_gathers(test, ctx, &mut report.gathers, &wd)?;
+    run_steps(test, jobs_for(opts.jobs, test), ctx, &mut report.steps, &wd)?;
+    report.verify = run_verify(test, ctx, &facts, &wd)?;
+    Ok(())
+}
+
+/// Pause between attempts of a test's `ready` command.
+const READY_PAUSE: Duration = Duration::from_secs(3);
+
+/// What runs in a test's working dir before anything is staged there:
+/// `ready` until it passes, then `setup` once.
+fn prepare_test(test: &TestDecl, ctx: &TestCtx, wd: &Workdir, pause: Duration) -> Result<(), Diag> {
+    if let Some(ready) = &test.ready {
+        ctx.phase(TestPhase::Ready);
+        await_ready(wd, ready, Duration::from_secs(test.ready_timeout), pause)?;
+    }
     if let Some(setup) = &test.setup {
         ctx.phase(TestPhase::Setup);
         let out = wd.exec_in("setup", setup)?;
@@ -390,13 +409,40 @@ fn drive_one(
             )));
         }
     }
-
-    wd.stage(synthesized.dir.path())?;
-
-    let facts = run_gathers(test, ctx, &mut report.gathers, &wd)?;
-    run_steps(test, jobs_for(opts.jobs, test), ctx, &mut report.steps, &wd)?;
-    report.verify = run_verify(test, ctx, &facts, &wd)?;
     Ok(())
+}
+
+/// Run a test's `ready` command, `pause` apart, until it exits 0. Still
+/// failing once `timeout` has passed is an error saying the instance never
+/// became ready, with the last attempt's exit code and output. A transport
+/// failure counts as one more failed attempt: the guest may be what is not
+/// ready yet.
+fn await_ready(wd: &Workdir, script: &str, timeout: Duration, pause: Duration) -> Result<(), Diag> {
+    let staged = wd.script("ready", script)?;
+    let start = Instant::now();
+    let result = loop {
+        let last = match staged.run() {
+            Ok(out) if out.exit_code == 0 => break Ok(()),
+            Ok(out) => {
+                let output = if out.stderr.trim().is_empty() {
+                    &out.stdout
+                } else {
+                    &out.stderr
+                };
+                format!("last exit {}: {}", out.exit_code, tail(output))
+            }
+            Err(d) => format!("last attempt failed: {}", d.message),
+        };
+        if start.elapsed() >= timeout {
+            break Err(Diag::bare(format!(
+                "the instance did not become ready: `ready` still failing after {}s ({last})",
+                timeout.as_secs_f64()
+            )));
+        }
+        std::thread::sleep(pause);
+    };
+    let _ = staged.remove();
+    result
 }
 
 /// Run every gather test through `__gather`, assert expectations, and
@@ -771,7 +817,7 @@ mod tests {
     use super::*;
     use crate::model::TestStep;
     use crate::testlab::backend::GuestOs;
-    use crate::testlab::guest::fake::{FakeGuest, printed};
+    use crate::testlab::guest::fake::{FakeGuest, exited, failed, printed};
 
     const EMPTY_REPORT: &str = r#"{"playbook":"p","version":"0","play":"test","mode":"apply","exit_code":0,"duration_secs":0.0,"gathered":[],"steps":[]}"#;
 
@@ -784,6 +830,8 @@ mod tests {
             memory: None,
             group: None,
             jobs,
+            ready: None,
+            ready_timeout: 300,
             setup: None,
             verify: None,
             steps: vec![TestStep {
@@ -846,6 +894,93 @@ mod tests {
     #[test]
     fn neither_leaves_the_guest_engine_default() {
         assert_eq!(jobs_seen(None, None), vec![None; 3]);
+    }
+
+    // --------------------------------------------------------------- ready
+
+    /// Drive `prepare_test` for a test with `ready` and `setup`, and say
+    /// what happened.
+    fn prepare(fake: &FakeGuest, ready_timeout: u64) -> Result<(), Diag> {
+        let mut test = test_decl(None);
+        test.ready = Some("systemctl is-active --quiet sshd".into());
+        test.ready_timeout = ready_timeout;
+        test.setup = Some("touch marker".into());
+        let wd = Guest::new(fake).test_work("0-core__t").unwrap();
+        let sink = super::super::events::null_sink();
+        let ctx = TestCtx {
+            sink: &sink,
+            package: "core",
+            test: "t",
+        };
+        prepare_test(&test, &ctx, &wd, Duration::ZERO)
+    }
+
+    /// The scripts the shell execs ran, after the workdir mkdir.
+    fn scripts_run(fake: &FakeGuest) -> Vec<String> {
+        fake.argvs()[1..].iter().map(|a| a[2].clone()).collect()
+    }
+
+    #[test]
+    fn ready_is_retried_until_it_passes_then_setup_runs() {
+        let fake = FakeGuest::new(GuestOs::Linux)
+            .replying([exited(0), failed(3, "inactive")])
+            .breaking("agent channel closed during exec");
+        prepare(&fake, 300).expect("ready on the third try");
+
+        let ready = "cd /weave/t/0-core__t || exit 1\nsystemctl is-active --quiet sshd";
+        assert_eq!(
+            scripts_run(&fake),
+            vec![
+                ready.to_string(),
+                ready.to_string(),
+                ready.to_string(),
+                "cd /weave/t/0-core__t || exit 1\ntouch marker".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn ready_that_never_passes_errors_without_running_setup() {
+        let fake = FakeGuest::new(GuestOs::Linux)
+            .replying([exited(0)])
+            .otherwise(failed(3, "sshd: inactive"));
+        let err = prepare(&fake, 1).expect_err("never ready");
+
+        assert!(
+            err.message.contains("the instance did not become ready"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("after 1s"), "{}", err.message);
+        assert!(err.message.contains("last exit 3"), "{}", err.message);
+        assert!(err.message.contains("sshd: inactive"), "{}", err.message);
+        assert!(
+            scripts_run(&fake)
+                .iter()
+                .all(|s| !s.contains("touch marker")),
+            "setup must not run: {:?}",
+            scripts_run(&fake)
+        );
+    }
+
+    #[test]
+    fn a_windows_ready_is_staged_once_and_removed() {
+        let fake = FakeGuest::new(GuestOs::Windows).replying([exited(0), failed(1, "")]);
+        prepare(&fake, 300).expect("ready on the second try");
+
+        let ready = "C:\\weave\\t\\0-core__t\\ready.cmd";
+        let setup = "C:\\weave\\t\\0-core__t\\setup.cmd";
+        assert_eq!(
+            scripts_run(&fake),
+            vec![
+                ready.to_string(),
+                ready.to_string(),
+                format!("del /f /q {ready}"),
+                setup.to_string(),
+                format!("del /f /q {setup}"),
+            ]
+        );
+        assert_eq!(fake.copies().len(), 2);
     }
 
     #[test]
