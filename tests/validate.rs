@@ -615,3 +615,18 @@ fn an_empty_lock_fails_validation() {
     assert_eq!(code, 2, "stderr: {stderr}");
     assert!(flat(&stderr).contains("empty lock name"), "{stderr}");
 }
+
+#[test]
+fn a_lib_file_named_after_a_host_module_fails_validation() {
+    let dir = tempfile::tempdir().unwrap();
+    copy_sample(dir.path());
+    let lib = dir.path().join("pkgs/core/lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("acl.ws"), "fn helper() -> int { 1 }\n").unwrap();
+    let (code, _, stderr) = run(&["validate", dir.path().to_str().unwrap()]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        flat(&stderr).contains("lib module 'acl' is shadowed by the host module 'acl'"),
+        "{stderr}"
+    );
+}
