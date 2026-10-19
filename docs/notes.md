@@ -483,7 +483,8 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
     `name` is `Null` when LookupAccountSidW fails for any reason (the SID
     stays authoritative). Object and callback ACEs read as `kind: "other"`
     with a `type`; `set` cannot write them and `diff` reports them. A NULL
-    DACL reads as `entries: []` and is always a `diff` line.
+    DACL reads as `entries: []` with `null_dacl: true` (an empty DACL has
+    `null_dacl: false`; the two are opposites) and is always a `diff` line.
   - `set` replaces all explicit entries, writes deny before allow (each
     group in spec order, exact duplicates dropped), and never writes
     inherited entries: it always passes PROTECTED_ or
@@ -548,6 +549,15 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   option and bind it the same way (`O_NOFOLLOW` read-only open on Unix,
   check-then-open on Windows). `read_with` errors on invalid UTF-8, as
   `read` does.
+- Host modules win over `lib/` files of the same name (the resolver checks
+  the registry first, so `use fs` is always the host API). Adding a host
+  module can therefore shadow a package helper that worked on the previous
+  release, as `acl` did to the `lib/acl.ws` helpers in config-weave-pkgs
+  in v0.9.0-alpha. Validation now fails on any package or playbook
+  `lib/<name>.ws` whose name is a host module, naming the file and the
+  module, rather than leaving only the missing-item errors from its
+  callers. Treat a new host module name as a possible breaking change for
+  package libs.
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:
