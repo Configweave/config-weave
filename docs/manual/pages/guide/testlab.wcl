@@ -6,7 +6,7 @@ page guide_testlab {
   chapter_header "The testlab" {
     kicker       = "The guide · explanation"
     reading_time = "8 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -84,7 +84,7 @@ PROSE
   h2 "How the runner talks to the guest"
 
   p <<'PROSE'
-The host copies a config-weave binary matched to the guest OS into the instance and smoke-tests it with `version`, so an architecture mismatch is one clear diagnostic rather than a mysterious failure later. For Linux the binary comes from `--binary`, then `$CONFIG_WEAVE_TEST_BINARY`, then the running executable if it is statically linked, then the newest static cross-build in the workspace. For Windows it comes from `--binary-windows`, `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, or the newest Windows cross-build.
+The host copies a config-weave binary matched to the guest OS into the instance and smoke-tests it with `version`, so an architecture mismatch is one clear diagnostic rather than a mysterious failure later. For Linux the binary comes from `--binary`, then `$CONFIG_WEAVE_TEST_BINARY`, then the running executable if it is statically linked, then the newest static cross-build in the workspace, then `config-weave-linux-x86_64` beside the running executable (symlinks resolved), then `$XDG_DATA_HOME/config-weave/bin/` (default `~/.local/share/config-weave/bin/`). For Windows it comes from `--binary-windows`, `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, the newest Windows cross-build, `config-weave-windows-x86_64.exe` beside the running executable, then the same folder. A release installed with `just install` therefore needs no flags. When no binary is found, the error lists every path it searched.
 PROSE
 
   p <<'PROSE'

@@ -6,7 +6,7 @@ page howto_test_package {
   chapter_header "Test a package" {
     kicker       = "The guide · how-to"
     reading_time = "5 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -92,7 +92,8 @@ PROSE
   p <<'PROSE'
 The instance runs whatever binary you point it at. When your development
 build is dynamically linked, pass a static Linux binary with `--binary PATH`
-and, for Windows guests, `--binary-windows PATH`. To run every container
+and, for Windows guests, `--binary-windows PATH`. A release installed
+with `just install` is found without either flag. To run every container
 test against a different image, or every VM test against a different
 template, pass `--image REF` or `--template REF`. Neither converts a test
 between the two kinds.

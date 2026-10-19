@@ -6,7 +6,7 @@ page ref_test_block {
   chapter_header "The test block" {
     kicker       = "Reference · reference"
     reading_time = "7 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-19"
     version      = "config-weave 0.1.0"
   }
 
@@ -168,6 +168,6 @@ SRC
       | "Instance" | "Requirement" |
       | "container (`image`)" | "An OCI image with a shell. vmlab pulls it and runs it in a micro-VM as root, with the test payload mounted at `/weave`." |
       | "VM (`template`)" | "The template must ship the vmlab guest agent, which the runner polls for readiness. Each group gets a throwaway one-VM lab." |
-      | "VM (Windows)" | "The guest agent must report `windows`, and `setup` is written for `cmd /C`. The runner copies a Windows build of config-weave, found through `--binary-windows` or `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`." |
+      | "VM (Windows)" | "The guest agent must report `windows`, and `setup` is written for `cmd /C`. The runner copies a Windows build of config-weave, found through `--binary-windows`, `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, a workspace cross-build, or the `just install` folder." |
   }
 }
