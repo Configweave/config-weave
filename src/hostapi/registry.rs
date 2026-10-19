@@ -37,6 +37,13 @@ mod codec {
     // Win32 error codes that mean "no such key or value" (winerror.h).
     const ERROR_FILE_NOT_FOUND: u32 = 2;
     const ERROR_PATH_NOT_FOUND: u32 = 3;
+    // RegEnumValueW's "name buffer too small" and "no more values".
+    const ERROR_MORE_DATA: u32 = 234;
+    const ERROR_NO_MORE_ITEMS: u32 = 259;
+
+    /// The longest value name the registry allows, in UTF-16 units, plus
+    /// the NUL RegEnumValueW writes after it.
+    const NAME_BUF_MAX: usize = 16_383 + 1;
 
     // Access-mask bits that select a registry view (winnt.h).
     const KEY_WOW64_64KEY: u32 = 0x0100;
@@ -134,6 +141,43 @@ mod codec {
         } else {
             Err(format!("{what}: {message} (Win32 error {code})"))
         }
+    }
+
+    /// The name buffer `value_names` starts with, in UTF-16 units, for the
+    /// longest name RegQueryInfoKeyW reports (which excludes the NUL).
+    pub(super) fn name_buf_len(max_name_len: u32) -> usize {
+        max_name_len as usize + 1
+    }
+
+    /// What `value_names` does after RegEnumValueW fails with `code` on a
+    /// name buffer of `cap` units.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(super) enum EnumNext {
+        /// Every value has been listed.
+        Done,
+        /// A value was added or renamed since the buffer was sized: retry
+        /// the same index with a buffer of this many units.
+        Grow(usize),
+        /// A real failure, or ERROR_MORE_DATA on a buffer already big
+        /// enough for any legal name.
+        Fail,
+    }
+
+    pub(super) fn enum_next(code: u32, cap: usize) -> EnumNext {
+        match code {
+            ERROR_NO_MORE_ITEMS => EnumNext::Done,
+            ERROR_MORE_DATA if cap < NAME_BUF_MAX => {
+                EnumNext::Grow((cap.max(1) * 2).min(NAME_BUF_MAX))
+            }
+            _ => EnumNext::Fail,
+        }
+    }
+
+    /// Order value names the way the registry compares them: ignoring case.
+    /// A key cannot hold two names that differ only in case, so the ordinal
+    /// tie-break only makes the order total.
+    pub(super) fn sort_value_names(names: &mut [String]) {
+        names.sort_by_cached_key(|n| (n.to_uppercase(), n.clone()));
     }
 
     /// A script value to the registry type and raw bytes `write` stores.
@@ -423,6 +467,31 @@ mod codec {
         }
 
         #[test]
+        fn value_names_sort_ignoring_case_with_the_default_value_first() {
+            let mut names: Vec<String> = ["beta", "Alpha", "", "gamma", "_x", "Zeta"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            sort_value_names(&mut names);
+            assert_eq!(names, ["", "Alpha", "beta", "gamma", "Zeta", "_x"]);
+        }
+
+        #[test]
+        fn enum_errors_grow_the_name_buffer_up_to_the_name_limit() {
+            assert_eq!(name_buf_len(0), 1);
+            assert_eq!(name_buf_len(5), 6);
+            assert_eq!(enum_next(ERROR_NO_MORE_ITEMS, 6), EnumNext::Done);
+            assert_eq!(enum_next(ERROR_MORE_DATA, 6), EnumNext::Grow(12));
+            assert_eq!(enum_next(ERROR_MORE_DATA, 0), EnumNext::Grow(2));
+            assert_eq!(
+                enum_next(ERROR_MORE_DATA, 10_000),
+                EnumNext::Grow(NAME_BUF_MAX)
+            );
+            assert_eq!(enum_next(ERROR_MORE_DATA, NAME_BUF_MAX), EnumNext::Fail);
+            assert_eq!(enum_next(5, 6), EnumNext::Fail);
+        }
+
+        #[test]
         fn views_map_to_wow64_access_bits() {
             assert_eq!(View::Native.sam_flag(), 0);
             assert_eq!(View::Wow64_32.sam_flag(), 0x0200);
@@ -445,6 +514,8 @@ mod codec {
             use windows::Win32::Foundation as f;
             assert_eq!(ERROR_FILE_NOT_FOUND, f::ERROR_FILE_NOT_FOUND.0);
             assert_eq!(ERROR_PATH_NOT_FOUND, f::ERROR_PATH_NOT_FOUND.0);
+            assert_eq!(ERROR_MORE_DATA, f::ERROR_MORE_DATA.0);
+            assert_eq!(ERROR_NO_MORE_ITEMS, f::ERROR_NO_MORE_ITEMS.0);
         }
     }
 }
@@ -623,6 +694,24 @@ pub fn module() -> Module {
         |_: &str, _: DynValue| -> Result<(), String> { Err(NOT_WINDOWS.to_string()) },
     );
 
+    m.doc_next(
+        "The names of a key's values, sorted case-insensitively. The default value is \"\" \
+         and is listed only when set. A missing key is an Err. \
+         opts: view (native | wow64_32 | wow64_64)",
+    );
+    #[cfg(windows)]
+    m.fn_(
+        "value_names",
+        |key: &str, opts: DynValue| -> Result<Vec<String>, String> {
+            win::value_names(key, parse_opts(&opts)?)
+        },
+    );
+    #[cfg(not(windows))]
+    m.fn_(
+        "value_names",
+        |_: &str, _: DynValue| -> Result<Vec<String>, String> { Err(NOT_WINDOWS.to_string()) },
+    );
+
     m.doc_next("Whether a key exists (any failure other than not-found is an Err)");
     #[cfg(windows)]
     m.fn_("key_exists", |key: &str| -> Result<bool, String> {
@@ -653,15 +742,16 @@ pub fn module() -> Module {
 #[cfg(windows)]
 mod win {
     use super::View;
-    use super::codec::absent_or_err;
+    use super::codec::{EnumNext, absent_or_err};
     use windows::Win32::Foundation::{ERROR_SUCCESS, WIN32_ERROR};
     use windows::Win32::System::Registry::{
         HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_CONFIG, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
         HKEY_USERS, KEY_ALL_ACCESS, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS,
         REG_VALUE_TYPE, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW, RegDeleteTreeW,
-        RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+        RegDeleteValueW, RegEnumValueW, RegOpenKeyExW, RegQueryInfoKeyW, RegQueryValueExW,
+        RegSetValueExW,
     };
-    use windows::core::{HSTRING, PCWSTR};
+    use windows::core::{HSTRING, PCWSTR, PWSTR};
     use wscript_std::DynValue;
 
     fn split_hive(key: &str) -> Result<(HKEY, String), String> {
@@ -876,5 +966,116 @@ mod win {
 
     pub fn key_exists(key: &str, view: View) -> Result<bool, String> {
         Ok(open_existing(key, KEY_READ, view)?.is_some())
+    }
+
+    /// The names of `key`'s values, sorted. Unlike `read`, a missing key is
+    /// an `Err`: an empty list would hide a mistyped key.
+    pub fn value_names(key: &str, view: View) -> Result<Vec<String>, String> {
+        let Some(handle) = open_existing(key, KEY_READ, view)? else {
+            return Err(format!("opening '{key}': the key does not exist"));
+        };
+        let fail = |rc: WIN32_ERROR| {
+            format!(
+                "listing the values of '{key}': {} (Win32 error {})",
+                message(rc),
+                rc.0
+            )
+        };
+        let mut max_name_len = 0u32;
+        let rc = unsafe {
+            RegQueryInfoKeyW(
+                handle.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(&mut max_name_len),
+                None,
+                None,
+                None,
+            )
+        };
+        if rc != ERROR_SUCCESS {
+            return Err(fail(rc));
+        }
+        let mut buf = vec![0u16; super::codec::name_buf_len(max_name_len)];
+        let mut names = Vec::new();
+        let mut index = 0u32;
+        loop {
+            // In: the buffer size in units, NUL included. Out: the name's
+            // length, NUL excluded.
+            let mut len = buf.len() as u32;
+            let rc = unsafe {
+                RegEnumValueW(
+                    handle.0,
+                    index,
+                    Some(PWSTR(buf.as_mut_ptr())),
+                    &mut len,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            };
+            if rc == ERROR_SUCCESS {
+                names.push(String::from_utf16_lossy(&buf[..len as usize]));
+                index += 1;
+                continue;
+            }
+            match super::codec::enum_next(rc.0, buf.len()) {
+                EnumNext::Done => break,
+                EnumNext::Grow(cap) => buf.resize(cap, 0),
+                EnumNext::Fail => return Err(fail(rc)),
+            }
+        }
+        super::codec::sort_value_names(&mut names);
+        Ok(names)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn value_names_lists_a_temp_key_including_the_default_value() {
+            let key = format!(
+                "HKCU\\Software\\config-weave-test\\value_names-{}",
+                std::process::id()
+            );
+            let s = |v: &str| DynValue::String(v.into());
+            create_key(&key, View::Native).unwrap();
+            assert_eq!(
+                value_names(&key, View::Native).unwrap(),
+                Vec::<String>::new()
+            );
+
+            let long = "n".repeat(300);
+            for name in ["beta", "Alpha", "gamma", long.as_str()] {
+                write(&key, name, &s("x"), "sz", View::Native).unwrap();
+            }
+            write(&key, "count", &DynValue::Int(1), "dword", View::Native).unwrap();
+            // No default value yet: it is absent, not "".
+            assert_eq!(
+                value_names(&key, View::Native).unwrap(),
+                ["Alpha", "beta", "count", "gamma", long.as_str()]
+            );
+
+            // `read(key, "")` and `write(key, "", ...)` name the default value.
+            write(&key, "", &s("default"), "sz", View::Native).unwrap();
+            assert_eq!(
+                value_names(&key, View::Native).unwrap(),
+                ["", "Alpha", "beta", "count", "gamma", long.as_str()]
+            );
+
+            delete_key(&key, View::Native).unwrap();
+            let err = value_names(&key, View::Native).unwrap_err();
+            assert!(
+                err.contains("does not exist") && err.contains(&key),
+                "got: {err}"
+            );
+        }
     }
 }
