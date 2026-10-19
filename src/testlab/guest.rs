@@ -290,6 +290,29 @@ impl<'a> Guest<'a> {
     }
 }
 
+/// A shell script ready to run in a [`Workdir`], from [`Workdir::script`].
+pub struct ShellScript<'a> {
+    guest: Guest<'a>,
+    argv: [String; 3],
+    /// The guest file the script was staged into, if it needed one.
+    staged: Option<String>,
+}
+
+impl ShellScript<'_> {
+    pub fn run(&self) -> Result<ExecOutput, Diag> {
+        let argv: Vec<&str> = self.argv.iter().map(String::as_str).collect();
+        self.guest.t.exec(&argv)
+    }
+
+    /// Delete the staged file, if there is one.
+    pub fn remove(self) -> Result<(), Diag> {
+        match &self.staged {
+            Some(path) => self.guest.remove_file(path),
+            None => Ok(()),
+        }
+    }
+}
+
 /// A directory inside a guest that exists, with the things that go in it.
 ///
 /// Obtained from [`Guest::test_work`] or [`Guest::scenario_work`], which
@@ -302,7 +325,7 @@ pub struct Workdir<'a> {
     facts: String,
 }
 
-impl Workdir<'_> {
+impl<'a> Workdir<'a> {
     /// The config-weave binary, shared across every working directory in
     /// this guest.
     fn bin(&self) -> &'static str {
@@ -315,24 +338,71 @@ impl Workdir<'_> {
         self.guest.t.copy_in(host, &self.playbook)
     }
 
-    /// Run a shell script with this directory as its working directory.
+    /// Run a shell script once with this directory as its working
+    /// directory, then remove whatever [`Workdir::script`] staged for it,
+    /// best effort. `name` names the staged file.
+    pub fn exec_in(&self, name: &str, script: &str) -> Result<ExecOutput, Diag> {
+        let staged = self.script(name, script)?;
+        let out = staged.run();
+        // A leftover batch file in a throwaway workdir harms nothing.
+        let _ = staged.remove();
+        out
+    }
+
+    /// Prepare a shell script to run, possibly repeatedly, with this
+    /// directory as its working directory.
     ///
     /// A guest exec's working directory is unspecified, so it has to be
     /// pinned — and *which* shell does the pinning, with which quoting, is
-    /// this module's business rather than the caller's.
-    pub fn exec_in(&self, script: &str) -> Result<ExecOutput, Diag> {
-        let pinned;
-        let argv: [&str; 3] = match self.guest.os {
-            GuestOs::Linux => {
-                pinned = format!("cd {} || exit 1\n{script}", self.dir);
-                ["sh", "-c", &pinned]
-            }
+    /// this module's business rather than the caller's. On linux that is
+    /// an `sh -c` argv. On windows the script becomes `<name>.cmd` in this
+    /// directory, run as `cmd.exe /C <path>`: passed as an argv element
+    /// instead, its double quotes reached programs escaped as `\"`, so
+    /// `powershell -Command "..."` saw one string literal and did nothing.
+    /// A batch file is not quite a `/C` line: an undefined `%VAR%` expands
+    /// to nothing instead of staying literal, a literal `%` is `%%`, and a
+    /// `for` variable is `%%i`. `@echo off` keeps command echo out of the
+    /// output.
+    pub fn script(&self, name: &str, script: &str) -> Result<ShellScript<'a>, Diag> {
+        match self.guest.os {
+            GuestOs::Linux => Ok(ShellScript {
+                guest: self.guest,
+                argv: [
+                    "sh".into(),
+                    "-c".into(),
+                    format!("cd {} || exit 1\n{script}", self.dir),
+                ],
+                staged: None,
+            }),
             GuestOs::Windows => {
-                pinned = format!("cd /d {} && {script}", shell_path(self.guest.os, &self.dir));
-                ["cmd.exe", "/C", &pinned]
+                let body = format!(
+                    "@echo off\r\ncd /d {} || exit /b 1\r\n{}\r\n",
+                    shell_path(self.guest.os, &self.dir),
+                    script.replace("\r\n", "\n").replace('\n', "\r\n")
+                );
+                let mut file = tempfile::NamedTempFile::new()
+                    .map_err(|e| Diag::bare(format!("cannot create the {name} temp file: {e}")))?;
+                file.write_all(body.as_bytes())
+                    .map_err(|e| Diag::bare(format!("cannot write the {name} temp file: {e}")))?;
+                let path = format!("{}/{name}.cmd", self.dir);
+                let copied = self.guest.t.copy_in(file.path(), &path);
+                let staged = ShellScript {
+                    guest: self.guest,
+                    argv: [
+                        "cmd.exe".into(),
+                        "/C".into(),
+                        shell_path(self.guest.os, &path),
+                    ],
+                    staged: Some(path),
+                };
+                if let Err(e) = copied {
+                    // A partial copy still holds the script.
+                    let _ = staged.remove();
+                    return Err(e);
+                }
+                Ok(staged)
             }
-        };
-        self.guest.t.exec(&argv)
+        }
     }
 
     /// Run a PowerShell script in the guest without putting it on the
@@ -908,7 +978,7 @@ mod tests {
     fn a_pinned_script_runs_in_the_workdir_linux() {
         let fake = FakeGuest::new(GuestOs::Linux);
         let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
-        wd.exec_in("touch marker").unwrap();
+        wd.exec_in("setup", "touch marker").unwrap();
 
         // `|| exit 1` so a failed cd cannot let the script run somewhere
         // unexpected.
@@ -918,17 +988,81 @@ mod tests {
         );
     }
 
+    const QUOTED: &str =
+        "powershell -NoProfile -Command \"Set-Content -Path C:\\cw.txt -Value 'ok'\"";
+
     #[test]
-    fn a_pinned_script_runs_in_the_workdir_windows() {
+    fn a_windows_script_runs_as_a_staged_batch_file() {
         let fake = FakeGuest::new(GuestOs::Windows);
         let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
-        wd.exec_in("echo hi").unwrap();
+        wd.exec_in("setup", QUOTED).unwrap();
 
-        // /d so cd crosses drives, and && so a failed cd stops the script.
+        let path = "C:/weave/t/0-core__a/setup.cmd";
         assert_eq!(
-            fake.argvs()[1],
-            vec!["cmd.exe", "/C", "cd /d C:\\weave\\t\\0-core__a && echo hi"]
+            fake.trail()[1..],
+            [
+                format!("copy {path}"),
+                "exec cmd.exe /C C:\\weave\\t\\0-core__a\\setup.cmd".to_string(),
+                "exec cmd.exe /C del /f /q C:\\weave\\t\\0-core__a\\setup.cmd".to_string(),
+            ]
         );
+        // The quotes travel in the file, never through an argv element.
+        assert!(
+            fake.argvs()
+                .iter()
+                .flatten()
+                .all(|a| !a.contains("Set-Content")),
+            "{:?}",
+            fake.argvs()
+        );
+        // /d so cd crosses drives, || exit /b so a failed cd stops the
+        // script, and CRLF line endings for cmd.
+        assert_eq!(
+            fake.bodies(),
+            vec![Some(format!(
+                "@echo off\r\ncd /d C:\\weave\\t\\0-core__a || exit /b 1\r\n{QUOTED}\r\n"
+            ))]
+        );
+    }
+
+    #[test]
+    fn a_multi_line_windows_script_gets_crlf_line_endings() {
+        let fake = FakeGuest::new(GuestOs::Windows);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        wd.exec_in("setup", "echo one\necho two\r\necho three")
+            .unwrap();
+        let body = fake.bodies()[0].clone().unwrap();
+        assert!(
+            body.ends_with("echo one\r\necho two\r\necho three\r\n"),
+            "{body:?}"
+        );
+    }
+
+    #[test]
+    fn a_staged_script_reports_its_exit_and_is_still_removed() {
+        // mkdir ok, the batch file exits 3.
+        let fake = FakeGuest::new(GuestOs::Windows).replying([exited(0), failed(3, "nope")]);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        let out = wd.exec_in("setup", "exit /b 3").unwrap();
+        assert_eq!(out.exit_code, 3);
+        assert_eq!(
+            fake.argvs().last().unwrap()[2],
+            "del /f /q C:\\weave\\t\\0-core__a\\setup.cmd"
+        );
+    }
+
+    #[test]
+    fn a_staged_script_can_run_repeatedly() {
+        let fake = FakeGuest::new(GuestOs::Windows);
+        let wd = Guest::new(&fake).test_work("0-core__a").unwrap();
+        let script = wd.script("ready", "exit /b 0").unwrap();
+        script.run().unwrap();
+        script.run().unwrap();
+        script.remove().unwrap();
+        // Copied once, run twice, removed once.
+        assert_eq!(fake.copies().len(), 1);
+        assert_eq!(fake.copies()[0].1, "C:/weave/t/0-core__a/ready.cmd");
+        assert_eq!(fake.argvs().len(), 4);
     }
 
     #[test]

@@ -62,7 +62,7 @@ PROSE
       | "`memory`" | "string" | "no" | "Guest RAM as a WCL byte size, for example `\"4GiB\"`. Omitted, a container gets vmlab's default of 256MiB and a VM gets its template's sizing. Tests in one group must agree." |
       | "`group`" | "string" | "no" | "Tests in the same package with the same non-empty group run sequentially inside one shared instance. They must agree on `image` or `template`, and they share OS state with no reset between them. Absent or empty, the test gets its own instance." |
       | "`jobs`" | "int" | "no" | "Worker pool size, at least 1, for this test's three in-guest runs. An explicit `config-weave test --jobs N` overrides it. Omitted, the guest engine uses its default, the smaller of the CPU count and 8." |
-      | "`setup`" | "string" | "no" | "A shell command run inside the instance before the three runs, through `sh -c` on Linux or `cmd /C` on Windows, with the test's working directory as the current directory." |
+      | "`setup`" | "string" | "no" | "A shell command run inside the instance before the three runs, with the test's working directory as the current directory. Linux runs it with `sh -c`. Windows writes it to a `setup.cmd` batch file in that directory and runs `cmd /C` on the file, so double quotes reach programs unchanged. Batch-file rules apply: an undefined `%VAR%` expands to nothing, a literal `%` is written `%%`, and a `for` variable is `%%i`. Command echo is off." |
       | "`verify`" | "string" | "no" | "Path of a verify script relative to the package directory. Exports `verify(facts: Value) -> bool`; see [Script entry points](ref_scripts)." |
       | "`step`" | "block, repeatable" | "no" | "Resource invocations with an expectation. See [step](ref_test_block)." |
       | "`gather`" | "block, repeatable" | "no" | "Gatherer invocations with equality assertions. See [gather](ref_test_block)." |
@@ -169,6 +169,6 @@ SRC
       | "Instance" | "Requirement" |
       | "container (`image`)" | "An OCI image with a shell. vmlab pulls it and runs it in a micro-VM as root, with the test payload mounted at `/weave`." |
       | "VM (`template`)" | "The template must ship the vmlab guest agent, which the runner polls for readiness. Each group gets a throwaway one-VM lab." |
-      | "VM (Windows)" | "The guest agent must report `windows`, and `setup` is written for `cmd /C`. The runner copies a Windows build of config-weave, found through `--binary-windows`, `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, a workspace cross-build, or the `just install` folder." |
+      | "VM (Windows)" | "The guest agent must report `windows`, and `setup` is written as a batch file. The runner copies a Windows build of config-weave, found through `--binary-windows`, `$CONFIG_WEAVE_TEST_BINARY_WINDOWS`, a workspace cross-build, or the `just install` folder." |
   }
 }

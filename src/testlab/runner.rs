@@ -380,7 +380,7 @@ fn drive_one(
 
     if let Some(setup) = &test.setup {
         ctx.phase(TestPhase::Setup);
-        let out = wd.exec_in(setup)?;
+        let out = wd.exec_in("setup", setup)?;
         ctx.log("setup", &out.stderr);
         if out.exit_code != 0 {
             return Err(Diag::bare(format!(

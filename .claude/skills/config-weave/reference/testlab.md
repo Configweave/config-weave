@@ -44,7 +44,7 @@ test "file_present_converges" {
 | `memory` | string | no | Guest RAM as a WCL byte size, for example `"4GiB"`. Omitted, a container gets vmlab's default of 256MiB and a VM gets its template's sizing. Tests in one group must agree. |
 | `group` | string | no | Tests in the same package with the same non-empty group run sequentially inside one shared instance. They must agree on `image` or `template`, and they share OS state with no reset between them. Absent or empty, the test gets its own instance. |
 | `jobs` | int | no | Worker pool size, at least 1, for this test's three in-guest runs. An explicit `config-weave test --jobs N` overrides it. Omitted, the guest engine uses its default, the smaller of the CPU count and 8. |
-| `setup` | string | no | A shell command run inside the instance before the three runs, through `sh -c` on Linux or `cmd /C` on Windows, with the test's working directory as the current directory. |
+| `setup` | string | no | A shell command run inside the instance before the three runs, with the test's working directory as the current directory. Linux runs it with `sh -c`. Windows writes it to a `setup.cmd` batch file in that directory and runs `cmd /C` on the file, so double quotes reach programs unchanged. Batch-file rules apply: an undefined `%VAR%` expands to nothing, a literal `%` is written `%%`, and a `for` variable is `%%i`. Command echo is off. |
 | `verify` | string | no | Path of a verify script relative to the package directory. Exports `verify(facts: Value) -> bool` (entry-point signatures: scripts.md). |
 | `step` | block, repeatable | no | Resource invocations with an expectation. |
 | `gather` | block, repeatable | no | Gatherer invocations with equality assertions. |
@@ -183,7 +183,7 @@ Every instance is a vmlab machine. The `image` or `template` field is the whole 
 | Start time | Seconds once the image is cached | Boot time; a fresh Windows clone takes several minutes on first boot |
 | Init system, reboot | No live init, no reboot | Real init, reboots |
 | Default memory | 256MiB, allocated on demand | The template's own sizing |
-| `setup` shell | `sh -c` | `sh -c` on Linux, `cmd /C` on Windows |
+| `setup` shell | `sh -c` | `sh -c` on Linux; on Windows a `.cmd` batch file run with `cmd /C` (batch `%` rules) |
 | Requirement | An OCI image with a shell; vmlab pulls it | The template ships the vmlab guest agent, which the runner polls for readiness (up to 300s) |
 | Agent check | Three `true` execs in a row must succeed (up to 300s) | Three `true` (Windows: `cmd /C exit 0`) execs in a row must succeed (up to 300s); also after a scenario `reboot` |
 | `vmlab up` limit | 5 min, then killed, torn down, group errors | 30 min, then the same (scenario machines too) |

@@ -605,9 +605,25 @@ below). Bindings fixed here:
   working dir `/weave/t/<idx>-<pkg>__<test>/` (forward slashes
   throughout; `C:/weave/t/…` on windows) holding its synthesized playbook
   and facts, so grouped tests never clobber each other. `setup` runs via
-  `sh -c` on linux and `cmd /C` on windows, cd'd into that per-test dir
+  `sh -c` on linux, cd'd into that per-test dir
   (created first — exec has no working directory guarantee), and
-  `chmod +x` is linux-only.
+  `chmod +x` is linux-only. On windows `Workdir::script` writes it to
+  `<dir>/setup.cmd` (`@echo off`, `cd /d <dir> || exit /b 1`, the
+  script, CRLF line endings), copies that in, runs `cmd.exe /C <path>`
+  and deletes it best effort. Until 2026-10 it ran as `cmd.exe /C "cd /d
+  … && <script>"` with the script as one argv element, and the guest
+  agent's argv-to-command-line quoting delivered every `"` in it as
+  `\"`: `powershell -Command "Set-Content …"` received a string literal,
+  printed nothing and exited 0, so the setup "succeeded" having done
+  nothing. Verified on `x86_64/windows-server-2025` (2026-10-19): the
+  old path ran `powershell -NoProfile -Command "Set-Content -Path
+  C:\cw-setup.txt -Value 'ok'"`, exited 0 and wrote no file (verify
+  failed); the batch file writes it, and `exit /b 3` as a batch file's
+  last line comes back as exit 3. Batch-file semantics differ from a `/C` line in `%` handling
+  — an undefined `%VAR%` expands to empty instead of staying literal, a
+  literal `%` is `%%`, a `for` variable is `%%i` — which the author docs
+  say. Command echo is off because it would land on stdout; only stderr
+  is logged, so nothing depended on it.
 - **In-instance protocol.** Two hidden subcommands on the copied
   binary: `__gather <dir> <pkg.gatherer> [--params-json …]` prints
   `{"ok":…,"value"|"error":…}`; `__verify <script> [--facts <json>]`
@@ -735,7 +751,7 @@ below). Bindings fixed here:
   …` (the CLI propagates the guest exit code); copy = `vmlab cp src
   box:dest`, with `src` canonicalized to an absolute path first since
   vmlab verbs run with the lab tempdir as cwd. Windows guests need the
-  guest agent in the template and `setup` written for `cmd /C`.
+  guest agent in the template and `setup` written as a batch file.
 - **Container instances (`image`).** `container "box" { image, mode = :idle,
   user = "0:0", nic { nat = true }, volume { host = "./payload" target =
   "/weave" } }`. `mode = :idle` is what `--entrypoint sleep` used to be —

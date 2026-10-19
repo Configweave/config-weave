@@ -73,7 +73,7 @@ PROSE
   h3 "A VM instance"
 
   p <<'PROSE'
-`template = "x86_64/ubuntu-24.04"` clones a full QEMU/KVM virtual machine from a vmlab template. It is the only kind with a real init system, the ability to reboot, and the ability to run Windows. The guest OS is detected from the vmlab guest agent, which the template must ship. A Windows `setup` command runs under `cmd /C` rather than `sh -c`. A fresh Windows clone takes several minutes on its first boot, so group Windows tests together.
+`template = "x86_64/ubuntu-24.04"` clones a full QEMU/KVM virtual machine from a vmlab template. It is the only kind with a real init system, the ability to reboot, and the ability to run Windows. The guest OS is detected from the vmlab guest agent, which the template must ship. A Windows `setup` command runs as a batch file, `setup.cmd` in the test's working directory, under `cmd /C` rather than `sh -c`. Double quotes in it reach programs unchanged, so `powershell -Command "..."` works. Batch-file rules apply rather than command-line ones: an undefined `%VAR%` expands to nothing instead of staying literal, a literal `%` is written `%%`, and a `for` variable is written `%%i`. A fresh Windows clone takes several minutes on its first boot, so group Windows tests together.
 PROSE
 
   callout "The guest agent runs commands with HOME=/" {
