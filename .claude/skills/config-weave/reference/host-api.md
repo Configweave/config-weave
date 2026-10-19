@@ -140,6 +140,7 @@ unchanged. This is the whole surface.
 | `symlink` | `fs::symlink(target: string, link: string) -> Result[unit, string]` | link at `link` pointing to `target` |
 | `read_link` | `fs::read_link(path: string) -> Result[string, string]` | the target of a symlink |
 | `chown` | `fs::chown(path: string, owner: Value, group: Value) -> Result[unit, string]` | Unix only (`Err` on Windows); each of `owner`/`group` is `Value::String(name)`, `Value::Int(id)` or `Value::Null` to leave it unchanged; unknown name is `Err("unknown owner '<name>'")`; does not follow a final symlink |
+| `chmod` | `fs::chmod(path: string, mode: Value) -> Result[unit, string]` | Unix only (`Err` on Windows); `mode` is `Value::Int(448)` (= `0o700`) or `Value::String` of octal digits (`"700"`, `"0700"`); other values or a mode above `0o7777` are `Err`; refuses a final symlink with `Err` instead of following it |
 
 ### `fs::metadata` map keys
 

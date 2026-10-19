@@ -431,6 +431,12 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   and `gid` are the owner ids on Unix and `Null` on Windows, where `0`
   would claim root; `mode` stays `0` there so existing `as_int()` readers
   keep working.
+- `fs::chmod` refuses a final symlink rather than following it: Linux
+  has no `lchmod`, and following would let a planted link redirect a
+  root-run chmod (`chown`'s reason for `lchown`). It lstats for a clear
+  error, then calls `fchmodat(…, AT_SYMLINK_NOFOLLOW)`, which returns
+  `EOPNOTSUPP` if a link is swapped in between, so the refusal holds
+  without a race. A string mode is octal digits only (`"0700"`, no `0o`).
 - `print`/`println` route into `log::info` via a per-thread print hook
   added upstream in wscript-vm (`set_print_hook`).
 - Property/params block fields **shadow** outer variables in WCL scope:

@@ -198,6 +198,37 @@ fs::chown("/home/alice/.ssh/known_hosts", Value::String("alice"), Value::Null)?
 SRC
   }
 
+  h2 "chmod"
+
+  code rust {
+    source = <<'SRC'
+fs::chmod(path: string, mode: Value) -> Result[unit, string]
+SRC
+  }
+
+  p <<'PROSE'
+Sets the permission bits of a path. Unix only: on Windows every call returns
+`Err`. `mode` is `Value::Int(n)`, where `448` is `0o700`, or `Value::String`
+of octal digits, as `chmod(1)` reads them: `"700"`, `"0700"` and `"0440"` all
+work. Any other value, a string with a non-octal digit, or a mode above
+`0o7777` returns `Err`. Read the result back from the `mode` key of
+`metadata`.
+PROSE
+
+  p <<'PROSE'
+`chmod` refuses a final symlink instead of following it, and returns
+`Err("cannot chmod <path>: it is a symlink, which chmod does not follow")`.
+Linux cannot change the mode of a link itself, and following it would let a
+symlink planted in a user-owned directory redirect a root-run `chmod` onto
+another file, as with `chown`. Symlinks earlier in the path are followed.
+PROSE
+
+  code rust {
+    source = <<'SRC'
+fs::chmod("/home/alice/.ssh", Value::String("0700"))?
+SRC
+  }
+
   code rust {
     source = <<'SRC'
 use fs

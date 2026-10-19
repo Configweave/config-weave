@@ -155,6 +155,15 @@ pub fn module() -> Module {
             chown(path, &owner, &group)
         },
     );
+    m.doc_next(
+        "Change a path's permission bits (Unix only). mode is an int (448 for 0o700) or a \
+         string of octal digits (\"0700\"), at most 0o7777. Refuses a final symlink rather \
+         than following it",
+    );
+    m.fn_(
+        "chmod",
+        |path: &str, mode: DynValue| -> Result<(), String> { chmod(path, &mode) },
+    );
     m
 }
 
@@ -215,6 +224,65 @@ fn chown(path: &str, owner: &DynValue, group: &DynValue) -> Result<(), String> {
 #[cfg(not(unix))]
 fn chown(_path: &str, _owner: &DynValue, _group: &DynValue) -> Result<(), String> {
     Err("fs::chown is only available on Unix".to_string())
+}
+
+/// Linux has no lchmod, so a final symlink is refused, for chown's reason.
+/// The lstat gives the error a clear message; `fchmodat` with
+/// `AT_SYMLINK_NOFOLLOW` closes the race if a link is swapped in after it.
+#[cfg(unix)]
+fn chmod(path: &str, mode: &DynValue) -> Result<(), String> {
+    let mode = parse_mode(mode)?;
+    let refuse = || format!("cannot chmod {path}: it is a symlink, which chmod does not follow");
+    let meta = std::fs::symlink_metadata(path).map_err(|e| format!("cannot chmod {path}: {e}"))?;
+    if meta.file_type().is_symlink() {
+        return Err(refuse());
+    }
+    let cpath = std::ffi::CString::new(path).map_err(|_| format!("invalid path '{path}'"))?;
+    // SAFETY: `cpath` is a valid NUL-terminated string for the call's duration.
+    let rc = unsafe {
+        libc::fchmodat(
+            libc::AT_FDCWD,
+            cpath.as_ptr(),
+            mode as libc::mode_t,
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if rc == 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    // libc's fallback also says EOPNOTSUPP when /proc is not mounted.
+    let swapped = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    if e.raw_os_error() == Some(libc::EOPNOTSUPP) && swapped {
+        return Err(refuse());
+    }
+    Err(format!("cannot chmod {path}: {e}"))
+}
+
+#[cfg(not(unix))]
+fn chmod(_path: &str, _mode: &DynValue) -> Result<(), String> {
+    Err("fs::chmod is only available on Unix".to_string())
+}
+
+/// An int is the mode itself; a string is octal digits, as chmod(1) reads
+/// them, so "700" and "0700" agree.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn parse_mode(v: &DynValue) -> Result<u32, String> {
+    let (mode, shown) = match v {
+        DynValue::Int(n) => (u32::try_from(*n).ok(), n.to_string()),
+        DynValue::String(s) if !s.is_empty() && s.bytes().all(|b| (b'0'..=b'7').contains(&b)) => {
+            (u32::from_str_radix(s, 8).ok(), format!("\"{s}\""))
+        }
+        other => {
+            return Err(format!(
+                "mode must be an int or a string of octal digits, got {other:?}"
+            ));
+        }
+    };
+    match mode {
+        Some(m) if m <= 0o7777 => Ok(m),
+        _ => Err(format!("mode {shown} is outside 0o7777")),
+    }
 }
 
 /// A name is looked up first; an all-digit string that names no account
@@ -348,6 +416,60 @@ mod tests {
         let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
         assert_eq!(meta_int(path, "uid"), uid as i64);
         assert_eq!(meta_int(path, "gid"), gid as i64);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_applies_int_and_octal_string_modes() {
+        let f = tempfile::NamedTempFile::new().unwrap();
+        let path = f.path().to_str().unwrap();
+        chmod(path, &DynValue::Int(0o700)).unwrap();
+        assert_eq!(meta_int(path, "mode"), 0o700);
+        chmod(path, &DynValue::String("0440".into())).unwrap();
+        assert_eq!(meta_int(path, "mode"), 0o440);
+        chmod(path, &DynValue::String("644".into())).unwrap();
+        assert_eq!(meta_int(path, "mode"), 0o644);
+    }
+
+    #[test]
+    fn parse_mode_rejects_bad_modes() {
+        for (mode, want) in [
+            (DynValue::Int(0o10000), "mode 4096 is outside 0o7777"),
+            (DynValue::Int(-1), "mode -1 is outside 0o7777"),
+            (
+                DynValue::String("10000".into()),
+                "mode \"10000\" is outside 0o7777",
+            ),
+        ] {
+            assert_eq!(parse_mode(&mode).unwrap_err(), want);
+        }
+        for mode in [
+            DynValue::String("0o700".into()),
+            DynValue::String("789".into()),
+            DynValue::String("".into()),
+            DynValue::Null,
+            DynValue::Bool(true),
+        ] {
+            let err = parse_mode(&mode).unwrap_err();
+            assert!(err.starts_with("mode must be"), "{mode:?}: {err}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_refuses_a_final_symlink() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("target");
+        std::fs::write(&target, "x").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let link = link.to_str().unwrap();
+        let err = chmod(link, &DynValue::Int(0o777)).unwrap_err();
+        assert!(err.contains("is a symlink"), "{err}");
+        assert!(err.contains(link), "{err}");
+        assert_eq!(meta_int(target.to_str().unwrap(), "mode"), 0o600);
     }
 
     #[cfg(unix)]
