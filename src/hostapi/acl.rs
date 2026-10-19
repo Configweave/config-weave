@@ -548,6 +548,10 @@ mod codec {
         DynValue::Map(HashMap::from([
             ("owner".to_string(), owner),
             ("protected".to_string(), DynValue::Bool(desc.protected)),
+            // A NULL DACL grants everyone full access and an empty one
+            // grants nobody anything; both have no entries, so this key
+            // is what tells them apart.
+            ("null_dacl".to_string(), DynValue::Bool(desc.dacl.is_none())),
             ("entries".to_string(), DynValue::List(entries)),
         ]))
     }
@@ -1340,6 +1344,7 @@ mod codec {
             assert_eq!(owner.get("sid"), Some(&s("S-1-5-32-544")));
             assert_eq!(owner.get("name"), Some(&s("BUILTIN\\Administrators")));
             assert_eq!(v.get("protected"), Some(&DynValue::Bool(false)));
+            assert_eq!(v.get("null_dacl"), Some(&DynValue::Bool(false)));
             let Some(DynValue::List(entries)) = v.get("entries") else {
                 panic!("no entries");
             };
@@ -1565,6 +1570,9 @@ mod codec {
                 ["unexpected entry: other of ACE type 9 rights [read_data] mask 0x1 inherit []"]
             );
             desc.dacl = None;
+            let v = to_value(&desc, Target::File, &Names::new());
+            assert_eq!(v.get("null_dacl"), Some(&DynValue::Bool(true)));
+            assert_eq!(v.get("entries"), Some(&DynValue::List(vec![])));
             let d = diff(&desc, &Names::new(), &spec, Target::File);
             assert_eq!(d, ["the DACL is NULL, which grants everyone full access"]);
         }

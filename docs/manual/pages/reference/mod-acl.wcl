@@ -40,6 +40,7 @@ SRC
       | "Key" | "Value" |
       | "`owner`" | "A map `{sid, name}`, or `Value::Null` when the descriptor has no owner." |
       | "`protected`" | "`true` when inheritance is disabled on the object." |
+      | "`null_dacl`" | "`true` when the object has a NULL DACL, which grants everyone full access. `false` for every other object, including one whose DACL is present but empty, which grants nobody anything." |
       | "`entries`" | "A list of entry maps, in the order Windows stores them, inherited entries included." |
   }
 
@@ -57,7 +58,7 @@ SRC
       | "`inherited`" | "`true` when the entry was inherited from the parent." |
   }
 
-  p "A NULL DACL, which grants everyone full access, reads as an empty `entries` list. `diff` reports it as a difference."
+  p "A NULL DACL, which grants everyone full access, reads as an empty `entries` list with `null_dacl` set to `true`. An empty DACL, which grants nobody anything, also has no entries but reads `null_dacl: false`. Check `null_dacl` before treating no entries as locked down. `diff` reports a NULL DACL as a difference."
 
   h2 "set"
 

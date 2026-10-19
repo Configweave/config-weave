@@ -307,11 +307,12 @@ fn apply(params: Value) -> Result[ApplyResult, string] {
 }
 
 #[test]
-fn a_host_module_still_wins_over_a_same_named_helper() {
+fn a_helper_named_after_a_host_module_fails_validation() {
     let dir = fixture(MARKER_USING_HELPER);
     write(dir.path(), "pkgs/probe/lib/helpers.ws", HELPER);
-    // A file named after a registered host module must not shadow it:
-    // `use fs` in the resource script still means the host API.
+    // A file named after a registered host module can never be imported:
+    // `use fs` always means the host API. Validation names the collision
+    // instead of letting the dead file sit there, and nothing is applied.
     write(
         dir.path(),
         "pkgs/probe/lib/fs.ws",
@@ -319,7 +320,10 @@ fn a_host_module_still_wins_over_a_same_named_helper() {
     );
 
     let (code, stdout, stderr) = run_in(dir.path(), &["apply", ".", "p"]);
-    assert_eq!(code, 0, "{stdout}{stderr}");
-    // The host `fs::write` ran, so the marker exists.
-    assert!(dir.path().join("m.txt").exists());
+    assert_eq!(code, 2, "{stdout}{stderr}");
+    assert!(
+        stderr.contains("lib module 'fs' is shadowed by the host module 'fs'"),
+        "{stderr}"
+    );
+    assert!(!dir.path().join("m.txt").exists());
 }

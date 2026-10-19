@@ -308,8 +308,27 @@ fn compile_lib(ctx: &Context, resolver: &WeaveResolver, dir: &Path, diags: &mut 
         .collect();
     paths.sort();
     for path in paths {
+        if let Some(diag) = shadowed_by_host_module(ctx, &path) {
+            diags.push(diag);
+            continue;
+        }
         compile_one(ctx, resolver, &path, diags);
     }
+}
+
+/// A `lib/<name>.ws` named after a host module can never be imported: the
+/// resolver gives host modules precedence, so `use <name>` binds the host
+/// API and every call into the file fails as a missing item. A new host
+/// module can collide with a helper that worked on the previous release,
+/// so this names the cause instead of leaving a missing-item error.
+fn shadowed_by_host_module(ctx: &Context, path: &Path) -> Option<Diag> {
+    let stem = path.file_stem()?.to_str()?;
+    ctx.registry().module(stem)?;
+    Some(Diag::bare(format!(
+        "{}: lib module '{stem}' is shadowed by the host module '{stem}', so `use {stem}` \
+         never reaches this file; rename the file (and its `use` lines)",
+        path.display()
+    )))
 }
 
 /// Verify a scenario script exports `run(lab: Lab) -> bool` (or the

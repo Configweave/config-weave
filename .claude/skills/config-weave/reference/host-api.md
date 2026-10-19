@@ -511,7 +511,7 @@ is the whole surface.
 
 | Function | Signature | Notes |
 |---|---|---|
-| `read` | `acl::read(path: string, opts: Value) -> Result[Value, string]` | `{owner: {sid, name}, protected: bool, entries: [{sid, name, kind, rights, mask, inherit, inherited}]}`, entries in stored order, inherited ones included |
+| `read` | `acl::read(path: string, opts: Value) -> Result[Value, string]` | `{owner: {sid, name}, protected: bool, null_dacl: bool, entries: [{sid, name, kind, rights, mask, inherit, inherited}]}`, entries in stored order, inherited ones included; `null_dacl: true` means a NULL DACL (everyone full access), which also has no entries |
 | `set` | `acl::set(path: string, spec: Value, opts: Value) -> Result[unit, string]` | replaces every explicit entry with `spec.entries`, deny before allow; never writes inherited entries |
 | `diff` | `acl::diff(path: string, spec: Value, opts: Value) -> Result[List[string], string]` | one line per difference; `[]` = converged. Exactly the comparison `set` converges, so `set` then `diff` is `[]`. Use it in `check` |
 
