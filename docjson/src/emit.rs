@@ -256,6 +256,9 @@ fn sync_test(b: &mut Block, doc: &TestDoc, diags: &mut Diags) {
     set_opt_string(b, "template", doc.template.as_deref());
     set_opt_string(b, "memory", doc.memory.as_deref());
     set_opt_string(b, "group", doc.group.as_deref());
+    set_opt_int(b, "jobs", doc.jobs);
+    set_opt_string(b, "ready", doc.ready.as_deref());
+    set_opt_int(b, "ready_timeout", doc.ready_timeout);
     set_opt_string(b, "setup", doc.setup.as_deref());
     set_opt_string(b, "verify", doc.verify.as_deref());
 
@@ -391,6 +394,13 @@ fn remove_field(b: &mut Block, name: &str) {
 fn set_opt_string(b: &mut Block, name: &str, value: Option<&str>) {
     match value {
         Some(v) => set_or_insert_field(b, name, string_literal_expr(v)),
+        None => remove_field(b, name),
+    }
+}
+
+fn set_opt_int(b: &mut Block, name: &str, value: Option<i64>) {
+    match value {
+        Some(v) => set_or_insert_field(b, name, Expr::I64(v)),
         None => remove_field(b, name),
     }
 }
@@ -572,6 +582,33 @@ package \"demo\" {
         assert_eq!(doc.resources[0].lock.as_deref(), Some("db"));
         let once = render_package(source, &doc).unwrap();
         assert!(once.contains("lock = \"db\""), "{once}");
+    }
+
+    #[test]
+    fn test_runtime_fields_roundtrip() {
+        let source = "\
+package \"demo\" {
+  description = \"d\"
+
+  test \"t\" {
+    description = \"t\"
+    image = \"debian:12\"
+    jobs = 2
+    ready = \"true\"
+    ready_timeout = 30
+    step \"s\" {
+      description = \"s\"
+      resource = \"thing\"
+    }
+  }
+}
+";
+        let doc = extract_package(&parse_for_edit(source, "t").unwrap()).unwrap();
+        assert_eq!(doc.tests[0].jobs, Some(2));
+        let once = render_package(source, &doc).unwrap();
+        assert!(once.contains("jobs = 2"), "{once}");
+        assert_eq!(doc.tests[0].ready.as_deref(), Some("true"));
+        assert!(once.contains("ready_timeout = 30"), "{once}");
     }
 
     /// A composite carries `arg` declarations and a body of steps, neither

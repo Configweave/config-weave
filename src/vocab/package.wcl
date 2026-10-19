@@ -158,6 +158,16 @@ type WeaveTestDecl {
   // `template`, and they share the instance's OS state (no reset between
   // them), so only group tests that target distinct state.
   group: utf8?
+  // Worker pool size (>= 1) for this test's in-guest check/apply runs.
+  // `config-weave test --jobs N` overrides it; omitted = the engine
+  // default inside the guest.
+  jobs: i64?
+  // A readiness command, run in the guest the way `setup` is (sh -c on
+  // linux, a .cmd batch file on windows) *before* `setup`, repeated a few
+  // seconds apart until it exits 0. Still failing after `ready_timeout`
+  // seconds (>= 1, default 300) errors the test as "did not become ready".
+  ready: utf8?
+  ready_timeout: i64?
   setup: utf8?
   verify: utf8?
   @children("step") steps: list<WeaveStepDecl>

@@ -543,7 +543,8 @@ runs each in a disposable **vmlab** instance. vmlab is the only backend
 below). Bindings fixed here:
 
 - **Shape.** `test "name" { description, image | template, memory?,
-  group?, setup?, verify?, step…, gather… }`. Exactly one of `image` (an
+  group?, jobs?, ready?, ready_timeout?, setup?, verify?, step…,
+  gather… }`. Exactly one of `image` (an
   OCI ref → a vmlab **container**) or `template` (a vmlab template ref →
   a full **VM**) is required; neither and both are validation errors that
   name the fix. `memory` is a WCL byte size emitted **unquoted** into the
@@ -574,8 +575,11 @@ below). Bindings fixed here:
   selection index so output stays in declaration order despite parallel
   runs.
 - **Three-run protocol.** Inside the instance the runner executes
-  `check`, `apply`, `apply` (all `--json --continue-on-error`, `--jobs`
-  forwarded). Run 2's internal re-check proves convergence within one
+  `check`, `apply`, `apply` (all `--json --continue-on-error`). `--jobs`
+  is `config-weave test --jobs` when given on the command line, else the
+  test's own `jobs` (an int >= 1), else omitted so the guest engine
+  defaults; the CLI flag is an `Option`, so "given" and "defaulted" are
+  told apart by `None` with no sentinel. Run 2's internal re-check proves convergence within one
   process; run 3 proves *cross-process idempotence* and that re-apply is
   a true no-op (a check that only passes on in-process state re-applies
   and surfaces as `configured`, failing the test). Expectation table
@@ -612,9 +616,37 @@ below). Bindings fixed here:
   working dir `/weave/t/<idx>-<pkg>__<test>/` (forward slashes
   throughout; `C:/weave/t/…` on windows) holding its synthesized playbook
   and facts, so grouped tests never clobber each other. `setup` runs via
-  `sh -c` on linux and `cmd /C` on windows, cd'd into that per-test dir
+  `sh -c` on linux, cd'd into that per-test dir
   (created first — exec has no working directory guarantee), and
-  `chmod +x` is linux-only.
+  `chmod +x` is linux-only. Before `setup`, an optional `ready` command
+  runs the same way (`ready.cmd` on windows, staged once and re-run),
+  every 3s until it exits 0; past `ready_timeout` (default 300s) the test
+  is an **error** — "the instance did not become ready", with the last
+  exit code and output tail — never a failure, since no assertion was
+  ever reached. A transport failure counts as one more failed attempt.
+  It is per test (grouped tests each run their own) and comes after the
+  steady-agent wait, so it judges the *workload* (a service started, a
+  first-boot task finished), not the agent. Verified on
+  `x86_64/windows-server-2025` and a `debian:12` container: a passing
+  `ready` (a quoted `powershell -Command`) then `setup` ran in order, and
+  one that never passed errored after its 8s `ready_timeout` with
+  "`ready` still failing after 8s (last exit 1: still waiting)". On windows `Workdir::script` writes it to
+  `<dir>/setup.cmd` (`@echo off`, `cd /d <dir> || exit /b 1`, the
+  script, CRLF line endings), copies that in, runs `cmd.exe /C <path>`
+  and deletes it best effort. Until 2026-10 it ran as `cmd.exe /C "cd /d
+  … && <script>"` with the script as one argv element, and the guest
+  agent's argv-to-command-line quoting delivered every `"` in it as
+  `\"`: `powershell -Command "Set-Content …"` received a string literal,
+  printed nothing and exited 0, so the setup "succeeded" having done
+  nothing. Verified on `x86_64/windows-server-2025` (2026-10-19): the
+  old path ran `powershell -NoProfile -Command "Set-Content -Path
+  C:\cw-setup.txt -Value 'ok'"`, exited 0 and wrote no file (verify
+  failed); the batch file writes it, and `exit /b 3` as a batch file's
+  last line comes back as exit 3. Batch-file semantics differ from a `/C` line in `%` handling
+  — an undefined `%VAR%` expands to empty instead of staying literal, a
+  literal `%` is `%%`, a `for` variable is `%%i` — which the author docs
+  say. Command echo is off because it would land on stdout; only stderr
+  is logged, so nothing depended on it.
 - **In-instance protocol.** Two hidden subcommands on the copied
   binary: `__gather <dir> <pkg.gatherer> [--params-json …]` prints
   `{"ok":…,"value"|"error":…}`; `__verify <script> [--facts <json>]`
@@ -677,8 +709,8 @@ below). Bindings fixed here:
   containers: `--container-jobs` (default `min(cpu, 8)`) and `--vm-jobs`
   (default 2). Total live instances ≤ container_cap + vm_cap. Within a
   group tests stay sequential (shared state). `--jobs` is unchanged — the
-  in-instance engine pool, still forwarded as `--jobs` to each
-  check/apply run. Provision/smoke failure errors every test in the
+  in-instance engine pool, forwarded as `--jobs` to each check/apply
+  run and overriding a test's own `jobs`. Provision/smoke failure errors every test in the
   group; a single test's transport trouble errors only that test and the
   rest of the group proceeds.
 - **Why vmlab only.** Docker bought fast linux containers at the cost of
@@ -721,6 +753,18 @@ below). Bindings fixed here:
   is required because `vmlab up` only blocks on agent readiness for VMs
   something *depends on*, and this lab's single VM has no dependents, so
   a slow (Windows) boot would otherwise hit osinfo's own 30s agent wait.
+  Answering `osinfo` is not the same as answering execs: right after a
+  boot or an agent refresh the agent can take one exec and drop the next
+  ("agent channel closed during exec", exit 137). So once the OS is known
+  `Guest::await_steady_agent` probes a trivial exec (`true`; `cmd.exe /C
+  exit 0` on windows) until it succeeds **3 times in a row**, any failure
+  restarting the count, 1s apart, under its own 300s deadline
+  (`READY_DEADLINE`); expiry errors naming the machine and the last
+  failure. Each probe carries a 30s vmlab exec timeout rather than the
+  3600s run one (the `Probing` transport adapter), so a hung probe cannot
+  outlive the deadline. It runs for generated test instances after `up`,
+  for scenario machines in `lab.machine(name)`, and after
+  `machine.reboot()`.
   `osinfo`'s `id` picks the protocol: **`windows`** (what the vmlab agent
   reports) or `mswindows` (what the QEMU guest agent reported before
   vmlab replaced it, still accepted) → windows, anything else → linux.
@@ -730,7 +774,7 @@ below). Bindings fixed here:
   …` (the CLI propagates the guest exit code); copy = `vmlab cp src
   box:dest`, with `src` canonicalized to an absolute path first since
   vmlab verbs run with the lab tempdir as cwd. Windows guests need the
-  guest agent in the template and `setup` written for `cmd /C`.
+  guest agent in the template and `setup` written as a batch file.
 - **Container instances (`image`).** `container "box" { image, mode = :idle,
   user = "0:0", nic { nat = true }, volume { host = "./payload" target =
   "/weave" } }`. `mode = :idle` is what `--entrypoint sleep` used to be —

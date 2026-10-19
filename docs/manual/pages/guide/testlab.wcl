@@ -34,7 +34,7 @@ SRC
   }
 
   p <<'PROSE'
-A test names its instance with exactly one of `image` or `template`, and holds steps that mirror playbook steps plus an `expect` field, defaulting to `converge`. It may also hold `gather` blocks with static params and an `expect` block of top-level key equality assertions, an optional `setup` command that runs before the protocol, an optional `verify` script that inspects the guest afterwards, a `memory` size, and a `group` name. Every value in a test must be static, because the test runs against a synthesised playbook with no variables. An unqualified `resource` or `from` resolves to the declaring package.
+A test names its instance with exactly one of `image` or `template`, and holds steps that mirror playbook steps plus an `expect` field, defaulting to `converge`. It may also hold `gather` blocks with static params and an `expect` block of top-level key equality assertions, an optional `ready` command retried until the instance is ready for the test, an optional `setup` command that runs after `ready` and before the protocol, an optional `verify` script that inspects the guest afterwards, a `memory` size, a `jobs` worker count for the in-guest runs, and a `group` name. Every value in a test must be static, because the test runs against a synthesised playbook with no variables. An unqualified `resource` or `from` resolves to the declaring package.
 PROSE
 
   h2 "The three-run protocol"
@@ -73,7 +73,7 @@ PROSE
   h3 "A VM instance"
 
   p <<'PROSE'
-`template = "x86_64/ubuntu-24.04"` clones a full QEMU/KVM virtual machine from a vmlab template. It is the only kind with a real init system, the ability to reboot, and the ability to run Windows. The guest OS is detected from the vmlab guest agent, which the template must ship. A Windows `setup` command runs under `cmd /C` rather than `sh -c`. A fresh Windows clone takes several minutes on its first boot, so group Windows tests together.
+`template = "x86_64/ubuntu-24.04"` clones a full QEMU/KVM virtual machine from a vmlab template. It is the only kind with a real init system, the ability to reboot, and the ability to run Windows. The guest OS is detected from the vmlab guest agent, which the template must ship. A Windows `setup` command runs as a batch file, `setup.cmd` in the test's working directory, under `cmd /C` rather than `sh -c`. Double quotes in it reach programs unchanged, so `powershell -Command "..."` works. Batch-file rules apply rather than command-line ones: an undefined `%VAR%` expands to nothing instead of staying literal, a literal `%` is written `%%`, and a `for` variable is written `%%i`. A fresh Windows clone takes several minutes on its first boot, so group Windows tests together.
 PROSE
 
   callout "The guest agent runs commands with HOME=/" {

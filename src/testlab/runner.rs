@@ -36,7 +36,8 @@ pub struct RunnerOptions {
     pub binaries: synth::BinaryResolver,
     /// Leave instances running for post-mortem debugging.
     pub keep: bool,
-    /// Forwarded to the in-instance check/apply runs.
+    /// `config-weave test --jobs`, when given on the command line: it
+    /// overrides every test's own `jobs` (see [`jobs_for`]).
     pub jobs: Option<usize>,
     /// Receives every lifecycle event; the human progress renderer and
     /// the `--events-ndjson` emitter are both sinks (see testlab::events).
@@ -81,6 +82,13 @@ fn expectations(e: Expect) -> [Option<StepStatus>; 3] {
 }
 
 const RUN_LABELS: [&str; 3] = ["check", "first apply", "second apply"];
+
+/// The `--jobs` a test's in-guest runs get: an explicit `config-weave test
+/// --jobs` wins, then the test's own `jobs`, else none — the guest
+/// engine's default.
+fn jobs_for(cli: Option<usize>, test: &TestDecl) -> Option<usize> {
+    cli.or(test.jobs)
+}
 
 /// One shared-instance unit of work: what to provision, and the ordered
 /// tests that run sequentially inside that one instance. The `usize` in
@@ -367,12 +375,31 @@ fn drive_one(
     slug: &str,
     report: &mut TestReport,
 ) -> Result<(), Diag> {
-    // Its own working dir, created here — setup cd's into it below.
+    // Its own working dir, created here — ready and setup cd into it.
     let wd = Guest::new(instance).test_work(slug)?;
+    prepare_test(test, ctx, &wd, READY_PAUSE)?;
 
+    wd.stage(synthesized.dir.path())?;
+
+    let facts = run_gathers(test, ctx, &mut report.gathers, &wd)?;
+    run_steps(test, jobs_for(opts.jobs, test), ctx, &mut report.steps, &wd)?;
+    report.verify = run_verify(test, ctx, &facts, &wd)?;
+    Ok(())
+}
+
+/// Pause between attempts of a test's `ready` command.
+const READY_PAUSE: Duration = Duration::from_secs(3);
+
+/// What runs in a test's working dir before anything is staged there:
+/// `ready` until it passes, then `setup` once.
+fn prepare_test(test: &TestDecl, ctx: &TestCtx, wd: &Workdir, pause: Duration) -> Result<(), Diag> {
+    if let Some(ready) = &test.ready {
+        ctx.phase(TestPhase::Ready);
+        await_ready(wd, ready, Duration::from_secs(test.ready_timeout), pause)?;
+    }
     if let Some(setup) = &test.setup {
         ctx.phase(TestPhase::Setup);
-        let out = wd.exec_in(setup)?;
+        let out = wd.exec_in("setup", setup)?;
         ctx.log("setup", &out.stderr);
         if out.exit_code != 0 {
             return Err(Diag::bare(format!(
@@ -382,13 +409,40 @@ fn drive_one(
             )));
         }
     }
-
-    wd.stage(synthesized.dir.path())?;
-
-    let facts = run_gathers(test, ctx, &mut report.gathers, &wd)?;
-    run_steps(test, opts, ctx, &mut report.steps, &wd)?;
-    report.verify = run_verify(test, ctx, &facts, &wd)?;
     Ok(())
+}
+
+/// Run a test's `ready` command, `pause` apart, until it exits 0. Still
+/// failing once `timeout` has passed is an error saying the instance never
+/// became ready, with the last attempt's exit code and output. A transport
+/// failure counts as one more failed attempt: the guest may be what is not
+/// ready yet.
+fn await_ready(wd: &Workdir, script: &str, timeout: Duration, pause: Duration) -> Result<(), Diag> {
+    let staged = wd.script("ready", script)?;
+    let start = Instant::now();
+    let result = loop {
+        let last = match staged.run() {
+            Ok(out) if out.exit_code == 0 => break Ok(()),
+            Ok(out) => {
+                let output = if out.stderr.trim().is_empty() {
+                    &out.stdout
+                } else {
+                    &out.stderr
+                };
+                format!("last exit {}: {}", out.exit_code, tail(output))
+            }
+            Err(d) => format!("last attempt failed: {}", d.message),
+        };
+        if start.elapsed() >= timeout {
+            break Err(Diag::bare(format!(
+                "the instance did not become ready: `ready` still failing after {}s ({last})",
+                timeout.as_secs_f64()
+            )));
+        }
+        std::thread::sleep(pause);
+    };
+    let _ = staged.remove();
+    result
 }
 
 /// Run every gather test through `__gather`, assert expectations, and
@@ -456,7 +510,7 @@ fn run_gathers(
 /// The three engine runs and the expectation table.
 fn run_steps(
     test: &TestDecl,
-    opts: &RunnerOptions,
+    jobs: Option<usize>,
     ctx: &TestCtx,
     results: &mut Vec<TestStepResult>,
     wd: &Workdir,
@@ -475,7 +529,7 @@ fn run_steps(
     let mut reports: Vec<JsonRunReport> = Vec::with_capacity(3);
     for (i, mode) in ["check", "apply", "apply"].iter().enumerate() {
         ctx.phase(RUN_PHASES[i].clone());
-        let out = wd.run(mode, Some(synth::PLAY), opts.jobs, RUN_LABELS[i])?;
+        let out = wd.run(mode, Some(synth::PLAY), jobs, RUN_LABELS[i])?;
         ctx.log(RUN_IDS[i], &out.stderr);
         reports.push(out.report);
     }
@@ -761,6 +815,173 @@ fn wscript_err(e: wscript::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::TestStep;
+    use crate::testlab::backend::GuestOs;
+    use crate::testlab::guest::fake::{FakeGuest, exited, failed, printed};
+
+    const EMPTY_REPORT: &str = r#"{"playbook":"p","version":"0","play":"test","mode":"apply","exit_code":0,"duration_secs":0.0,"gathered":[],"steps":[]}"#;
+
+    /// A one-step test, with `jobs` as declared.
+    fn test_decl(jobs: Option<usize>) -> TestDecl {
+        TestDecl {
+            name: "t".into(),
+            description: String::new(),
+            target: TestTarget::Container("debian:12".into()),
+            memory: None,
+            group: None,
+            jobs,
+            ready: None,
+            ready_timeout: 300,
+            setup: None,
+            verify: None,
+            steps: vec![TestStep {
+                name: "s".into(),
+                description: String::new(),
+                package: "core".into(),
+                resource: "r".into(),
+                expect: Expect::Converge,
+                requires: Vec::new(),
+                condition_src: None,
+                properties_src: None,
+                span: (0, 0),
+            }],
+            gathers: Vec::new(),
+            span: (0, 0),
+        }
+    }
+
+    /// The `--jobs` value each of the three engine runs was given, from
+    /// driving `run_steps` with `cli` against a test declaring `declared`.
+    fn jobs_seen(cli: Option<usize>, declared: Option<usize>) -> Vec<Option<String>> {
+        let test = test_decl(declared);
+        let fake = FakeGuest::new(GuestOs::Linux);
+        let wd = Guest::new(&fake).test_work("0-core__t").unwrap();
+        fake.queue([
+            printed(EMPTY_REPORT),
+            printed(EMPTY_REPORT),
+            printed(EMPTY_REPORT),
+        ]);
+        let sink = super::super::events::null_sink();
+        let ctx = TestCtx {
+            sink: &sink,
+            package: "core",
+            test: "t",
+        };
+        let mut results = Vec::new();
+        run_steps(&test, jobs_for(cli, &test), &ctx, &mut results, &wd).unwrap();
+
+        // [0] is the workdir mkdir; the three runs follow.
+        fake.argvs()[1..]
+            .iter()
+            .map(|argv| {
+                let at = argv.iter().position(|a| a == "--jobs")?;
+                argv.get(at + 1).cloned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_tests_own_jobs_reaches_every_run() {
+        assert_eq!(jobs_seen(None, Some(3)), vec![Some("3".to_string()); 3]);
+    }
+
+    #[test]
+    fn an_explicit_cli_jobs_overrides_the_tests_own() {
+        assert_eq!(jobs_seen(Some(8), Some(3)), vec![Some("8".to_string()); 3]);
+        assert_eq!(jobs_seen(Some(8), None), vec![Some("8".to_string()); 3]);
+    }
+
+    #[test]
+    fn neither_leaves_the_guest_engine_default() {
+        assert_eq!(jobs_seen(None, None), vec![None; 3]);
+    }
+
+    // --------------------------------------------------------------- ready
+
+    /// Drive `prepare_test` for a test with `ready` and `setup`, and say
+    /// what happened.
+    fn prepare(fake: &FakeGuest, ready_timeout: u64) -> Result<(), Diag> {
+        let mut test = test_decl(None);
+        test.ready = Some("systemctl is-active --quiet sshd".into());
+        test.ready_timeout = ready_timeout;
+        test.setup = Some("touch marker".into());
+        let wd = Guest::new(fake).test_work("0-core__t").unwrap();
+        let sink = super::super::events::null_sink();
+        let ctx = TestCtx {
+            sink: &sink,
+            package: "core",
+            test: "t",
+        };
+        prepare_test(&test, &ctx, &wd, Duration::ZERO)
+    }
+
+    /// The scripts the shell execs ran, after the workdir mkdir.
+    fn scripts_run(fake: &FakeGuest) -> Vec<String> {
+        fake.argvs()[1..].iter().map(|a| a[2].clone()).collect()
+    }
+
+    #[test]
+    fn ready_is_retried_until_it_passes_then_setup_runs() {
+        let fake = FakeGuest::new(GuestOs::Linux)
+            .replying([exited(0), failed(3, "inactive")])
+            .breaking("agent channel closed during exec");
+        prepare(&fake, 300).expect("ready on the third try");
+
+        let ready = "cd /weave/t/0-core__t || exit 1\nsystemctl is-active --quiet sshd";
+        assert_eq!(
+            scripts_run(&fake),
+            vec![
+                ready.to_string(),
+                ready.to_string(),
+                ready.to_string(),
+                "cd /weave/t/0-core__t || exit 1\ntouch marker".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn ready_that_never_passes_errors_without_running_setup() {
+        let fake = FakeGuest::new(GuestOs::Linux)
+            .replying([exited(0)])
+            .otherwise(failed(3, "sshd: inactive"));
+        let err = prepare(&fake, 1).expect_err("never ready");
+
+        assert!(
+            err.message.contains("the instance did not become ready"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("after 1s"), "{}", err.message);
+        assert!(err.message.contains("last exit 3"), "{}", err.message);
+        assert!(err.message.contains("sshd: inactive"), "{}", err.message);
+        assert!(
+            scripts_run(&fake)
+                .iter()
+                .all(|s| !s.contains("touch marker")),
+            "setup must not run: {:?}",
+            scripts_run(&fake)
+        );
+    }
+
+    #[test]
+    fn a_windows_ready_is_staged_once_and_removed() {
+        let fake = FakeGuest::new(GuestOs::Windows).replying([exited(0), failed(1, "")]);
+        prepare(&fake, 300).expect("ready on the second try");
+
+        let ready = "C:\\weave\\t\\0-core__t\\ready.cmd";
+        let setup = "C:\\weave\\t\\0-core__t\\setup.cmd";
+        assert_eq!(
+            scripts_run(&fake),
+            vec![
+                ready.to_string(),
+                ready.to_string(),
+                format!("del /f /q {ready}"),
+                setup.to_string(),
+                format!("del /f /q {setup}"),
+            ]
+        );
+        assert_eq!(fake.copies().len(), 2);
+    }
 
     #[test]
     fn expectation_table_matches_the_design() {

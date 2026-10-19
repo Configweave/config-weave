@@ -225,6 +225,15 @@ pub struct TestDoc {
     pub memory: Option<String>,
     #[serde(default, skip_serializing_if = "is_none")]
     pub group: Option<String>,
+    /// Worker pool size for the in-guest runs.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub jobs: Option<i64>,
+    /// Readiness command, retried before `setup`.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub ready: Option<String>,
+    /// Seconds `ready` may keep failing; None = the default (300).
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub ready_timeout: Option<i64>,
     #[serde(default, skip_serializing_if = "is_none")]
     pub setup: Option<String>,
     #[serde(default, skip_serializing_if = "is_none")]
