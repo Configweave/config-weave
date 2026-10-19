@@ -4,6 +4,7 @@
 //! platform so compilation, validation and `.wscripti` emission are identical
 //! everywhere. Foreign-platform functions return runtime errors.
 
+pub mod acl;
 pub mod archive;
 pub mod com;
 pub mod data;
@@ -62,6 +63,7 @@ pub fn context() -> Context {
         .module(data::module())
         .module(template::module())
         .module(registry::module())
+        .module(acl::module())
         .module(service::module())
         .module(com::module())
         .register_type::<CheckResult>()
