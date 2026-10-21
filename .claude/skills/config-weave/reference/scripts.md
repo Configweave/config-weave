@@ -252,12 +252,14 @@ of any other name is a compile error at validation.
 | `http` | config-weave | Fetch and download. |
 | `hash` | config-weave | Digests of strings and files. |
 | `encoding` | config-weave | Base64, UTF-8 and UTF-16LE conversions over `List[int]` bytes. |
+| `version` | config-weave | Parse, compare and range-match versions with any number of parts. |
 | `archive` | config-weave | Extract archives. |
 | `env` | config-weave | Environment variables. |
 | `sys` | config-weave | Platform facts: family, OS name, CPU count. |
 | `data` | config-weave | Parse and write INI. |
 | `template` | config-weave | Render a Tera template against a map (autoescape off). |
 | `registry` | config-weave, Windows only | Registry keys and values. |
+| `acl` | config-weave, Windows only | Owner and DACL of files, directories and registry keys. |
 | `service` | config-weave, Windows only | Windows services. |
 | `com` | config-weave, Windows only | COM via IDispatch, WMI queries. |
 | `testlab` | config-weave, scenario scripts only | `Lab` and `Machine` handles. |

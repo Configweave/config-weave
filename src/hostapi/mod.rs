@@ -22,6 +22,7 @@ pub mod sys;
 pub mod template;
 pub mod testlab;
 pub mod types;
+pub mod version;
 #[cfg(windows)]
 pub mod windows_impl;
 
@@ -57,6 +58,7 @@ pub fn context() -> Context {
         .module(http::module())
         .module(hash::module())
         .module(encoding::module())
+        .module(version::module())
         .module(archive::module())
         .module(env::module())
         .module(sys::module())

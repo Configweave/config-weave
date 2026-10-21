@@ -6,7 +6,7 @@ page guide_host_api {
   chapter_header "The host API" {
     kicker       = "The guide · explanation"
     reading_time = "6 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-21"
     version      = "config-weave 0.1.0"
   }
 
@@ -36,6 +36,7 @@ PROSE
     li "[http](ref_mod_http) fetches and downloads over HTTP."
     li "[hash](ref_mod_hash) computes digests of strings and files."
     li "[encoding](ref_mod_encoding) converts between strings, bytes and base64, including the UTF-16LE form Windows uses."
+    li "[version](ref_mod_version) parses and compares versions with any number of parts and matches them against npm-style ranges such as `>=14.38` or `^7`."
     li "[archive](ref_mod_archive) extracts archives."
     li "[env](ref_mod_env) reads and writes environment variables."
     li "[sys](ref_mod_sys) reports the platform: family, OS name, CPU count and similar facts."

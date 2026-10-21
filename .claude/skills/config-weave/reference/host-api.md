@@ -48,6 +48,7 @@ This is the whole set of registered modules.
 | `http` | HTTP client (rustls, no system TLS) | all | config-weave |
 | `hash` | SHA-256, SHA-512, MD5 digests | all | config-weave |
 | `encoding` | base64, UTF-8 and UTF-16LE bytes | all | config-weave |
+| `version` | parse, compare and range-match versions (any number of parts) | all | config-weave |
 | `archive` | extract zip and tar.gz | all | config-weave |
 | `env` | process environment and host identity | all | config-weave |
 | `sys` | OS and hardware facts | all | config-weave |
@@ -66,7 +67,7 @@ This is the whole set of registered modules.
 | `testlab` | scenario driver handles (`Lab`, `Machine`) | scenario scripts only | config-weave |
 
 `testlab` is registered only in the context scenario driver scripts compile
-and run against. Every other script sees the twenty-two modules above it.
+and run against. Every other script sees the twenty-three modules above it.
 
 ### The Value type
 
@@ -290,6 +291,50 @@ with an element outside `0..=255` is an `Err`. This is the whole surface.
 ```rust
 // Windows unattend hidden password: base64(UTF-16LE(password + element name))
 let hidden = encoding::base64_encode(encoding::utf16le(password + "Password"))?
+```
+
+## version
+
+`use version`. Parses and compares version strings with any number of numeric
+parts and matches them against npm (node-semver) ranges. Pure computation,
+cross-platform. Every `Err` quotes the bad input and, for a parse failure, the
+byte offset. This is the whole surface.
+
+| Function | Signature | Notes |
+|---|---|---|
+| `parse` | `version::parse(v: string) -> Result[Value, string]` | `{parts: List[int], pre: string, build: string}`; `pre`/`build` are `""` when absent |
+| `compare` | `version::compare(a: string, b: string) -> Result[int, string]` | `-1`, `0` or `1` |
+| `matches` | `version::matches(v: string, range: string) -> Result[bool, string]` | |
+| `max_matching` | `version::max_matching(vs: List[string], range: string) -> Result[Option[string], string]` | newest match as written, `None` when none; any unparsable entry is an `Err` |
+
+Version rules: parts compare as integers (`14.9 < 14.38`); a missing part is 0
+(`14.38` == `14.38.0.0`); a leading `v` is accepted; a pre-release `-…` sorts
+before its release and compares per semver §11; build metadata `+…` is ignored.
+A non-numeric or empty part (`1:2.3-4`, `1.2~rc1`, `1.2a`, `1..2`) is an `Err`:
+distro package versions need the package manager's own rules.
+
+| Range | Meaning |
+|---|---|
+| `1.2.3`, `=1.2.3`, `15.0.4490.9` | exact: three or more parts are exact under every operator |
+| `7`, `14.38`, `=1.2`, `7.x`, `20.2.*` | prefix: a one- or two-part version is an x-range (`7` = `>=7 <8`, `=1.2` = `>=1.2 <1.3`) |
+| `>=14.38`, `>1.2`, `<2`, `<=1.4.7` | comparisons; a partial names its prefix, as in npm: `>1.2` = `>=1.3`, `<=1.2` = `<1.3`, `>1` = `>=2`, `<=1` = `<2`, `>=`/`<` unchanged |
+| `>=14.38 <15` | AND (space separated; `>= 14.38` also accepted) |
+| `^6 \|\| ^7` | OR |
+| `^7.5.0` / `^0.2.3` / `^0.0.3` / `^15.0.4490.9` | `<8` / `<0.3` / `<0.0.4` / `<16`: bump the first non-zero part written (all zero: the last written) |
+| `~20.2.1` / `~15.0.4490.9` / `~1` | `<20.3` / `<15.1` / `<2`: bump the second part, or the first if only one is written |
+| `1.2.3 - 2.3.4` | inclusive; a partial upper bound covers its prefix (`1.2.3 - 2.3` = `<2.4`) |
+| `*`, `x`, empty | any release |
+
+A pre-release version matches only when a comparator in the same `||`
+alternative names a pre-release on the same numeric parts, so `^7` and `*` do
+not match `7.6.0-preview.3` but `>=7.6.0-preview.1` does.
+
+```rust
+if version::matches(have, ">=14.38")? { return Ok(CheckResult::AlreadyConfigured) }
+let pick = match version::max_matching(available, "~20.2")? {
+    Some(v) => v,
+    None => return Err("no 20.2 release available"),
+}
 ```
 
 ## archive

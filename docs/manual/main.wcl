@@ -46,6 +46,7 @@ import "./pages/reference/mod-shell.wcl"
 import "./pages/reference/mod-http.wcl"
 import "./pages/reference/mod-hash.wcl"
 import "./pages/reference/mod-encoding.wcl"
+import "./pages/reference/mod-version.wcl"
 import "./pages/reference/mod-archive.wcl"
 import "./pages/reference/mod-env.wcl"
 import "./pages/reference/mod-sys.wcl"
@@ -140,6 +141,7 @@ site manual {
       chapter "http module"              { page = ref_mod_http }
       chapter "hash module"              { page = ref_mod_hash }
       chapter "encoding module"          { page = ref_mod_encoding }
+      chapter "version module"           { page = ref_mod_version }
       chapter "archive module"           { page = ref_mod_archive }
       chapter "env module"               { page = ref_mod_env }
       chapter "sys module"               { page = ref_mod_sys }
