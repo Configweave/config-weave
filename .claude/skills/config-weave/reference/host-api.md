@@ -232,14 +232,14 @@ if !out.success { return Ok(CheckResult::NotConfigured) }
 ## http
 
 `use http`. HTTP client built on rustls. Cross-platform. Every function takes an
-options `Value` as its last argument. A response with an error status is still
-`Ok`; inspect `status`. This is the whole surface.
+options `Value` as its last argument. A `get`/`post` response with an error
+status is still `Ok`; inspect `status`. This is the whole surface.
 
 | Function | Signature | Notes |
 |---|---|---|
 | `get` | `http::get(url: string, opts: Value) -> Result[HttpResponse, string]` | GET |
 | `post` | `http::post(url: string, body: string, opts: Value) -> Result[HttpResponse, string]` | POST `body`; set the content type through `headers` |
-| `download` | `http::download(url: string, dest: string, opts: Value) -> Result[int, string]` | writes the body to the file at `dest`, returns bytes written |
+| `download` | `http::download(url: string, dest: string, opts: Value) -> Result[int, string]` | writes the body to the file at `dest`, returns bytes written; atomic, see below |
 
 ### HTTP options map
 
@@ -250,6 +250,32 @@ Pass `Value::Null` for defaults. Any other key is an `Err`.
 | `headers` | map of string | request headers; a non-string value is an `Err` |
 | `timeout` | int or float | seconds before the request is abandoned |
 | `redirects` | bool | follow redirects, default `true` |
+| `retries` | int | `download` only: extra attempts after the first, default `0` |
+| `size` | int | `download` only: expected byte count of the file |
+| `sha256` | string | `download` only: expected SHA-256 of the file, 64 hex digits, any case |
+
+`get`/`post` reject `retries`, `size` and `sha256` as unknown keys.
+
+### download behaviour
+
+- Streams into `<dest>.part` in the same directory, fsyncs, and renames onto
+  `dest` only after every check passes. On failure `.part` is removed and an
+  existing `dest` is untouched, so `fs::exists(dest)` never sees a partial
+  download. A stale `<dest>.part` from an earlier call is deleted first.
+- Asks for `Accept-Encoding: identity`. The body must match `Content-Length`
+  when the server sends one, then `size`, then `sha256` (over the whole file).
+- Retried (with `retries`): transport errors, 5xx, 429, a body shorter than
+  `Content-Length`/`size`. Not retried: other non-2xx statuses, a body longer
+  than expected, a `sha256` mismatch. Backoff 1s, 2s, 4s… capped at 30s.
+- After a part-way failure on a response with `Accept-Ranges: bytes`, the next
+  attempt sends `Range: bytes=<n>-` (+ `If-Range` with the ETag or
+  Last-Modified). Kept only on `206` whose `Content-Range` starts at n;
+  otherwise it restarts from byte 0.
+- `Err` text: `download <url> failed: <reason>`, or `download <url> failed
+  after <k> attempts: <reason>` when `retries` is set.
+
+With `sha256` set, the `http::download` + `hash::sha256_file` + compare
+pattern collapses into the one call.
 
 ### HttpResponse
 

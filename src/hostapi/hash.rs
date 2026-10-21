@@ -14,7 +14,7 @@ fn hex(bytes: &[u8]) -> String {
 /// downloaded archives. `digest` 0.11 dropped the `io::Write` impl on
 /// hashers, so this reads and `update`s explicitly instead of
 /// `io::copy`ing into one.
-fn digest_file<D: Digest>(path: &str) -> Result<String, String> {
+pub(crate) fn digest_file<D: Digest>(path: &str) -> Result<String, String> {
     use std::io::Read;
 
     let mut file = std::fs::File::open(path).map_err(|e| format!("cannot open {path}: {e}"))?;

@@ -431,6 +431,24 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   the start (`registry::read_typed`, `registry::value_names`,
   `service::restart`). Unknown option keys are an `Err`, including
   `stop_dependents` on `start_with`.
+- `http::download` is atomic: it streams into `<dest>.part` beside `dest`,
+  fsyncs, and renames onto `dest` only after the length, `size` and
+  `sha256` checks pass (`rename` replaces on Linux and Windows). Any
+  failure removes `.part` and leaves an existing `dest` alone; a stale
+  `.part` from an earlier call is deleted, never resumed. It sends
+  `Accept-Encoding: identity`, because ureq's default gzip decoding strips
+  `Content-Length` and makes byte ranges meaningless. Its download-only
+  opts (`retries`, `size`, `sha256`) are unknown keys to `get`/`post`.
+  Retried: ureq transport errors (Io, Timeout, HostNotFound,
+  ConnectionFailed, Protocol, BodyStalled), 5xx, 429, a short body. Not
+  retried: other statuses, an over-long body, a sha256 mismatch. Backoff
+  1s doubling, capped at 30s. Resume happens only inside one call, only
+  when the previous full response had `Accept-Ranges: bytes` and a
+  `Content-Length`; it sends `Range` + `If-Range` (ETag, else
+  Last-Modified) and keeps the bytes only on a `206` whose Content-Range
+  starts at the offset, otherwise it restarts from byte 0. A body that is
+  complete per the server but short of `size` restarts rather than
+  resumes.
 - `service` `stop_dependents` stops dependents in EnumDependentServicesW's
   order, not sorted: the SCM returns transitive dependents in reverse
   start order, which is the only safe stop order when dependents depend on
