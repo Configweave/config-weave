@@ -5,8 +5,8 @@ page ref_mod_http {
 
   chapter_header "http module" {
     kicker       = "Reference · reference"
-    reading_time = "2 min read"
-    updated      = "2026-09-02"
+    reading_time = "4 min read"
+    updated      = "2026-10-21"
     version      = "config-weave 0.1.0"
   }
 
@@ -15,8 +15,8 @@ page ref_mod_http {
 on the system TLS library. Every function returns `Result[…, string]` and
 takes an options `Value` as its last argument. The options argument is
 required: pass `Value::Null` for the defaults, or a `Value::Map` with any of
-the keys below. A response with an error status is still `Ok`; inspect
-`status`.
+the keys below. Any other key is an `Err`. A `get` or `post` response with
+an error status is still `Ok`; inspect `status`.
 PROSE
 
   table {
@@ -25,7 +25,12 @@ PROSE
       | "`headers`" | "map of string" | "request headers" |
       | "`timeout`" | "int or float" | "seconds before the request is abandoned" |
       | "`redirects`" | "bool" | "follow redirects, default `true`" |
+      | "`retries`" | "int" | "`download` only. Extra attempts after the first, default `0`." |
+      | "`size`" | "int" | "`download` only. The expected byte count of the file." |
+      | "`sha256`" | "string" | "`download` only. The expected SHA-256 of the file, 64 hex digits in either case." |
   }
+
+  p "`get` and `post` reject `retries`, `size` and `sha256` as unknown options."
 
   h2 "HttpResponse"
 
@@ -69,7 +74,49 @@ http::download(url: string, dest: string, opts: Value) -> Result[int, string]
 SRC
   }
 
-  p "Fetches `url` and writes the body to the file at `dest`. It returns the number of bytes written. Pair it with the [archive module](ref_mod_archive) to unpack what was fetched."
+  p <<'PROSE'
+Fetches `url` and writes the body to the file at `dest`. It returns the
+number of bytes written. Pair it with the [archive module](ref_mod_archive)
+to unpack what was fetched.
+
+The body is written to `<dest>.part` in the same directory. When every check
+passes, the file is flushed to disk and renamed onto `dest`, replacing any
+file already there. When the call fails, it removes `<dest>.part` and leaves
+an existing `dest` as it was, so `dest` never holds a partial download. A
+`<dest>.part` left by an earlier, interrupted call is deleted when the next
+call starts.
+
+An attempt fails in these cases:
+PROSE
+
+  table {
+    rows:
+      | "Failure" | "Retried" |
+      | "A transport error: connect, reset, timeout, DNS." | "yes" |
+      | "Status 5xx or 429." | "yes" |
+      | "The body is shorter than `Content-Length` or `size`." | "yes" |
+      | "Any other status that is not 2xx, such as 404." | "no" |
+      | "The body is longer than `Content-Length` or `size`." | "no" |
+      | "The file does not match `sha256`." | "no" |
+  }
+
+  p <<'PROSE'
+With `retries` set to n, a retried failure is followed by up to n more
+attempts. The pause before each is 1s, 2s, 4s and so on, capped at 30s.
+When an attempt fails part way and its response carried
+`Accept-Ranges: bytes`, the next attempt asks for the rest with
+`Range: bytes=<n>-`, plus `If-Range` with the ETag or Last-Modified value.
+The bytes already received are kept only when the server answers `206` with
+a `Content-Range` starting at n. Otherwise the download starts again from
+the first byte. The `size` and `sha256` checks cover the whole assembled
+file.
+
+The request asks for the identity encoding, so the bytes written are the
+bytes the server stores. The error names the URL and the reason; with
+`retries` set it also gives the attempt count, for example
+`download https://example.org/big.iso failed after 3 attempts: body ended at
+1048576 of 4194304 bytes`.
+PROSE
 
   code rust {
     source = <<'SRC'
@@ -77,6 +124,12 @@ use http
 use value
 
 let n = http::download("https://example.org/tool.tar.gz", "/tmp/tool.tar.gz", Value::Null)?
+
+let opts = Value::Map(#{
+    "retries": Value::Int(3),
+    "sha256": Value::String("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"),
+})
+let n = http::download("https://example.org/big.iso", "/srv/media/big.iso", opts)?
 SRC
   }
 }
