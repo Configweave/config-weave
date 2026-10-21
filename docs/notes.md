@@ -552,6 +552,41 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
     SeTakeOwnershipPrivilege on the thread token only, reverted after the
     call, so other worker threads never hold them. A failure to enable
     them is an `Err` only when the owner actually differs.
+- `version` (pure, all platforms) is a hand-written N-part generalisation
+  of node-semver: the `semver` crate takes exactly three parts and Windows
+  versions have four. Parts are `u64` (overflow is an `Err`); a missing part
+  is 0 when comparing; build metadata is ignored for order and equality.
+  Bindings where node-semver assumes three parts:
+  - "Full" is three parts. A range version with fewer (`7`, `14.38`), or
+    with a wildcard, is a partial and names the x-range of its prefix under
+    every operator, as node-semver desugars it: bare `1.2` and `=1.2` are
+    `>=1.2 <1.3`, `>1.2` is `>=1.3`, `>=1.2` and `<1.2` stay as written,
+    `<=1.2` is `<1.3`; `>1.2` and `>1.2.x` agree. An author copying `<=1.4`
+    from npm gets npm's meaning. Three or more parts are exact under every
+    operator, so `15.0.4490.9` does not match `15.0.4490.9.1`; the
+    version-side zero padding (`14.38` == `14.38.0.0`) is unchanged. A
+    pre-release makes a version non-partial (`>=7.6-preview` is a single
+    bound). A hyphen upper bound follows the same rule (`1.2.3 - 2.3` is
+    `<2.4`). `<*`/`>*` match nothing.
+  - `^` bumps the first non-zero part among those written and drops the
+    rest (`^15.0.4490.9` is `<16`, `^0.0.3` is `<0.0.4`); when every written
+    part is zero it bumps the last written (`^0.0` is `<0.1`). `~` bumps the
+    second part when two or more are written, else the first (`~15.0.4490.9`
+    is `<15.1`, `~1` is `<2`). `~>` is accepted as `~`, as in node-semver.
+  - Upper bounds are plain `<N` rather than node's `<N-0`: the pre-release
+    rule (a pre-release matches only when a comparator in the same `||`
+    alternative names one on the same zero-padded parts) already keeps
+    `2.0.0-alpha` out of `^1.2.3-beta`.
+  - Stricter than node-semver: a number after a wildcard (`1.x.3`), a
+    pre-release on a wildcard, a dangling `||`, an operator inside a hyphen
+    range and any stray term beside one are `Err`s with a byte offset.
+  - `max_matching` returns `Option[string]` (the binding layer carries
+    `Option` like `env::get` and `registry::read`, so no `Value::Null`
+    stand-in), the entry as written; of equal entries the first wins.
+    Every entry must parse, so a bad version in a feed is an `Err` rather
+    than a silently skipped candidate.
+  - `parse` returns parts as script ints, so a part above `i64::MAX` is an
+    `Err` there only; `compare`/`matches` handle the full `u64` range.
 - `fs::metadata` reports `mode` as the permission bits only
   (`st_mode & 0o7777`); before 2026-10 it leaked the file-type bits
   (`33188` for a `0644` file) despite documenting permission bits. `uid`

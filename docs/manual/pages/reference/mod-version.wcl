@@ -1,0 +1,183 @@
+// Part III — Reference. Declared mode: reference.
+page ref_mod_version {
+  sites = [:manual]
+  title = "version module"
+
+  chapter_header "version module" {
+    kicker       = "Reference · reference"
+    reading_time = "4 min read"
+    updated      = "2026-10-21"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+`use version` parses and compares version strings and matches them against
+ranges written in the npm (node-semver) range syntax, so every resource
+that takes a `version` parameter applies the same rules. It is pure
+computation: it touches nothing on the host and behaves identically on
+every platform. Every function returns `Result[…, string]`.
+
+A version may have any number of numeric parts, not only semver's three,
+so Windows versions such as `15.0.4490.9` and `10.0.26100.1742` work
+directly. Distro package versions (a Debian epoch `1:2.3-4`, an RPM `~`)
+are not supported: compare those with the package manager's own rules.
+PROSE
+
+  h2 "parse"
+
+  code rust {
+    source = <<'SRC'
+version::parse(v: string) -> Result[Value, string]
+SRC
+  }
+
+  p "Parses `v` and returns a map with these keys."
+
+  table {
+    rows:
+      | "Key" | "Value" |
+      | "`parts`" | "The numeric parts as a list of ints, as written: `15.0.4490.9` gives `[15, 0, 4490, 9]` and `14.38` gives `[14, 38]`." |
+      | "`pre`" | "The pre-release after `-`, without the dash, such as `preview.3`. `\"\"` when there is none." |
+      | "`build`" | "The build metadata after `+`, without the plus. `\"\"` when there is none." |
+  }
+
+  p "A part larger than a script `int` (above 9223372036854775807) is an `Err` from `parse` only; `compare`, `matches` and `max_matching` accept parts up to 18446744073709551615."
+
+  h2 "compare"
+
+  code rust {
+    source = <<'SRC'
+version::compare(a: string, b: string) -> Result[int, string]
+SRC
+  }
+
+  p "Returns `-1` when `a` is older than `b`, `0` when they are equal and `1` when `a` is newer. `Err` names whichever argument does not parse."
+
+  h2 "matches"
+
+  code rust {
+    source = <<'SRC'
+version::matches(v: string, range: string) -> Result[bool, string]
+SRC
+  }
+
+  p "Returns `true` when `v` satisfies `range`. `Err` when either does not parse; a bad version is reported before the range is read."
+
+  h2 "max_matching"
+
+  code rust {
+    source = <<'SRC'
+version::max_matching(vs: List[string], range: string) -> Result[Option[string], string]
+SRC
+  }
+
+  p "Returns the newest entry of `vs` that satisfies `range`, exactly as written in the list, or `None` when no entry matches or the list is empty. Of entries that compare equal (`1.2` and `1.2.0`), the first wins. Every entry must parse, whether it matches or not: an entry that does not parse is an `Err` naming it, never silently skipped."
+
+  h2 "Version rules"
+
+  list {
+    li "A version is numeric parts separated by `.`, then an optional pre-release `-…`, then optional build metadata `+…`. A leading `v` or `V` is accepted (`v7.6.7`), and surrounding whitespace is ignored."
+    li "Parts compare as integers, never as strings: `14.9` is older than `14.38`."
+    li "A missing part counts as 0: `14.38` equals `14.38.0.0`, and `7` equals `7.0.0`."
+    li "A pre-release sorts before its release: `7.6.0-preview.3` is older than `7.6.0`. Pre-releases compare as in semver §11: dot-separated identifiers left to right, numeric identifiers numerically and before alphanumeric ones, alphanumeric ones in ASCII order, and a longer set wins when every preceding identifier is equal."
+    li "Build metadata is ignored for ordering and equality: `1.2.3+abc` equals `1.2.3`."
+    li "A part that is not a number (`1:2.3-4`, `1.2~rc1`, `1.2a`), an empty part (`1..2`, `1.2.`), an empty pre-release or build identifier, or a character other than letters, digits and `-` in one, is an `Err` naming the input and the byte offset."
+  }
+
+  p "The semver precedence example, oldest first:"
+
+  code text {
+    source = <<'SRC'
+1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta
+  < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0
+SRC
+  }
+
+  h2 "Range syntax"
+
+  table {
+    rows:
+      | "Form" | "Meaning" |
+      | "`1.2.3`, `=1.2.3`, `15.0.4490.9`" | "Exactly that version. A version with three or more parts is exact under every operator; missing parts are 0, so `1.2.3` also matches `1.2.3.0`." |
+      | "`>=14.38`, `>1.2`, `<2`, `<=1.4.7`" | "Comparisons. A partial version (one or two parts) names the x-range of its prefix, as in npm: `>1.2` is `>=1.3`, `>=1.2` is `>=1.2`, `<1.2` is `<1.2`, `<=1.2` is `<1.3`, `>1` is `>=2`, `<=1` is `<2`. So `<=1.4` matches `1.4.1`, and `>1.2` does not." |
+      | "`>=14.38 <15`" | "AND: every space-separated comparator must hold. An operator may be written apart from its version: `>= 14.38`." |
+      | "`^6 || ^7`" | "OR: any `||`-separated alternative may match." |
+      | "`^7.5.0`" | "`>=7.5.0 <8`: the upper bound bumps the first non-zero part written. `^0.2.3` is `>=0.2.3 <0.3`, `^0.0.3` is `>=0.0.3 <0.0.4`, `^15.0.4490.9` is `<16`." |
+      | "`~20.2.1`" | "`>=20.2.1 <20.3`: bumps the second part, or the first when only one is written. `~15.0.4490.9` is `<15.1`, `~1` is `<2`." |
+      | "`7`, `1.2`, `=1.2`, `7.x`, `7.*`, `20.2.x`" | "Any version with that prefix. A partial version with no operator or with `=` is a prefix too, as in node-semver: `7` is `>=7 <8` and `=1.2` is `>=1.2 <1.3`." |
+      | "`1.2.3 - 2.3.4`" | "An inclusive range, `>=1.2.3 <=2.3.4`. An upper bound with fewer than three parts, or a wildcard, covers its whole prefix: `1.2.3 - 2.3` is `>=1.2.3 <2.4`." |
+      | "`*`, `x` or empty" | "Any release (not a pre-release)." |
+  }
+
+  p "The grammar, in the node-semver style:"
+
+  code text {
+    source = <<'SRC'
+range       ::= set ( '||' set )*
+set         ::= hyphen | term ( ws term )* | ''
+hyphen      ::= partial ws '-' ws partial
+term        ::= op? ws? partial
+op          ::= '<' | '<=' | '>' | '>=' | '=' | '~' | '~>' | '^'
+partial     ::= ( 'v' | 'V' )? xr ( '.' xr )* ( '-' pre )? ( '+' build )?
+xr          ::= 'x' | 'X' | '*' | [0-9]+
+pre, build  ::= ident ( '.' ident )*
+ident       ::= [0-9A-Za-z-]+
+SRC
+  }
+
+  p "Once a part is a wildcard, every later part must be one too, and a wildcard version cannot carry a pre-release. A wildcard makes a version partial whatever its length, so an operator on one reads it as the same prefix: `>=1.x` is `>=1`, `>1.2.x` is `>=1.3` (the same as `>1.2`), `<1.x` is `<1`, `<=1.x` is `<2`, and `<*` or `>*` matches nothing. A version with a pre-release is never partial: `>=7.6-preview` is `>=7.6.0-preview`."
+
+  h2 "Pre-releases in ranges"
+
+  p <<'PROSE'
+As in node-semver, a range does not match a pre-release unless it names
+one. A pre-release version matches an alternative only when every
+comparator in it holds and at least one comparator in the same alternative
+names a pre-release on the same numeric parts (padded with zeros, so
+`7.6-preview` names `7.6.0`). So `^7` does not match `7.6.0-preview.3`, and
+`*` matches no pre-release at all, but `>=7.6.0-preview.1` matches
+`7.6.0-preview.3` and every later release, and not `7.7.0-preview.1`.
+PROSE
+
+  h2 "Errors"
+
+  p "A range that does not parse is an `Err` that quotes the range and gives the byte offset of the problem:"
+
+  table {
+    rows:
+      | "Range" | "Error" |
+      | "`>== 1.2`" | "`invalid version range \">== 1.2\": unknown operator at 0`" |
+      | "`>=`" | "`… missing version after operator at 0`" |
+      | "`1..2`" | "`… empty part at 2`" |
+      | "`1.2a`" | "`… part \"2a\" is not a number at 2`" |
+      | "`1.x.3`" | "`… part \"3\" follows a wildcard at 4`" |
+      | "`1.2 ||`" | "`… dangling || at 4`" |
+      | "`- 2`" | "`… hyphen range is missing its lower bound at 0`" |
+      | "`1 -`" | "`… hyphen range is missing its upper bound at 2`" |
+      | "`>=1 - 2`" | "`… operator in a hyphen range at 0`" |
+  }
+
+  h2 "Example"
+
+  p "A check that accepts the Visual C++ runtime 14.38 or later, and the newest matching release from a feed:"
+
+  code rust {
+    source = <<'SRC'
+use version
+
+fn check(params: Value) -> Result[CheckResult, string] {
+    let have = installed_version()?          // for example "14.40.33810.0"
+    if version::matches(have, ">=14.38")? {
+        return Ok(CheckResult::AlreadyConfigured)
+    }
+    Ok(CheckResult::NotConfigured)
+}
+
+// ["20.1.4", "20.2.1", "20.2.10", "20.3.0"] with "~20.2" -> Some("20.2.10")
+let pick = match version::max_matching(available, "~20.2")? {
+    Some(v) => v,
+    None => return Err("no 20.2 release available"),
+}
+SRC
+  }
+}
