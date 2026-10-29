@@ -6,7 +6,7 @@ page cmd_root {
   chapter_header "config-weave" {
     kicker       = "Commands · reference"
     reading_time = "7 min read"
-    updated      = "2026-10-19"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
@@ -68,17 +68,17 @@ PROSE
   table {
     rows:
       | "Mode" | "Selected by" | "Behaviour" |
-      | "Rich" | "Default when stdout is a terminal" | "Colour, Unicode icons, a live progress line on stderr with phase detail, and per-step timing. The final report repeats only the summary." |
+      | "Rich" | "Default when stdout is a terminal" | "Colour, Unicode icons, a live progress line on stderr with phase detail, and per-step timing. A wait step shows its progress, as in `api_up (waiting, attempt 14, 7m of 3h)`. The final report repeats only the summary." |
       | "Plain" | "`--no-color`, or stdout is not a terminal" | "ASCII, one line per step in declaration order, then a summary. No cursor movement." |
       | "JSON" | "`--json`" | "One complete JSON object on stdout at completion. Nothing else is written to stdout. Script log output goes to stderr or the log file." |
   }
 
   p <<'PROSE'
-The JSON object for `check` and `apply` is schema-stable. It carries `playbook`, `version`, `play`, `mode`, `exit_code`, `duration_secs`, the `gathered` list (name and gatherer) and the `steps` list. Each step has `name`, `container_path`, `resource`, `status` (for example `already_configured`), `message` and `duration_secs`. Steps appear in declaration order whatever order they finished in, so two reports diff cleanly.
+The JSON object for `check` and `apply` is schema-stable. It carries `playbook`, `version`, `play`, `mode`, `exit_code`, `duration_secs`, the `gathered` list (name and gatherer) and the `steps` list. Each step has `name`, `container_path`, `resource`, `status` (for example `already_configured`), `message` and `duration_secs`. For a wait step, `resource` holds the probe reference, such as `net.http_ok`, or the bare name of a playbook-local probe. Steps appear in declaration order whatever order they finished in, so two reports diff cleanly.
 PROSE
 
   p <<'PROSE'
-File logging is separate from the terminal mode. `--log-file PATH` installs an NDJSON subscriber at `--log-level`. Every script `log::*` call becomes one line with the step and resource attached, alongside the engine's own events. The file is buffered and flushed when the process exits. `check`, `apply` and `test` also accept `--events-ndjson`, which streams one JSON event per line to stderr while the run is in progress. That stream replaces the live progress line and leaves stdout to the final report.
+File logging is separate from the terminal mode. `--log-file PATH` installs an NDJSON subscriber at `--log-level`. Every script `log::*` call becomes one line with the step and resource attached, alongside the engine's own events. The file is buffered and flushed when the process exits. At `--log-level debug`, each unsuccessful attempt of a wait step's probe adds a `probe not ready` record with the fields `step`, `probe`, `attempt`, `elapsed_secs` and `error`. `check`, `apply` and `test` also accept `--events-ndjson`, which streams one JSON event per line to stderr while the run is in progress. That stream replaces the live progress line and leaves stdout to the final report. The `check` and `apply` events are listed in [config-weave apply](cmd_apply).
 PROSE
 
   h2 "Exit status"

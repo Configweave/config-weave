@@ -1,6 +1,6 @@
 ---
 name: config-weave
-description: "Read when writing or fixing a playbook.wcl, a package.wcl, a wscript resource, gatherer or verify script (.ws), a test or scenario block, or when running config-weave (validate, check, apply, test, secrets, pkg, wscripti). Carries the complete block, host-API and CLI surface, so nothing needs guessing."
+description: "Read when writing or fixing a playbook.wcl, a package.wcl, a wscript resource, gatherer, probe or verify script (.ws), a wait step (wait_for), a test or scenario block, or when running config-weave (validate, check, apply, test, secrets, pkg, wscripti). Carries the complete block, host-API and CLI surface, so nothing needs guessing."
 allowed-tools:
   - Read
   - Write
@@ -17,7 +17,8 @@ allowed-tools:
 config-weave is a single static binary that reads a WCL playbook and either
 checks a machine against it or applies it. A playbook's plays run steps; each
 step invokes a resource declared in a package and implemented by a wscript
-script. Every resource obeys one contract, **converge**: `check` reads the host
+script, or is a wait step that polls a probe (a `ready` script) until an
+upstream system is ready. Every resource obeys one contract, **converge**: `check` reads the host
 and never writes; `apply` changes the host so that a re-check, in the same run
 and in a fresh process, reports already configured. The engine validates
 everything before anything runs, then runs the re-check itself.
@@ -67,9 +68,9 @@ change.
 <reference>
 | Task | Read |
 |------|------|
-| Write or fix `playbook.wcl`: plays, steps, containers, composites, variables, `secret()` | `reference/playbook.md` |
-| Write or fix `package.wcl`: resources, gatherers, params, composites, the built-in `weave` package, `config-weave pkg` | `reference/package.md` |
-| Write a resource, gatherer or verify script: the contract, entry points, `Value`, wscript essentials, prelude and methods | `reference/scripts.md` |
+| Write or fix `playbook.wcl`: plays, steps, wait steps, containers, composites, playbook probes, variables, `secret()` | `reference/playbook.md` |
+| Write or fix `package.wcl`: resources, gatherers, probes, params, composites, the built-in `weave` package (incl. the `weave.command` probe), `config-weave pkg` | `reference/package.md` |
+| Write a resource, gatherer, probe or verify script: the contract, entry points, `Value`, wscript essentials, prelude and methods | `reference/scripts.md` |
 | Call the host from a script: every module, function, type and option map | `reference/host-api.md` |
 | Run the CLI: every command and flag, output modes, exit codes, environment, troubleshooting | `reference/cli.md` |
 | Write or run tests and scenarios: the `test` block, expectations, the three-run protocol, instances, the driver API | `reference/testlab.md` |

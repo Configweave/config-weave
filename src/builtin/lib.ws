@@ -1,4 +1,4 @@
-// Shared by the two built-in `execute` resources: reading their common
+// Shared by the built-in `execute` resources and the `command` probe: reading their common
 // parameters and handing a script to the right interpreter.
 
 use value

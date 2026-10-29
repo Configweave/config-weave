@@ -1,8 +1,8 @@
 # playbook.wcl
 
 `playbook.wcl` is the WCL document at the root of a playbook directory. It holds
-exactly one `playbook` block: gathers, variables, playbook-local composites, and
-plays of steps. The schema is `src/vocab/playbook.wcl`.
+exactly one `playbook` block: gathers, variables, playbook-local composites and
+probes, and plays of steps. The schema is `src/vocab/playbook.wcl`.
 
 | Item | Value |
 |---|---|
@@ -77,7 +77,7 @@ playbook "Sample Baseline" {
 ## Blocks
 
 This is the whole surface: `playbook`, `gather`, `vars`, `play`, `container`,
-`step`, `properties`, `params`, `composite`, `arg`, `symbol`. Every field marked
+`step`, `properties`, `params`, `composite`, `arg`, `probe`, `param`, `symbol`. Every field marked
 required is enforced by the loader, including each block's `description`. WCL's
 own block check flags unknown fields only, so a missing required field is a
 loader validation error. Child blocks may appear in any order.
@@ -91,6 +91,7 @@ playbook "Sample" {
   gather "os" { … }
   vars { … }
   composite "site" { … }
+  probe "marker" { … }
   play "default" { … }
 }
 ```
@@ -103,6 +104,7 @@ playbook "Sample" {
 | `gather` | block, repeatable | no | | Gatherer invocations. |
 | `vars` | block, at most one | no | | Variable declarations. |
 | `composite` | block, repeatable | no | | Playbook-local composites. |
+| `probe` | block, repeatable | no | | Playbook-local probes, for wait steps. |
 | `play` | block, repeatable | no | | The plays. |
 
 ### gather
@@ -211,17 +213,24 @@ step "nginx" {
 |---|---|---|---|---|
 | label | string | yes | | The step name. Unique within the play; the target of `requires`. |
 | `description` | string | yes | | One-line summary, shown in reports and docs. |
-| `resource` | string | yes | | `pkg.resource`, `pkg.composite`, or the bare name of a composite declared in this playbook. |
+| `resource` | string | exactly one of `resource` / `wait_for` | | `pkg.resource`, `pkg.composite`, or the bare name of a composite declared in this playbook. |
+| `wait_for` | string | exactly one of `resource` / `wait_for` | | Makes a wait step. `pkg.probe`, or the bare name of a probe declared in this playbook. |
+| `timeout` | duration | yes on a wait step | | Wait steps only. How long `apply` polls before the step is Error. At least `1s`. |
+| `interval` | duration | no | `30s` | Wait steps only. Pause between probe attempts. At least `1s`. |
+| `fail_on_error` | bool | no | `false` | Wait steps only. `true` fails the step at the first probe error instead of counting it as not ready. |
 | `condition` | bool expression | no | | When false the step reports Skipped, no phase runs, and its dependents still run. |
 | `requires` | list of strings | no | | Step names in this play that must finish first. Ordering only, not a success demand. |
 | `concurrency` | string | no | resource's class | `"parallel"`, `"exclusive"` or `"global"`. Tightens the resource's declared class, never loosens it. |
-| `properties` | block, at most one | no | | The resource's parameters. |
+| `properties` | block, at most one | no | | The resource's or probe's parameters. |
 
 Rules:
 - Resource names from packages are always qualified `pkg.resource`. Only a
   playbook-local composite is referenced bare.
 - Each step walks check, apply, re-check. The script contract: scripts.md.
   Concurrency class declarations on a resource: package.md.
+- Both `resource` and `wait_for`, or neither, is a validation error. A probe
+  named with `resource =`, or a resource with `wait_for =`, is a validation
+  error whose hint names the right field.
 - `requires` naming a step that does not exist, or a set of edges that forms a
   cycle, is a load error.
 - Dependency outcomes: Already Configured, Configured and Skipped release
@@ -234,6 +243,57 @@ Rules:
   in-flight steps, runs alone, then dispatching resumes). A step value looser
   than the resource's class is a validation error. `--jobs` sets the worker
   pool size.
+
+#### Wait steps
+
+```wcl
+step "api_up" {
+  description = "Wait for the API"
+  wait_for = "net.http_ok"                      // or "weave.command", or a bare playbook probe
+  interval = 30s
+  timeout = 3h
+  fail_on_error = false
+  requires = ["start_api"]
+  properties { url = "https://api.internal/health" }   // validated against the probe's params
+}
+```
+
+Rules:
+- `interval`, `timeout` and `fail_on_error` on a resource step are a
+  validation error. A wait step with no `timeout` is a validation error.
+- `interval` / `timeout` are bare duration literals: `ns`, `us`, `ms`, `s`,
+  `min`, `h`, `d`. Minutes are `min`; `1m` fails (`'m' is not a unit of type
+  'std.Duration'`). They may be expressions (a var, `args.patience`): a static
+  value is range-checked at validate, a dynamic one at plan time.
+- `concurrency` on a wait step may only be `"parallel"`.
+- check runs the probe once and never waits. apply runs it, then every
+  `interval`, until ready or `timeout`; the last pause is shortened so a final
+  attempt lands on the deadline. Statuses and messages:
+
+| Outcome | Mode | Status | Message |
+|---|---|---|---|
+| ready, first attempt | both | already configured | |
+| not ready | check | not configured | `not ready; apply waits up to 3h` |
+| probe error | check | not configured | `probe failed: <msg>; apply waits up to 3h` |
+| ready after waiting | apply | configured | `ready after 4m12s (9 attempts)` |
+| deadline passed | apply | error | `not ready after 3h (361 attempts)` + `; last probe failed: <msg>` if the last attempt errored |
+| probe error with `fail_on_error = true` | both | error | `probe failed: <msg>`, at the first error |
+| run halted while waiting | apply | not run | `wait cancelled after 2m because the run halted` |
+
+- A probe error (`Err`, a VM fault, a killed `weave.command` attempt) counts as
+  not ready and polling continues, unless `fail_on_error = true`.
+- Scheduling: a wait step runs on its own thread, outside the `--jobs` pool, so
+  any number can wait even with `--jobs 1`. It is always `parallel` and never
+  holds a class or `lock`. It counts as in flight: a `global` step waits for
+  running wait steps, and no wait step starts while a `global` step runs. In a
+  `parallel = false` play it holds the play until it ends.
+- Halt cancels waiters (an exception to "in-flight steps finish"): at the next
+  pause between attempts they report Not Run. A `ready` call in progress is not
+  interrupted.
+- Dependents behave as for any step: in apply, a wait step that errors or is
+  cancelled blocks them (Not Run).
+- Reports show the probe reference (`net.http_ok`, or the bare name) where a
+  resource would be.
 
 ### properties and params
 
@@ -248,11 +308,11 @@ properties {
 
 | Field | Type | Required | Default | Meaning |
 |---|---|---|---|---|
-| any declared name | per the `param` type | per the `param` | per the `param` | One parameter value. Names not declared by the resource or gatherer are rejected. |
+| any declared name | per the `param` type | per the `param` | per the `param` | One parameter value. Names not declared by the resource, probe or gatherer are rejected. |
 
 Rules:
-- A step's `properties` is validated against the resource's `param`
-  declarations, a gather's `params` against the gatherer's: declared defaults
+- A step's `properties` is validated against the `param` declarations of the
+  resource or probe it names, a gather's `params` against the gatherer's: declared defaults
   are applied, unknown names rejected, required names checked, each value
   checked against its coarse type.
 - A `symbol` parameter is written `:name`; the quoted spelling `"name"` is an
@@ -311,7 +371,7 @@ play "sites" {
 
 | Field | Type | Required | Default | Meaning |
 |---|---|---|---|---|
-| label | string | yes | | The composite name. Shares a namespace with resources. |
+| label | string | yes | | The composite name. Shares a namespace with resources, and the bare-name namespace with playbook probes. |
 | `description` | string | yes | | One-line summary for the docs. |
 | `arg` | block, repeatable | no | | Declared arguments. |
 | `step` | block, repeatable | no | | The body. Each step has the fields of a playbook `step`. |
@@ -339,7 +399,10 @@ Rules:
   invocation in `requires` waits for every step it expanded into.
 - Nesting is capped at 8 levels. A composite that invokes itself, directly or
   indirectly, is rejected by name as a cycle.
-- An invocation's own `concurrency` tightens every step of the body. A body
+- A body may hold wait steps. An unqualified `wait_for` in a playbook
+  composite names a playbook-local probe.
+- An invocation's own `concurrency` tightens every resource step of the body;
+  wait steps in the body stay `parallel`. A body
   step may carry its own `concurrency`. An `expect` field (testlab steps only)
   is rejected in a composite body.
 - `secret()` inside a composite in a `package.wcl` is a validation error, like
@@ -369,6 +432,35 @@ arg "ensure" {
 An `arg` has the shape of a resource `param`. These argument names are
 rejected because they are already in scope inside the body: `arg`, `step`,
 `properties`, `symbol`, `name`, `description`, `declared_args`, `steps`.
+
+### probe
+
+```wcl
+probe "marker" {
+  description = "Ready once the marker file exists"
+  script = "probes/marker.ws"            // relative to the playbook directory
+  param "path" {
+    description = "File to look for"
+    type = "string"
+    required = true
+  }
+}
+```
+
+| Field | Type | Required | Default | Meaning |
+|---|---|---|---|---|
+| label | string | yes | | The probe name, the bare value of a step's `wait_for`. |
+| `description` | string | yes | | One-line summary for the docs. |
+| `script` | string | yes | | wscript file exporting `ready`, relative to the playbook directory. |
+| `param` | block, repeatable | no | | Declared parameters: the package `param` shape (package.md), with `symbol` children. |
+
+Rules:
+- A playbook-local probe is referenced bare (`wait_for = "marker"`); the same
+  block in a `package.wcl` is referenced qualified (package.md).
+- It shares the bare-name namespace with playbook composites; a duplicate is a
+  validation error.
+- The script's `use` imports resolve against the playbook's `lib/`. The `ready`
+  contract is in scripts.md and is checked at validate.
 
 ## Variables
 
@@ -422,8 +514,8 @@ vars {
 ## Gotchas
 
 - Never write an import line; the engine appends `<weave/playbook.wcl>`.
-- Every `playbook`, `play`, `container`, `step`, `composite` and `arg` block needs
-  a `description`. Only `gather` may omit it.
+- Every `playbook`, `play`, `container`, `step`, `composite`, `arg`, `probe`
+  and `param` block needs a `description`. Only `gather` may omit it.
 - Package resources and gatherers are always `pkg.name`. A bare `resource`
   means a composite declared in this playbook.
 - `properties { url = url }` and `params { x = x }` are cycle errors: field
@@ -439,6 +531,12 @@ vars {
   invocation; name the invoking step, which waits for the whole expansion.
 - A `concurrency` value looser than the resource's class fails validation.
 - A gather's `params` cannot use another gather's result.
+- A step names exactly one of `resource` and `wait_for`. A wait step needs
+  `timeout`, and its durations use `min` for minutes: `timeout = 10min`, never
+  `10m`.
+- Messages print durations as `4m12s`; that is output, not WCL.
+- `check` never waits on a wait step, so a not-ready probe in check is Not
+  Configured, not a hang.
 - A `--var-file` entry cannot reference another variable; it evaluates
   standalone.
 - A `secret("plaintext")` call that was never run through `secrets encrypt`

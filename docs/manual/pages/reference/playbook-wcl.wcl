@@ -6,12 +6,12 @@ page ref_playbook {
   chapter_header "playbook.wcl" {
     kicker       = "Reference · reference"
     reading_time = "11 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
   p <<'PROSE'
-`playbook.wcl` is the WCL document at the root of a playbook directory. It holds one `playbook` block, which declares the playbook's gathers, its variables, any playbook-local composites, and its plays of steps. The engine appends the system import `<weave/playbook.wcl>` to the file when it opens the playbook, so you never write an import line. How the pieces fit together is explained in [Playbooks, plays and steps](guide_playbooks); this chapter lists every block and field.
+`playbook.wcl` is the WCL document at the root of a playbook directory. It holds one `playbook` block, which declares the playbook's gathers, its variables, any playbook-local composites and probes, and its plays of steps. The engine appends the system import `<weave/playbook.wcl>` to the file when it opens the playbook, so you never write an import line. How the pieces fit together is explained in [Playbooks, plays and steps](guide_playbooks); this chapter lists every block and field.
 PROSE
 
   table {
@@ -38,6 +38,7 @@ playbook "Sample" {
   gather "os" { … }
   vars { … }
   composite "site" { … }
+  probe "marker" { … }
   play "default" { … }
 }
 SRC
@@ -54,6 +55,7 @@ SRC
       | "`gather`" | "block, repeatable" | "no" | "Gatherer invocations. See [gather](ref_playbook)." |
       | "`vars`" | "block, at most one" | "no" | "Variable declarations. See [vars](ref_playbook)." |
       | "`composite`" | "block, repeatable" | "no" | "Playbook-local composites. See [composite](ref_playbook)." |
+      | "`probe`" | "block, repeatable" | "no" | "Playbook-local readiness checks. See [probe](ref_playbook)." |
       | "`play`" | "block, repeatable" | "no" | "The plays. See [play](ref_playbook)." |
   }
 
@@ -175,7 +177,25 @@ SRC
   }
 
   p <<'PROSE'
-One unit of work. A step names a resource or a composite and supplies its properties. The engine runs the resource's script through the check, apply and re-check lifecycle described in [The convergence contract](guide_convergence). The `resource` field takes a package-qualified name (`pkg.resource` or `pkg.composite`) or the bare name of a composite declared in this playbook.
+One unit of work. A step names exactly one of `resource` and `wait_for`; naming both or neither is a validation error. A resource step names a resource or a composite and supplies its properties, and the engine runs the resource's script through the check, apply and re-check lifecycle described in [The convergence contract](guide_convergence). The `resource` field takes a package-qualified name (`pkg.resource` or `pkg.composite`) or the bare name of a composite declared in this playbook.
+PROSE
+
+  code wcl {
+    source = <<'SRC'
+step "api_up" {
+  description = "Wait for the API"
+  wait_for = "net.http_ok"
+  interval = 30s
+  timeout = 3h
+  fail_on_error = false
+  requires = ["start_api"]
+  properties { url = "https://api.internal/health" }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A wait step names a probe with `wait_for` instead, as `pkg.probe` or the bare name of a probe declared in this playbook. `check` runs the probe once and never waits. `apply` runs it every `interval` until it reports ready or `timeout` passes. The properties are validated against the probe's `param` declarations exactly as a resource step's are. Naming a probe with `resource`, or a resource with `wait_for`, is a validation error whose message names the right field. The statuses and scheduling rules are in [Waiting for upstream systems](guide_waiting).
 PROSE
 
   table {
@@ -183,12 +203,20 @@ PROSE
       | "Field" | "Type" | "Required" | "Meaning" |
       | "label" | "string" | "yes" | "The step name. Unique within the play; the target of `requires`." |
       | "`description`" | "string" | "yes" | "One-line summary, shown in reports and docs." |
-      | "`resource`" | "string" | "yes" | "The resource or composite to run." |
+      | "`resource`" | "string" | "one of `resource` and `wait_for`" | "The resource or composite to run." |
+      | "`wait_for`" | "string" | "one of `resource` and `wait_for`" | "The probe to wait on. Makes the step a wait step." |
+      | "`interval`" | "duration" | "no, default `30s`; wait steps only" | "The pause between probe attempts. At least `1s`." |
+      | "`timeout`" | "duration" | "yes on a wait step; wait steps only" | "How long `apply` waits before the step reports *error*. At least `1s`." |
+      | "`fail_on_error`" | "bool" | "no, default `false`; wait steps only" | "`true` fails the step at the first probe error instead of treating it as not ready." |
       | "`condition`" | "bool expression" | "no" | "When false the step reports *skipped* and its dependents still run." |
       | "`requires`" | "list of strings" | "no" | "Step names that must finish first. Ordering only, not a success demand: an errored or unrun dependency blocks its dependents, a skipped one does not." |
-      | "`concurrency`" | "string" | "no" | "`parallel`, `exclusive` or `global`. May tighten the resource's declared class, never loosen it; a looser value is a validation error. See [Concurrency classes](ref_package)." |
-      | "`properties`" | "block, at most one" | "no" | "The resource's parameters. See below." |
+      | "`concurrency`" | "string" | "no" | "`parallel`, `exclusive` or `global`. May tighten the resource's declared class, never loosen it; a looser value is a validation error. On a wait step only `parallel` is accepted. See [Concurrency classes](ref_package)." |
+      | "`properties`" | "block, at most one" | "no" | "The resource's or probe's parameters. See below." |
   }
+
+  p <<'PROSE'
+`interval`, `timeout` and `fail_on_error` on a resource step are a validation error. `interval` and `timeout` are bare WCL duration literals with the suffixes `ns`, `us`, `ms`, `s`, `min`, `h` and `d`. Minutes are `min`: `1m` is a validation error. Either may be an expression, such as a variable or a composite argument; a static value is range-checked by `validate`, a dynamic one when the step is planned.
+PROSE
 
   h2 "properties and params"
 
@@ -204,7 +232,7 @@ SRC
   }
 
   p <<'PROSE'
-Both are free-form maps. A step's `properties` block is validated against the resource's `param` declarations; a gather's `params` block against the gatherer's. Validation applies declared defaults, rejects unknown names, checks required names are present, and checks each value against its coarse type. A `symbol` parameter must be written as `:name`; the quoted spelling is an error. A `duration` parameter is written as a bare WCL unit literal (`30min`, `4h`), never quoted. A `map` parameter is written as a map literal (`env = { KEY: "value" }`), never as a nested block; a nested block inside `properties` or `params` is a validation error. Values may be any WCL expression over the variable scope, and are evaluated lazily when the step is planned.
+Both are free-form maps. A step's `properties` block is validated against the `param` declarations of the resource or probe it names; a gather's `params` block against the gatherer's. Validation applies declared defaults, rejects unknown names, checks required names are present, and checks each value against its coarse type. A `symbol` parameter must be written as `:name`; the quoted spelling is an error. A `duration` parameter is written as a bare WCL unit literal (`30min`, `4h`), never quoted. A `map` parameter is written as a map literal (`env = { KEY: "value" }`), never as a nested block; a nested block inside `properties` or `params` is a validation error. Values may be any WCL expression over the variable scope, and are evaluated lazily when the step is planned.
 PROSE
 
   table {
@@ -255,10 +283,39 @@ PROSE
   table {
     rows:
       | "Field" | "Type" | "Required" | "Meaning" |
-      | "label" | "string" | "yes" | "The composite name. Shares a namespace with resources." |
+      | "label" | "string" | "yes" | "The composite name. Shares a namespace with resources, and the bare-name namespace with playbook-local probes." |
       | "`description`" | "string" | "yes" | "One-line summary for the docs." |
       | "`arg`" | "block, repeatable" | "no" | "Declared arguments. See [arg](ref_playbook)." |
-      | "`step`" | "block, repeatable" | "no" | "The body. Each step has the fields of a playbook [step](ref_playbook), and an invocation's own `concurrency` tightens every step of the body." |
+      | "`step`" | "block, repeatable" | "no" | "The body. Each step has the fields of a playbook [step](ref_playbook), wait steps included, and an invocation's own `concurrency` tightens every resource step of the body. Wait steps in the body stay `parallel`." |
+  }
+
+  h2 "probe"
+
+  code wcl {
+    source = <<'SRC'
+probe "marker" {
+  description = "Ready once the marker file exists"
+  script = "probes/marker.ws"
+  param "path" {
+    description = "File to look for"
+    type = "string"
+    required = true
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A playbook-local readiness check, referenced from a wait step by bare name (`wait_for = "marker"`). The same block in a `package.wcl` is shared and referenced qualified; see [probe in package.wcl](ref_package). The script path is relative to the playbook directory, and the script's `use` imports resolve against the playbook's `lib/`. The script exports `ready(params: Value) -> bool` or `Result[bool, string]`, checked by `validate`; see [Script entry points](ref_scripts). Playbook-local probes share the bare-name namespace with playbook-local composites, so a duplicate name is a validation error.
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The probe name, the value of a step's `wait_for`." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`script`" | "string" | "yes" | "Path of the wscript file, relative to the playbook directory." |
+      | "`param`" | "block, repeatable" | "no" | "Declared parameters, with the fields of [param in package.wcl](ref_package)." |
   }
 
   h2 "arg"

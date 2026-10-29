@@ -1,4 +1,5 @@
-//! The built-in `weave` package: resources config-weave ships itself.
+//! The built-in `weave` package: resources and probes config-weave ships
+//! itself.
 //!
 //! Its `package.wcl` and scripts are compiled into the binary and loaded
 //! through exactly the same path as a package on disk — so `validate`,
@@ -22,6 +23,7 @@ pub const PACKAGE_PATH: &str = "<weave>/package.wcl";
 /// import gives it. The resolver consults this before the filesystem, so
 /// the shared helper resolves for the built-ins and nowhere else.
 pub const SCRIPTS: &[(&str, &str)] = &[
+    ("command.ws", include_str!("builtin/command.ws")),
     ("execute.ws", include_str!("builtin/execute.ws")),
     ("execute_once.ws", include_str!("builtin/execute_once.ws")),
     ("lib.ws", include_str!("builtin/lib.ws")),

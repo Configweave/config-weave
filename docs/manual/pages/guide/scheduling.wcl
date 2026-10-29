@@ -6,7 +6,7 @@ page guide_scheduling {
   chapter_header "Scheduling and concurrency" {
     kicker       = "The guide · explanation"
     reading_time = "5 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
@@ -21,7 +21,7 @@ Every step in a play is a node. Each name in a step's `requires` list adds an ed
 PROSE
 
   p <<'PROSE'
-The scheduler hands ready steps to a pool of workers. `--jobs` sets the pool size. A step becomes ready when every step it requires has reached a final status, and the scheduler keeps dispatching as long as the concurrency classes allow.
+The scheduler hands ready steps to a pool of workers. `--jobs` sets the pool size. A step becomes ready when every step it requires has reached a final status, and the scheduler keeps dispatching as long as the concurrency classes allow. Wait steps are the exception to the pool: each runs on its own thread, so a wait never takes a worker. See [Wait steps](guide_scheduling) below.
 PROSE
 
   diagram {
@@ -57,7 +57,7 @@ PROSE
   }
 
   p <<'PROSE'
-When a run halts, because a step errored without `--continue-on-error` or because a step reported Reboot Required in apply mode, every step that was never dispatched reports Not Run. A halted run still reports every step deterministically, so the output always accounts for the whole play.
+When a run halts, because a step errored without `--continue-on-error` or because a step reported Reboot Required in apply mode, every step that was never dispatched reports Not Run. Steps already in flight finish, because killing a half-finished installer is worse than waiting for it. Wait steps are the one exception: a halt cancels them at their next pause between probe attempts, and they report Not Run. A halted run still reports every step deterministically, so the output always accounts for the whole play.
 PROSE
 
   h2 "Concurrency classes"
@@ -79,6 +79,19 @@ PROSE
     body = "Because a step can only tighten, a resource that defaults to `exclusive` can never run two unrelated instances at once. Declare `parallel` unless the resource really does contend for one host-wide lock, and let the playbook tighten where it must."
   }
 
+  h2 "Wait steps"
+
+  p <<'PROSE'
+A [wait step](guide_waiting) polls a probe for up to its `timeout`, which may be hours. It spends that time asleep, so the scheduler gives it different rules from a resource step.
+PROSE
+
+  list {
+    li "It runs on its own thread, outside the `--jobs` pool. Any number of wait steps can wait at once without starving resource steps, even with `--jobs 1`. If waits took workers, N waits in a pool of N workers would block every other step until one timed out."
+    li "It is always `parallel`. It never holds an `exclusive` class or a `lock`, because holding either while waiting would stall every step that needs it. A `concurrency` other than `parallel` on a wait step is a validation error, and a composite invocation's tightening skips the wait steps in its body."
+    li "It still counts as in flight. A `global` step waits for running wait steps to finish before it starts, and no wait step starts while a `global` step runs."
+    li "In a play with `parallel = false`, a wait step holds the play like any other step. The next step starts when the wait ends."
+  }
+
   h2 "Gatherers run first"
 
   p <<'PROSE'
@@ -88,6 +101,6 @@ PROSE
   h2 "Where to go next"
 
   p <<'PROSE'
-The three classes and lock groups with their exact rules are in [package.wcl](ref_package). The `requires`, `condition` and `concurrency` fields on a step are in [playbook.wcl](ref_playbook). The `--jobs` and `--continue-on-error` flags are in [config-weave apply](cmd_apply).
+The three classes and lock groups with their exact rules are in [package.wcl](ref_package). The `requires`, `condition` and `concurrency` fields on a step are in [playbook.wcl](ref_playbook). The `--jobs` and `--continue-on-error` flags are in [config-weave apply](cmd_apply). Probes and wait steps are covered in [Waiting for upstream systems](guide_waiting).
 PROSE
 }

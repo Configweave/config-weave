@@ -1,0 +1,306 @@
+// Part II — The guide. Declared mode: explanation, with worked examples.
+page guide_waiting {
+  sites = [:manual]
+  title = "Waiting for upstream systems"
+
+  chapter_header "Waiting for upstream systems" {
+    kicker       = "The guide · explanation"
+    reading_time = "9 min read"
+    updated      = "2026-10-30"
+    version      = "config-weave 0.1.0"
+  }
+
+  p <<'PROSE'
+Some steps cannot run until something outside the host is ready. A database migration needs the database to accept connections. A service registration needs the API it registers with to answer. A join script needs a file that another host writes. A resource cannot express this, because a resource converges the host and waiting converges nothing. config-weave gives the job its own two pieces: a **probe**, which is a script that answers "is it ready yet?", and a **wait step**, which names a probe and polls it until it says yes or a timeout passes.
+PROSE
+
+  p <<'PROSE'
+This chapter explains how to declare a probe, how a wait step behaves in `check` and in `apply`, and how the scheduler runs wait steps beside ordinary ones. The field tables are in [playbook.wcl](ref_playbook) and [package.wcl](ref_package), and the `ready` signature is in [Script entry points](ref_scripts).
+PROSE
+
+  h2 "A quick check with weave.command"
+
+  p <<'PROSE'
+The shortest wait uses the built-in probe `weave.command`. It runs a shell script on every attempt and reports ready when the script exits 0.
+PROSE
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+step "db" {
+  description = "Wait for Postgres"
+  wait_for = "weave.command"
+  interval = 10s
+  timeout = 2h
+  properties { command = "pg_isready -h db.internal" }
+}
+
+step "migrate" {
+  description = "Run the schema migrations"
+  resource = "app.migrations"
+  requires = ["db"]
+}
+SRC
+  }
+
+  p <<'PROSE'
+The step names a probe with `wait_for` where an ordinary step names a resource with `resource`. In `apply`, the engine runs `pg_isready` every 10 seconds for up to two hours. `migrate` requires `db`, so it starts only after the database answers. If two hours pass first, `db` reports Error and `migrate` reports Not Run.
+PROSE
+
+  p "`weave.command` takes the same parameters as `weave.execute`, with one script instead of two."
+
+  table {
+    rows:
+      | "Parameter" | "Type" | "Default" | "Meaning" |
+      | "`command`" | "string" | "required" | "The script run on every attempt. Exit status 0 means ready. Any other status means not ready yet." |
+      | "`shell`" | "symbol" | "`:auto`" | "`:auto` (PowerShell on Windows, bash elsewhere), `:bash` or `:powershell`." |
+      | "`cwd`" | "string" | "`\"\"`" | "Working directory. Empty means the directory config-weave was run from." |
+      | "`env`" | "map" | "none" | "Extra environment variables, as `{ KEY: \"value\" }`." |
+      | "`timeout`" | "duration" | "`0s`, no limit" | "Kills one attempt after this long. A killed attempt is a probe error." |
+  }
+
+  p <<'PROSE'
+Two timeouts are in play here, and they do different jobs. The `timeout` property limits a single attempt, so a hung `curl` cannot stall the wait. The step's own `timeout` field limits the whole wait. A script that cannot start at all, because `cwd` does not exist or the interpreter is missing, is a probe error. A command that bash cannot find is not: bash starts, prints `command not found` and exits 127, which reads as "not ready". A typo in `command` therefore shows up as a wait that never ends. Run `check` first, and the not-ready result appears in seconds.
+PROSE
+
+  h2 "Declaring a probe"
+
+  p <<'PROSE'
+A shell one-liner is fine for one wait. When the same kind of check appears in many places, declare a probe. A probe is a script with declared parameters, so one probe serves any number of wait steps. This package declares a probe that is ready once a URL answers with a 2xx status.
+PROSE
+
+  code wcl {
+    filename = "pkgs/net/package.wcl"
+    source = <<'SRC'
+package "net" {
+  description = "Readiness checks for network services"
+
+  probe "http_ok" {
+    description = "Ready once a URL answers with a 2xx status"
+    script = "probes/http_ok.ws"
+
+    param "url" {
+      description = "URL to request"
+      type = "string"
+      required = true
+    }
+    param "request_timeout" {
+      description = "Seconds before one request is abandoned"
+      type = "int"
+      default = 10
+    }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+The `param` blocks are the same as a resource's: a coarse type, `required`, `default`, and `symbol` children for an enumerated value. A wait step's `properties` are validated against them in the same way. An unknown key, a missing required parameter or a type mismatch fails `validate`.
+PROSE
+
+  p "The script exports one function, `ready`."
+
+  code rust {
+    filename = "pkgs/net/probes/http_ok.ws"
+    source = <<'SRC'
+use value
+use http
+
+fn ready(params: Value) -> Result[bool, string] {
+    let url = match params.get("url") {
+        Some(v) => v.as_string().unwrap_or(""),
+        None => "",
+    }
+    let secs = match params.get("request_timeout") {
+        Some(v) => v.as_int().unwrap_or(10),
+        None => 10,
+    }
+    let resp = http::get(url, Value::Map(#{ "timeout": Value::Int(secs) }))?
+    Ok(resp.status >= 200 && resp.status < 300)
+}
+SRC
+  }
+
+  p <<'PROSE'
+`true` means ready and `false` means not ready yet. An `Err`, or a fault inside the script, is a probe error. In this script a refused connection makes `http::get` return `Err`, and `?` passes it on as a probe error. A 503 is a response, so it returns `false`. By default both count as "not ready" and the step keeps polling. The difference shows in the messages: a probe error is reported with its text, so a timeout that ends on `connection refused` tells you something a bare "not ready" does not. The [http module](ref_mod_http) lists the request options.
+PROSE
+
+  p <<'PROSE'
+`validate` compiles every probe script and checks that it exports `ready` with an accepted signature. A typo in a probe fails before the run starts, not three hours into an apply.
+PROSE
+
+  p "A wait step uses the probe like this."
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+step "api_up" {
+  description = "Wait for the API"
+  wait_for = "net.http_ok"
+  timeout = 3h
+  properties { url = "https://api.internal/health" }
+}
+SRC
+  }
+
+  h3 "Where a probe can live"
+
+  p <<'PROSE'
+A probe in a package is shared and referenced qualified, as `net.http_ok`. In a package, probes share one namespace with resources and composites, so a package cannot declare a probe and a resource under the same name. A probe can also sit directly under `playbook { }`. A playbook-local probe is referenced by bare name (`wait_for = "marker"`), its `script` path is relative to the playbook directory, and its `use` imports resolve against the playbook's `lib/`. Playbook-local probes share the bare-name namespace with playbook-local composites.
+PROSE
+
+  h2 "The wait step"
+
+  p <<'PROSE'
+A step names exactly one of `resource` and `wait_for`. Naming both, or neither, is a validation error. So is naming a probe with `resource` or a resource with `wait_for`; the message says which field to use. Three fields belong to wait steps only, and a resource step that carries any of them fails validation.
+PROSE
+
+  list {
+    li "`timeout` is required. It is how long `apply` waits before it gives up. The minimum is 1s."
+    li "`interval` is the pause between attempts. It defaults to 30s, and the minimum is 1s."
+    li "`fail_on_error` defaults to `false`. Set it to `true` to make the first probe error fail the step. See [Probe errors](guide_waiting)."
+  }
+
+  p <<'PROSE'
+`interval` and `timeout` are bare WCL duration literals: `500ms`, `30s`, `10min`, `3h`, `1d`. Minutes are `min`. `1m` is a validation error, because `m` is not a duration unit. Either field may be an expression, such as a variable or a composite argument. `validate` range-checks a static value, and the planner checks a dynamic one when the step is planned.
+PROSE
+
+  p <<'PROSE'
+Everything else works as on any step. `requires` orders the wait, `condition` can skip it, and the step appears in every report with the probe reference where a resource would be. `concurrency` may only be `parallel`, for the reasons in [How wait steps are scheduled](guide_waiting).
+PROSE
+
+  h2 "Check never waits"
+
+  p <<'PROSE'
+`check` is a dry run, and it stays fast. It runs each probe once and reports what it found without waiting.
+PROSE
+
+  table {
+    rows:
+      | "Probe result" | "Status in check" | "Message" |
+      | "ready" | "already configured" | "none" |
+      | "not ready" | "not configured" | "`not ready; apply waits up to 3h`" |
+      | "probe error" | "not configured" | "`probe failed: <msg>; apply waits up to 3h`" |
+      | "probe error, with `fail_on_error = true`" | "error" | "`probe failed: <msg>`" |
+  }
+
+  p <<'PROSE'
+A not-ready probe in `check` is a finding, not a failure, so it does not change the exit status. It tells you that `apply` would wait, and for how long at most.
+PROSE
+
+  h2 "Apply polls"
+
+  p <<'PROSE'
+In `apply` the engine runs the probe, then again every `interval`, until the probe reports ready or `timeout` passes. The last pause is shortened so that one final attempt lands on the deadline.
+PROSE
+
+  table {
+    rows:
+      | "Outcome" | "Status" | "Example message" |
+      | "Ready on the first attempt" | "already configured" | "none" |
+      | "Ready after waiting" | "configured" | "`ready after 4m12s (9 attempts)`" |
+      | "Not ready at the deadline" | "error" | "`not ready after 3h (361 attempts)`, plus `; last probe failed: <msg>` when the last attempt errored" |
+      | "Probe error, with `fail_on_error = true`" | "error" | "`probe failed: <msg>`, at the first error" |
+      | "The run halted while waiting" | "not run" | "`wait cancelled after 2m because the run halted`" |
+  }
+
+  p <<'PROSE'
+The statuses mean what they mean for a resource. Already Configured says nothing had to happen. Configured says the step had to wait. Steps that require a wait step are treated as for any dependency: in `apply`, a wait step that errors or does not run blocks them, and they report Not Run.
+PROSE
+
+  callout "Durations in messages use m for minutes" {
+    kind = :info
+    body = "Messages print durations as `4m12s` for readability. That is output only. In `playbook.wcl` you still write `4min`."
+  }
+
+  h2 "Probe errors and fail_on_error"
+
+  p <<'PROSE'
+By default a probe error counts as "not ready". This suits a probe whose errors are transient, such as a refused connection while a service starts. The step keeps polling, and if it times out, the message carries the last error.
+PROSE
+
+  p <<'PROSE'
+Some errors will not fix themselves. A 401 from an API with a wrong token, or a host name that does not resolve, will fail the same way for three hours. Set `fail_on_error = true` when an error means "stop", not "not yet". The step then fails at the first probe error with `probe failed: <msg>`. For this to be useful, the probe has to separate the two cases. It returns `Ok(false)` for "not yet" and `Err` for "this will not get better".
+PROSE
+
+  h2 "Waits inside composites"
+
+  p <<'PROSE'
+A composite body may contain wait steps. This is the natural place for "start a thing, then wait for it": the composite owns both halves, and the caller sees one step.
+PROSE
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+composite "service_ready" {
+  description = "Start a service, then wait for its health URL"
+  arg "name"       { description = "Service name"      type = "string"   required = true }
+  arg "health_url" { description = "Health endpoint"   type = "string"   required = true }
+  arg "patience"   { description = "How long to wait"  type = "duration" default = 10min }
+
+  step "start" {
+    description = "Start the service"
+    resource = "core.service_running"
+    properties { name = args.name }
+  }
+  step "healthy" {
+    description = "Wait for the health endpoint"
+    wait_for = "net.http_ok"
+    requires = ["start"]
+    interval = 5s
+    timeout = args.patience
+    properties { url = args.health_url }
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+`timeout = args.patience` is a dynamic value, so the planner range-checks it when the step is planned. Inside a package composite an unqualified `wait_for` names a probe of the same package. Inside a playbook composite it names a playbook-local probe. When an invocation sets `concurrency` to tighten its body, the tightening skips the wait steps in that body, because a wait step is always `parallel`.
+PROSE
+
+  h2 "How wait steps are scheduled"
+
+  p <<'PROSE'
+A wait step spends most of its life asleep, so the scheduler does not treat it like a resource step. Four rules apply.
+PROSE
+
+  list {
+    li "**Outside the worker pool.** Each wait step runs on its own thread, not on one of the `--jobs` workers. Any number of steps can wait at once and the resource steps still get every worker, even with `--jobs 1`. If wait steps took workers, four waits in a pool of four would block every other step until a wait ended."
+    li "**Always parallel.** A wait step never holds an `exclusive` class or a `lock`. Holding either for hours would stall every step that needs it. Setting `concurrency` to anything other than `parallel` is a validation error."
+    li "**Global steps drain them.** A wait step still counts as in flight. A `global` step waits for running wait steps to finish before it starts, and no wait step starts while a `global` step runs."
+    li "**Sequential plays wait.** In a play with `parallel = false`, a wait step holds the play like any other step. The next step starts when the wait ends."
+  }
+
+  p <<'PROSE'
+The global rule has a cost. A `global` step that becomes ready while a three-hour wait is running sits behind that wait. If the global step does not depend on what the wait guards, consider whether it needs to be `global`, or whether the wait belongs in a later play.
+PROSE
+
+  h3 "When the run halts"
+
+  p <<'PROSE'
+A run halts when a step errors without `--continue-on-error`, or when a step reports Reboot Required in `apply`. Normally a halt lets in-flight steps finish, because killing a half-finished installer is worse than waiting for it. Wait steps are the exception. A halted run cancels every wait step at its current pause, and the step reports Not Run with `wait cancelled after 2m because the run halted`. Cancelling between attempts changes nothing on the host, and letting a three-hour wait run out would hold the halted run open for three hours. A probe call already in progress is not interrupted. The cancel takes effect when that attempt returns.
+PROSE
+
+  h2 "Watching a wait"
+
+  p <<'PROSE'
+A long wait should not look like a hang. In rich terminal mode the live line shows each waiting step with its progress, for example `api_up (waiting, attempt 14, 7m of 3h)`. With `--events-ndjson` the step emits `step_phase` with phase `waiting`, then a `step_waiting` event after every unsuccessful attempt.
+PROSE
+
+  code json {
+    source = <<'SRC'
+{"event":"step_waiting","idx":1,"name":"api_up","attempt":14,"elapsed_secs":390.0,"timeout_secs":10800.0,"error":"io: Connection refused (os error 111)","ts":1793312977241}
+SRC
+  }
+
+  p <<'PROSE'
+`error` is `null` when the probe returned `false`, and the probe's message when it failed. With `--log-file` at `--log-level debug`, each unsuccessful attempt also writes a `probe not ready` record with the fields `step`, `probe`, `attempt`, `elapsed_secs` and `error`. Probe messages are scrubbed of decrypted secrets like every other step message.
+PROSE
+
+  h2 "Where to go next"
+
+  p <<'PROSE'
+The `probe` block and the wait step fields are in [playbook.wcl](ref_playbook) and [package.wcl](ref_package). The `ready` contract is in [Script entry points](ref_scripts). How resource steps share the worker pool is in [Scheduling and concurrency](guide_scheduling).
+PROSE
+}

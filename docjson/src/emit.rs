@@ -57,9 +57,9 @@ pub fn sync_playbook(src: &mut Source, doc: &PlaybookDoc) -> Result<(), Diags> {
 
     let mut diags = Vec::new();
     let mut ordered: Vec<Block> = Vec::new();
-    let mut pool = extract_managed(&mut block.items, &["gather", "vars", "play"]);
+    let mut pool = extract_managed(&mut block.items, &["gather", "vars", "probe", "play"]);
 
-    // Canonical section order: gathers, vars, plays.
+    // Canonical section order: gathers, vars, probes, plays.
     for g in &doc.gathers {
         let mut b = take_or_new(&mut pool, "gather", g.orig.as_ref().unwrap_or(&g.name));
         sync_gather(&mut b, g, &mut diags);
@@ -68,6 +68,11 @@ pub fn sync_playbook(src: &mut Source, doc: &PlaybookDoc) -> Result<(), Diags> {
     if !doc.vars.is_empty() {
         let mut b = take_singleton(&mut pool, "vars");
         sync_kvs(&mut b, &doc.vars, &mut diags);
+        ordered.push(b);
+    }
+    for p in &doc.probes {
+        let mut b = take_or_new(&mut pool, "probe", p.orig.as_ref().unwrap_or(&p.name));
+        sync_probe(&mut b, p, &mut diags);
         ordered.push(b);
     }
     for p in &doc.plays {
@@ -120,11 +125,27 @@ fn sync_play_items(parent: &mut Block, docs: &[PlayItemDoc], diags: &mut Diags) 
 fn sync_step(b: &mut Block, doc: &StepDoc, diags: &mut Diags) {
     set_label(b, 0, string_literal_expr(&doc.name));
     set_or_insert_field(b, "description", string_literal_expr(&doc.description));
-    set_or_insert_field(b, "resource", string_literal_expr(&doc.resource));
+    set_opt_string(b, "resource", doc.resource.as_deref());
+    sync_wait(b, &doc.wait, diags);
     set_opt_expr(b, "condition", doc.condition.as_deref(), diags);
     set_string_list(b, "requires", &doc.requires);
     set_opt_string(b, "concurrency", doc.concurrency.as_deref());
     sync_kv_child(b, "properties", &doc.properties, diags);
+}
+
+/// A step's wait fields; each absent one is removed, so a wait step
+/// turned back into a resource step drops them all.
+fn sync_wait(b: &mut Block, doc: &WaitDoc, diags: &mut Diags) {
+    set_opt_string(b, "wait_for", doc.wait_for.as_deref());
+    set_opt_expr(b, "interval", doc.interval.as_deref(), diags);
+    set_opt_expr(b, "timeout", doc.timeout.as_deref(), diags);
+    match &doc.fail_on_error {
+        Some(v) => match val_to_expr(v) {
+            Ok(e) => set_or_insert_field(b, "fail_on_error", e),
+            Err(e) => diags.push(format!("field 'fail_on_error': {e}")),
+        },
+        None => remove_field(b, "fail_on_error"),
+    }
 }
 
 fn sync_container(b: &mut Block, doc: &ContainerDoc, diags: &mut Diags) {
@@ -145,7 +166,14 @@ pub fn sync_package(src: &mut Source, doc: &PackageDoc) -> Result<(), Diags> {
     let mut ordered: Vec<Block> = Vec::new();
     let mut pool = extract_managed(
         &mut block.items,
-        &["gatherer", "resource", "composite", "test", "scenario"],
+        &[
+            "gatherer",
+            "resource",
+            "probe",
+            "composite",
+            "test",
+            "scenario",
+        ],
     );
 
     for g in &doc.gatherers {
@@ -156,6 +184,11 @@ pub fn sync_package(src: &mut Source, doc: &PackageDoc) -> Result<(), Diags> {
     for r in &doc.resources {
         let mut b = take_or_new(&mut pool, "resource", r.orig.as_ref().unwrap_or(&r.name));
         sync_resource(&mut b, r, &mut diags);
+        ordered.push(b);
+    }
+    for p in &doc.probes {
+        let mut b = take_or_new(&mut pool, "probe", p.orig.as_ref().unwrap_or(&p.name));
+        sync_probe(&mut b, p, &mut diags);
         ordered.push(b);
     }
     for c in &doc.composites {
@@ -194,6 +227,13 @@ fn sync_resource(b: &mut Block, doc: &ResourceDoc, diags: &mut Diags) {
     sync_params(b, &doc.params, diags);
 }
 
+fn sync_probe(b: &mut Block, doc: &ProbeDoc, diags: &mut Diags) {
+    set_label(b, 0, string_literal_expr(&doc.name));
+    set_or_insert_field(b, "description", string_literal_expr(&doc.description));
+    set_or_insert_field(b, "script", string_literal_expr(&doc.script));
+    sync_params(b, &doc.params, diags);
+}
+
 fn sync_composite(b: &mut Block, doc: &CompositeDoc, diags: &mut Diags) {
     set_label(b, 0, string_literal_expr(&doc.name));
     set_or_insert_field(b, "description", string_literal_expr(&doc.description));
@@ -212,7 +252,8 @@ fn sync_composite(b: &mut Block, doc: &CompositeDoc, diags: &mut Diags) {
 fn sync_composite_step(b: &mut Block, doc: &CompositeStepDoc, diags: &mut Diags) {
     set_label(b, 0, string_literal_expr(&doc.name));
     set_or_insert_field(b, "description", string_literal_expr(&doc.description));
-    set_or_insert_field(b, "resource", string_literal_expr(&doc.resource));
+    set_opt_string(b, "resource", doc.resource.as_deref());
+    sync_wait(b, &doc.wait, diags);
     set_opt_expr(b, "condition", doc.condition.as_deref(), diags);
     set_string_list(b, "requires", &doc.requires);
     set_opt_string(b, "concurrency", doc.concurrency.as_deref());
@@ -223,8 +264,8 @@ fn sync_params(parent: &mut Block, docs: &[ParamDoc], diags: &mut Diags) {
     sync_params_of(parent, "param", docs, diags)
 }
 
-/// `sync_params` over an arbitrary declaration block kind: resources and
-/// gatherers declare `param`, composites declare `arg`.
+/// `sync_params` over an arbitrary declaration block kind: resources,
+/// gatherers and probes declare `param`, composites declare `arg`.
 fn sync_params_of(parent: &mut Block, kind: &str, docs: &[ParamDoc], diags: &mut Diags) {
     let mut ordered: Vec<Block> = Vec::new();
     let mut pool = extract_managed(&mut parent.items, &[kind]);
@@ -673,6 +714,204 @@ package \"demo\" {
         assert_eq!(once, twice);
     }
 
+    /// A package probe (with params) beside a composite whose body has a
+    /// wait step: both extract, and the wait step carries no `resource`.
+    #[test]
+    fn package_probe_and_composite_wait_step_extract_and_roundtrip() {
+        let source = "\
+package \"net\" {
+  description = \"d\"
+
+  resource \"svc\" {
+    description = \"A service\"
+    script = \"resources/svc.ws\"
+  }
+
+  // Polls a URL.
+  probe \"http_ok\" {
+    description = \"Ready once a URL answers 2xx\"
+    script = \"probes/http_ok.ws\"
+    param \"url\" {
+      description = \"URL to request\"
+      type = \"string\"
+      required = true
+    }
+  }
+
+  composite \"api\" {
+    description = \"Start and wait\"
+    arg \"patience\" {
+      description = \"How long to wait\"
+      type = \"duration\"
+      default = 10min
+    }
+    step \"start\" {
+      description = \"start\"
+      resource = \"svc\"
+    }
+    step \"up\" {
+      description = \"wait\"
+      wait_for = \"http_ok\"
+      interval = 5s
+      timeout = args.patience
+      fail_on_error = true
+      requires = [\"start\"]
+      properties {
+        url = \"http://localhost/health\"
+      }
+    }
+  }
+}
+";
+        let doc = extract_package(&parse_for_edit(source, "t").unwrap()).unwrap();
+        assert_eq!(doc.probes.len(), 1);
+        let probe = &doc.probes[0];
+        assert_eq!(probe.name, "http_ok");
+        assert_eq!(probe.script, "probes/http_ok.ws");
+        assert_eq!(probe.params.len(), 1);
+        assert_eq!(probe.params[0].name, "url");
+        assert_eq!(probe.params[0].required, Some(true));
+
+        let steps = &doc.composites[0].steps;
+        assert_eq!(steps[0].resource.as_deref(), Some("svc"));
+        assert_eq!(steps[0].wait, WaitDoc::default());
+        let up = &steps[1];
+        assert_eq!(up.resource, None);
+        assert_eq!(up.wait.wait_for.as_deref(), Some("http_ok"));
+        assert_eq!(up.wait.interval.as_deref(), Some("5s"));
+        assert_eq!(up.wait.timeout.as_deref(), Some("args.patience"));
+        assert_eq!(up.wait.fail_on_error, Some(Val::Lit(true.into())));
+
+        // The JSON is flat: the wait keys sit beside the step's other keys,
+        // and a resource step's shape is unchanged.
+        let json = serde_json::to_value(&doc).unwrap();
+        let up_json = &json["composites"][0]["steps"][1];
+        assert_eq!(up_json["wait_for"], "http_ok");
+        assert_eq!(up_json["timeout"], "args.patience");
+        assert!(up_json.get("resource").is_none(), "{up_json}");
+        let start_json = &json["composites"][0]["steps"][0];
+        assert_eq!(start_json["resource"], "svc");
+        assert!(start_json.get("wait_for").is_none(), "{start_json}");
+        let back: PackageDoc = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(back, doc);
+
+        let once = render_package(source, &doc).unwrap();
+        assert!(once.contains("# Polls a URL."), "{once}");
+        assert!(once.contains("probe \"http_ok\""), "{once}");
+        assert!(once.contains("wait_for = \"http_ok\""), "{once}");
+        assert!(once.contains("interval = 5s"), "{once}");
+        assert!(once.contains("timeout = args.patience"), "{once}");
+        assert!(once.contains("fail_on_error = true"), "{once}");
+        let doc2 = extract_package(&parse_for_edit(&once, "t").unwrap()).unwrap();
+        assert_eq!(json, serde_json::to_value(&doc2).unwrap());
+        let twice = render_package(&once, &doc2).unwrap();
+        assert_eq!(once, twice);
+    }
+
+    /// A playbook-local probe and a play-level wait step round-trip, and
+    /// turning the wait step into a resource step drops every wait field.
+    #[test]
+    fn playbook_local_probe_and_wait_step_roundtrip() {
+        let source = "\
+playbook \"demo\" {
+  description = \"d\"
+
+  vars {
+    patience = 3h
+  }
+
+  // Checks the database.
+  probe \"db_up\" {
+    description = \"Postgres answers\"
+    script = \"probes/db_up.ws\"
+    param \"host\" {
+      description = \"Host\"
+      type = \"string\"
+    }
+  }
+
+  play \"main\" {
+    description = \"p\"
+
+    step \"wait_db\" {
+      description = \"Wait for the database\"
+      wait_for = \"db_up\"
+      timeout = vars.patience
+      properties {
+        host = \"db.internal\"
+      }
+    }
+
+    step \"migrate\" {
+      description = \"m\"
+      resource = \"core.file_present\"
+      requires = [\"wait_db\"]
+    }
+  }
+}
+";
+        let mut doc = extract_playbook(&parse_for_edit(source, "t").unwrap()).unwrap();
+        assert_eq!(doc.probes.len(), 1);
+        assert_eq!(doc.probes[0].name, "db_up");
+        assert_eq!(doc.probes[0].params[0].name, "host");
+        let PlayItemDoc::Step(wait) = &doc.plays[0].items[0] else {
+            panic!()
+        };
+        assert_eq!(wait.resource, None);
+        assert_eq!(wait.wait.wait_for.as_deref(), Some("db_up"));
+        assert_eq!(wait.wait.interval, None);
+        assert_eq!(wait.wait.timeout.as_deref(), Some("vars.patience"));
+        assert_eq!(wait.wait.fail_on_error, None);
+
+        let once = render_playbook(source, &doc).unwrap();
+        assert!(once.contains("# Checks the database."), "{once}");
+        assert!(once.contains("probe \"db_up\""), "{once}");
+        assert!(once.contains("wait_for = \"db_up\""), "{once}");
+        assert!(once.contains("timeout = vars.patience"), "{once}");
+        assert!(!once.contains("interval"), "{once}");
+        let doc2 = extract_playbook(&parse_for_edit(&once, "t").unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&doc).unwrap(),
+            serde_json::to_value(&doc2).unwrap()
+        );
+        assert_eq!(once, render_playbook(&once, &doc2).unwrap());
+
+        // Editing: wait step -> resource step, and the probe removed.
+        if let PlayItemDoc::Step(s) = &mut doc.plays[0].items[0] {
+            s.resource = Some("core.file_present".into());
+            s.wait = WaitDoc::default();
+        }
+        doc.probes.clear();
+        let edited = render_playbook(source, &doc).unwrap();
+        assert!(!edited.contains("probe \"db_up\""), "{edited}");
+        assert!(!edited.contains("wait_for"), "{edited}");
+        assert!(!edited.contains("timeout"), "{edited}");
+    }
+
+    /// DocJson from before probes existed (no `probes`, every step with a
+    /// `resource`) still deserializes and renders.
+    #[test]
+    fn pre_probe_docjson_still_deserializes() {
+        let json = serde_json::json!({
+            "name": "demo",
+            "description": "d",
+            "plays": [{
+                "name": "main",
+                "description": "p",
+                "items": [{ "step": {
+                    "name": "one",
+                    "description": "s",
+                    "resource": "core.file_present"
+                }}]
+            }]
+        });
+        let doc: PlaybookDoc = serde_json::from_value(json).unwrap();
+        assert!(doc.probes.is_empty());
+        let out = render_playbook("", &doc).unwrap();
+        assert!(out.contains("resource = \"core.file_present\""), "{out}");
+        assert!(!out.contains("probe"), "{out}");
+    }
+
     #[test]
     fn comments_survive_an_unchanged_sync() {
         let source = "\
@@ -757,7 +996,8 @@ playbook \"demo\" {
             name: "brand-new".into(),
             orig: None,
             description: "added by the form".into(),
-            resource: "core.file_present".into(),
+            resource: Some("core.file_present".into()),
+            wait: WaitDoc::default(),
             condition: None,
             requires: vec!["make-a".into()],
             concurrency: Some("exclusive".into()),
@@ -786,6 +1026,7 @@ playbook \"demo\" {
             version: Some("0.1.0".into()),
             gathers: vec![],
             vars: vec![],
+            probes: vec![],
             plays: vec![],
         };
         let out = render_playbook("", &doc).unwrap();

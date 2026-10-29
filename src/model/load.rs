@@ -93,6 +93,7 @@ pub fn load(dir: &Path) -> Loaded {
         ctx,
         packages: &packages,
         composites: BTreeMap::new(),
+        probes: BTreeMap::new(),
     };
     let playbook = loader.load(dir, &pb_block, &source);
 
@@ -127,7 +128,8 @@ const SHADOWED_ARG_NAMES: &[&str] = &[
 
 /// What a playbook `step` block turned out to name.
 enum LoadedStep {
-    Resource(Step),
+    /// A real step: a resource to converge or a probe to wait on.
+    Step(Step),
     Composite(CompositeInvocation),
 }
 
@@ -197,6 +199,8 @@ struct PlaybookLoader<'a> {
     /// Playbook-local composites, loaded before any play so a step can
     /// reference one by bare name.
     composites: BTreeMap<String, CompositeDecl>,
+    /// Playbook-local probes, likewise loaded before any play.
+    probes: BTreeMap<String, ProbeDecl>,
 }
 
 impl PlaybookLoader<'_> {
@@ -214,6 +218,22 @@ impl PlaybookLoader<'_> {
         let mut vars = Vec::new();
         let mut plays = Vec::new();
         let mut seen_gather_names = HashSet::new();
+
+        // Probes before composites: a composite body may wait on one.
+        for block in pb.blocks().filter(|b| b.kind() == "probe") {
+            let Some(p) = load_probe(&block, Scripts::Dir(dir), &mut self.ctx) else {
+                continue;
+            };
+            if self.probes.insert(p.name.clone(), p).is_some() {
+                self.ctx.err(
+                    format!(
+                        "duplicate probe '{}'",
+                        label_string(&block).unwrap_or_default()
+                    ),
+                    wcl_span(block.span()),
+                );
+            }
+        }
 
         // Composites first, and in their own pass: a play references them,
         // and one composite body may reference another declared further
@@ -233,7 +253,26 @@ impl PlaybookLoader<'_> {
                 );
             }
         }
-        validate_pending(self.packages, &self.composites, &pending, self.ctx.diags);
+        // Bare names resolve to either, so a collision would make one
+        // unreachable.
+        for name in self.probes.keys() {
+            if self.composites.contains_key(name) {
+                self.ctx.err(
+                    format!(
+                        "'{name}' is declared as both a probe and a composite; they share \
+                         the playbook's bare-name namespace, so a step could not name either"
+                    ),
+                    wcl_span(pb.span()),
+                );
+            }
+        }
+        validate_pending(
+            self.packages,
+            &self.composites,
+            &self.probes,
+            &pending,
+            self.ctx.diags,
+        );
 
         for block in pb.blocks() {
             match block.kind() {
@@ -291,6 +330,7 @@ impl PlaybookLoader<'_> {
             gathers,
             vars,
             composites: std::mem::take(&mut self.composites),
+            probes: std::mem::take(&mut self.probes),
             plays,
             packages: BTreeMap::new(), // filled by caller
         }
@@ -398,7 +438,7 @@ impl PlaybookLoader<'_> {
         for block in parent.blocks() {
             match block.kind() {
                 "step" => match self.load_step(&block, containers, composites) {
-                    Some(LoadedStep::Resource(step)) => {
+                    Some(LoadedStep::Step(step)) => {
                         declared.push(DeclaredStep {
                             name: step.name.clone(),
                             requires: step.requires.clone(),
@@ -502,8 +542,9 @@ impl PlaybookLoader<'_> {
         // and each instance carries its own path and provenance.
         let templates: Vec<Step> = decl.steps.clone();
         for tmpl in templates {
-            let nested = lookup_composite(self.packages, composites, &tmpl.package, &tmpl.resource)
-                .is_some();
+            let nested = tmpl.kind == StepKind::Resource
+                && lookup_composite(self.packages, composites, &tmpl.package, &tmpl.resource)
+                    .is_some();
             if nested {
                 let inner = CompositeInvocation {
                     name: tmpl.name.clone(),
@@ -518,9 +559,14 @@ impl PlaybookLoader<'_> {
                 container.items.push(PlayItem::Container(c));
                 continue;
             }
+            // The invocation may tighten every step of the body, except a
+            // wait step, which is always parallel.
+            let concurrency = match tmpl.kind {
+                StepKind::Resource => max_opt(tmpl.concurrency, inv.concurrency),
+                StepKind::Wait => None,
+            };
             container.items.push(PlayItem::Step(Step {
-                // The invocation may tighten every step of the body.
-                concurrency: max_opt(tmpl.concurrency, inv.concurrency),
+                concurrency,
                 container_path: path.clone(),
                 frames: child_frames.clone(),
                 ..tmpl
@@ -539,14 +585,38 @@ impl PlaybookLoader<'_> {
         let span = wcl_span(block.span());
         let name = label_string(block)?;
         let description = string_field(block, "description", &mut self.ctx).unwrap_or_default();
-        let resource_ref = string_field(block, "resource", &mut self.ctx)?;
+        let what = format!("step '{name}'");
+        let (kind, resource_ref) = step_target(block, &what, &mut self.ctx)?;
+        check_wait_fields(block, kind, &what, &mut self.ctx);
         let requires = string_list_field(block, "requires", &mut self.ctx).unwrap_or_default();
-        let declared_concurrency = parse_concurrency_field(block, &mut self.ctx);
         let condition_src = self.condition_src(block);
+        if kind == StepKind::Wait {
+            return self.load_wait_step(
+                block,
+                containers,
+                name,
+                description,
+                resource_ref,
+                requires,
+                condition_src,
+                span,
+            );
+        }
+        let declared_concurrency = parse_concurrency_field(block, &mut self.ctx);
 
         // An unqualified reference names a playbook-local composite; there
         // are no unqualified resources.
         let Some((package, target)) = resource_ref.split_once('.') else {
+            if self.probes.contains_key(&resource_ref) {
+                self.ctx.err(
+                    format!(
+                        "step '{name}' names the probe '{resource_ref}' as a resource; a \
+                         probe is waited on with wait_for = \"{resource_ref}\""
+                    ),
+                    span,
+                );
+                return None;
+            }
             if !composites.contains_key(&resource_ref) {
                 self.ctx.err(
                     format!(
@@ -577,6 +647,16 @@ impl PlaybookLoader<'_> {
             );
             return None;
         };
+        if pkg.probes.contains_key(target) {
+            self.ctx.err(
+                format!(
+                    "step '{name}' names the probe '{package}.{target}' as a resource; a \
+                     probe is waited on with wait_for = \"{package}.{target}\""
+                ),
+                span,
+            );
+            return None;
+        }
         if pkg.composites.contains_key(target) {
             let (package, target) = (package.to_string(), target.to_string());
             return Some(LoadedStep::Composite(self.composite_invocation(
@@ -628,13 +708,90 @@ impl PlaybookLoader<'_> {
             );
         }
 
-        Some(LoadedStep::Resource(Step {
+        Some(LoadedStep::Step(Step {
             name,
             description,
             package: package.to_string(),
             resource: target.to_string(),
+            kind: StepKind::Resource,
             requires,
             concurrency,
+            container_path: containers.to_vec(),
+            frames: Vec::new(),
+            condition_src,
+            span,
+        }))
+    }
+
+    /// A step that waits on a probe: a bare reference names a playbook
+    /// probe, a qualified one a package probe. Properties check against the
+    /// probe's params exactly as a resource step's do against its resource.
+    #[allow(clippy::too_many_arguments)]
+    fn load_wait_step(
+        &mut self,
+        block: &Block<'_>,
+        containers: &[String],
+        name: String,
+        description: String,
+        probe_ref: String,
+        requires: Vec<String>,
+        condition_src: Option<String>,
+        span: (usize, usize),
+    ) -> Option<LoadedStep> {
+        let (package, target) = match probe_ref.split_once('.') {
+            Some((p, t)) => (p.to_string(), t.to_string()),
+            None => (String::new(), probe_ref.clone()),
+        };
+        let params = if package.is_empty() {
+            let Some(decl) = self.probes.get(&target) else {
+                self.ctx.err(
+                    format!(
+                        "step '{name}' waits on '{probe_ref}', which is not a playbook probe; \
+                         a wait_for without a '.' names a probe declared in playbook.wcl"
+                    ),
+                    span,
+                );
+                return None;
+            };
+            decl.params.clone()
+        } else {
+            let Some(pkg) = self.packages.get(&package) else {
+                self.ctx.err(
+                    format!("unknown package '{package}' in step '{name}'"),
+                    span,
+                );
+                return None;
+            };
+            let Some(decl) = pkg.probes.get(&target) else {
+                let hint = if pkg.resources.contains_key(&target)
+                    || pkg.composites.contains_key(&target)
+                {
+                    format!("; '{probe_ref}' is converged with resource = \"{probe_ref}\"")
+                } else {
+                    String::new()
+                };
+                self.ctx.err(
+                    format!("package '{package}' has no probe '{target}'{hint}"),
+                    span,
+                );
+                return None;
+            };
+            decl.params.clone()
+        };
+        let what = format!("probe '{probe_ref}'");
+        if let Some(props) = block.blocks().find(|b| b.kind() == "properties") {
+            self.check_params(&props, &params, &what);
+        } else {
+            self.check_param_block_missing(&params, span, &what);
+        }
+        Some(LoadedStep::Step(Step {
+            name,
+            description,
+            package,
+            resource: target,
+            kind: StepKind::Wait,
+            requires,
+            concurrency: None,
             container_path: containers.to_vec(),
             frames: Vec::new(),
             condition_src,
@@ -766,7 +923,7 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
     let Ok(entries) = std::fs::read_dir(&pkgs_dir) else {
         // No `pkgs/` folder is legal; the built-in package is still there.
         for p in &pending {
-            validate_pending(&packages, &BTreeMap::new(), p, diags);
+            validate_pending(&packages, &BTreeMap::new(), &BTreeMap::new(), p, diags);
         }
         return packages;
     };
@@ -813,7 +970,7 @@ fn load_packages(dir: &Path, diags: &mut Vec<Diag>) -> BTreeMap<String, Package>
     // A package is distributed on its own, so nothing in it may reach into
     // the playbook's composite namespace — hence the empty map here.
     for p in &pending {
-        validate_pending(&packages, &BTreeMap::new(), p, diags);
+        validate_pending(&packages, &BTreeMap::new(), &BTreeMap::new(), p, diags);
     }
     packages
 }
@@ -876,6 +1033,8 @@ impl Pending {
 struct PendingCompositeStep {
     /// "step 'x' of composite 'pkg.y'" — diagnostic prefix.
     what: String,
+    /// Whether the step names a resource/composite or waits on a probe.
+    kind: StepKind,
     /// Package holding the target; empty means the playbook-local namespace.
     package: String,
     /// Resource or composite name.
@@ -914,6 +1073,7 @@ struct PendingGatherCheck {
 fn validate_pending(
     packages: &BTreeMap<String, Package>,
     playbook_composites: &BTreeMap<String, CompositeDecl>,
+    playbook_probes: &BTreeMap<String, ProbeDecl>,
     p: &Pending,
     diags: &mut Vec<Diag>,
 ) {
@@ -923,7 +1083,11 @@ fn validate_pending(
         diags,
     };
     for s in &p.composite_steps {
-        validate_composite_step(&mut ctx, packages, playbook_composites, s);
+        if s.kind == StepKind::Wait {
+            validate_composite_wait_step(&mut ctx, packages, playbook_probes, s);
+        } else {
+            validate_composite_step(&mut ctx, packages, playbook_composites, s);
+        }
     }
     for s in &p.steps {
         let Some(pkg) = packages.get(&s.package) else {
@@ -1038,6 +1202,17 @@ fn validate_composite_step(
         );
         return;
     }
+    if pkg.probes.contains_key(&s.target) {
+        ctx.err(
+            format!(
+                "{} names the probe '{}.{}' as a resource; a probe is waited on with \
+                 wait_for",
+                s.what, s.package, s.target
+            ),
+            s.span,
+        );
+        return;
+    }
     let Some(decl) = pkg.resources.get(&s.target) else {
         ctx.err(
             format!(
@@ -1063,6 +1238,54 @@ fn validate_composite_step(
             s.span,
         );
     }
+    check_params_deferred(ctx, s.props.as_deref(), &decl.params, &what, s.span);
+}
+
+/// Resolve one composite inner wait step's probe and check its properties.
+fn validate_composite_wait_step(
+    ctx: &mut Ctx<'_>,
+    packages: &BTreeMap<String, Package>,
+    playbook_probes: &BTreeMap<String, ProbeDecl>,
+    s: &PendingCompositeStep,
+) {
+    let decl = if s.package.is_empty() {
+        let Some(decl) = playbook_probes.get(&s.target) else {
+            ctx.err(
+                format!(
+                    "no playbook probe '{}' (in {}); a wait_for without a '.' names a \
+                     probe declared in playbook.wcl",
+                    s.target, s.what
+                ),
+                s.span,
+            );
+            return;
+        };
+        decl
+    } else {
+        let Some(pkg) = packages.get(&s.package) else {
+            ctx.err(
+                format!("unknown package '{}' in {}", s.package, s.what),
+                s.span,
+            );
+            return;
+        };
+        let Some(decl) = pkg.probes.get(&s.target) else {
+            ctx.err(
+                format!(
+                    "package '{}' has no probe '{}' (in {})",
+                    s.package, s.target, s.what
+                ),
+                s.span,
+            );
+            return;
+        };
+        decl
+    };
+    let what = if s.package.is_empty() {
+        format!("probe '{}' in {}", s.target, s.what)
+    } else {
+        format!("probe '{}.{}' in {}", s.package, s.target, s.what)
+    };
     check_params_deferred(ctx, s.props.as_deref(), &decl.params, &what, s.span);
 }
 
@@ -1447,6 +1670,7 @@ fn load_package_source(
     let mut gatherers = BTreeMap::new();
     let mut resources = BTreeMap::new();
     let mut composites: BTreeMap<String, CompositeDecl> = BTreeMap::new();
+    let mut probes: BTreeMap<String, ProbeDecl> = BTreeMap::new();
     let mut test_blocks = Vec::new();
     let mut scenarios = Vec::new();
     let mut seen_scenarios = HashSet::new();
@@ -1537,6 +1761,20 @@ fn load_package_source(
                     );
                 }
             }
+            "probe" => {
+                let Some(p) = load_probe(&block, scripts, &mut ctx) else {
+                    continue;
+                };
+                if probes.insert(p.name.clone(), p).is_some() {
+                    ctx.err(
+                        format!(
+                            "duplicate probe '{}'",
+                            label_string(&block).unwrap_or_default()
+                        ),
+                        wcl_span(block.span()),
+                    );
+                }
+            }
             "resource" => {
                 let Some(rname) = label_string(&block) else {
                     continue;
@@ -1609,6 +1847,24 @@ fn load_package_source(
             let _ = r;
         }
     }
+    for pname in probes.keys() {
+        let other = if resources.contains_key(pname) {
+            Some("resource")
+        } else if composites.contains_key(pname) {
+            Some("composite")
+        } else {
+            None
+        };
+        if let Some(other) = other {
+            ctx.err(
+                format!(
+                    "'{pname}' is declared as both a probe and a {other}; they share one \
+                     namespace, so a step could not name either"
+                ),
+                wcl_span(pkg_block.span()),
+            );
+        }
+    }
 
     let mut tests = Vec::new();
     let mut seen_tests = HashSet::new();
@@ -1672,11 +1928,27 @@ fn load_package_source(
             gatherers,
             resources,
             composites,
+            probes,
             tests,
             scenarios,
         },
         pending,
     ))
+}
+
+/// One `probe` block. `scripts` decides what its `script` names: a file
+/// under the package (or playbook) directory, or a built-in script.
+fn load_probe(block: &Block<'_>, scripts: Scripts<'_>, ctx: &mut Ctx<'_>) -> Option<ProbeDecl> {
+    let name = label_string(block)?;
+    let description = string_field(block, "description", ctx).unwrap_or_default();
+    let script = script_field(block, scripts, ctx)?;
+    let params = load_params(block, ctx);
+    Some(ProbeDecl {
+        name,
+        description,
+        script,
+        params,
+    })
 }
 
 /// One `composite` block: params, then a body of steps whose targets stay
@@ -1800,10 +2072,12 @@ fn load_composite_step(
     let span = wcl_span(block.span());
     let name = label_string(block)?;
     let description = string_field(block, "description", ctx).unwrap_or_default();
-    let target_ref = string_field(block, "resource", ctx)?;
+    let what = format!("step '{name}' of {label}");
+    let (kind, target_ref) = step_target(block, &what, ctx)?;
+    check_wait_fields(block, kind, &what, ctx);
     // Unqualified inside a package composite means that package's own
     // namespace (as it does in a test step); inside a playbook composite it
-    // means a playbook-local composite.
+    // means a playbook-local composite or probe.
     let (package, target) = match target_ref.split_once('.') {
         Some((p, r)) => (p.to_string(), r.to_string()),
         None => (owner.to_string(), target_ref.clone()),
@@ -1821,13 +2095,13 @@ fn load_composite_step(
             span,
         );
     }
-    let what = format!("step '{name}' of {label}");
     let props = block
         .blocks()
         .find(|b| b.kind() == "properties")
         .map(|p| deferred_pairs(&p, &what, ctx));
     pending.composite_steps.push(PendingCompositeStep {
         what,
+        kind,
         package: package.clone(),
         target: target.clone(),
         props,
@@ -1844,6 +2118,7 @@ fn load_composite_step(
         description,
         package,
         resource: target,
+        kind,
         requires,
         concurrency,
         container_path: Vec::new(),
@@ -1961,6 +2236,22 @@ fn load_test(
                     );
                 }
                 let sdesc = string_field(&b, "description", ctx).unwrap_or_default();
+                // Shared schema with composite steps, which may wait. A test
+                // asserts convergence, and readiness of the instance is the
+                // test's own `ready` command.
+                if b.fields()
+                    .any(|f| f.name() == "wait_for" || WAIT_FIELDS.contains(&f.name()))
+                {
+                    ctx.err(
+                        format!(
+                            "step '{sname}' of test '{name}' declares a wait; a test step \
+                             names a resource, and the test's own 'ready' command is how a \
+                             test waits for its instance"
+                        ),
+                        sspan,
+                    );
+                    continue;
+                }
                 let Some(rref) = string_field(&b, "resource", ctx) else {
                     continue;
                 };
@@ -2486,6 +2777,105 @@ fn bool_field(block: &Block<'_>, name: &str, ctx: &mut Ctx<'_>) -> Option<bool> 
             );
             None
         }
+    }
+}
+
+/// The fields only a wait step takes.
+const WAIT_FIELDS: &[&str] = &["interval", "timeout", "fail_on_error"];
+
+/// Which of `resource` / `wait_for` a step names, and the reference. A
+/// step names exactly one; `what` prefixes the diagnostics.
+fn step_target(block: &Block<'_>, what: &str, ctx: &mut Ctx<'_>) -> Option<(StepKind, String)> {
+    let span = wcl_span(block.span());
+    let has = |n: &str| block.fields().any(|f| f.name() == n);
+    match (has("resource"), has("wait_for")) {
+        (true, false) => Some((StepKind::Resource, string_field(block, "resource", ctx)?)),
+        (false, true) => Some((StepKind::Wait, string_field(block, "wait_for", ctx)?)),
+        (false, false) => {
+            ctx.err(
+                format!(
+                    "{what} names neither 'resource' nor 'wait_for'; set resource = \
+                     \"package.resource\" to converge something, or wait_for = \
+                     \"package.probe\" to wait until something is ready"
+                ),
+                span,
+            );
+            None
+        }
+        (true, true) => {
+            ctx.err(
+                format!(
+                    "{what} names both 'resource' and 'wait_for'; a step either converges \
+                     a resource or waits on a probe, so split it into two steps"
+                ),
+                span,
+            );
+            None
+        }
+    }
+}
+
+/// Check the wait-only fields against the step's kind. On a resource step
+/// any of them is an error. On a wait step `timeout` is required, and
+/// `interval` / `timeout` / `fail_on_error` are type- and range-checked when
+/// they evaluate statically; one that references a variable or a composite
+/// argument is checked by the planner at run time instead. A wait step is
+/// always `parallel`, so a tighter class is refused rather than honoured.
+fn check_wait_fields(block: &Block<'_>, kind: StepKind, what: &str, ctx: &mut Ctx<'_>) {
+    let span = wcl_span(block.span());
+    if kind == StepKind::Resource {
+        for name in WAIT_FIELDS {
+            if block.fields().any(|f| f.name() == *name) {
+                ctx.err(
+                    format!("{what} declares '{name}', which only a wait step (wait_for) takes"),
+                    span,
+                );
+            }
+        }
+        return;
+    }
+    if !block.fields().any(|f| f.name() == "timeout") {
+        ctx.err(
+            format!(
+                "{what} waits with no 'timeout'; declare how long to wait before giving \
+                 up (timeout = 2h)"
+            ),
+            span,
+        );
+    }
+    for f in block.fields() {
+        let name = f.name();
+        if !WAIT_FIELDS.contains(&name) {
+            continue;
+        }
+        let fspan = wcl_span(f.span());
+        let value = match field_value_dyn(&f) {
+            Ok(fv) => fv.value,
+            Err(FieldValueError::Unresolved(_)) => continue,
+            Err(FieldValueError::Convert(e)) => {
+                ctx.err(format!("'{name}' of {what}: {e}"), fspan);
+                continue;
+            }
+            Err(FieldValueError::Eval(e)) => {
+                ctx.diags.push(Diag::from_eval(e, ctx.file, ctx.source));
+                continue;
+            }
+        };
+        if let Err(e) = crate::engine::wait::check_field(name, &value) {
+            ctx.err(format!("{what}: {e}"), fspan);
+        }
+    }
+    if let Some(c) = string_field_optional(block, "concurrency", ctx)
+        && c != "parallel"
+    {
+        ctx.err(
+            format!(
+                "{what} declares concurrency '{c}'; a wait step is always 'parallel', \
+                 because holding a class or lock while waiting would stall every other \
+                 step that needs it"
+            ),
+            span,
+        );
     }
 }
 

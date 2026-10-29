@@ -6,6 +6,7 @@
 //! resources:  fn check(params: Value) -> CheckResult   (or Result[CheckResult, string])
 //!             fn apply(params: Value) -> ApplyResult   (or Result[ApplyResult, string])
 //! gatherers:  fn gather(params: Value) -> Value        (or Result[Value, string])
+//! probes:     fn ready(params: Value) -> bool          (or Result[bool, string])
 //! verifies:   fn verify(facts: Value) -> bool          (or Result[bool, string])
 //! ```
 //!
@@ -157,12 +158,20 @@ pub struct CompiledGatherer {
     pub gather: EntryKind,
 }
 
-/// Every compiled script in the playbook, keyed by `package.name`.
+/// A compiled probe script.
+pub struct CompiledProbe {
+    pub unit: CompiledUnit,
+    pub ready: EntryKind,
+}
+
+/// Every compiled script in the playbook, keyed by `package.name` (a
+/// playbook-local probe by its bare name, as a step names it).
 /// Test verify scripts compile (stage 5 catches broken ones) but are
 /// not retained — they only ever run inside instances via `__verify`.
 pub struct ScriptSet {
     pub resources: HashMap<String, CompiledResource>,
     pub gatherers: HashMap<String, CompiledGatherer>,
+    pub probes: HashMap<String, CompiledProbe>,
 }
 
 /// Compile all scripts; either every script compiles and satisfies its
@@ -171,6 +180,7 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
     let mut diags = Vec::new();
     let mut resources = HashMap::new();
     let mut gatherers = HashMap::new();
+    let mut probes = HashMap::new();
     // Scenario scripts compile against an augmented context (the `testlab`
     // module on top of the host API); built lazily, only when present.
     let mut scenario_ctx: Option<Context> = None;
@@ -210,6 +220,11 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
                 }
             }
         }
+        for p in pkg.probes.values() {
+            if let Some(probe) = compile_probe(ctx, &resolver, &p.script, &mut diags) {
+                probes.insert(format!("{}.{}", pkg.name, p.name), probe);
+            }
+        }
         for t in &pkg.tests {
             let Some(script) = &t.verify else {
                 continue;
@@ -228,18 +243,36 @@ pub fn compile_all(pb: &Playbook, ctx: &Context) -> Result<ScriptSet, Vec<Diag>>
             compile_lib(ctx, &resolver, &pkg.dir.join("lib"), &mut diags);
         }
     }
-    // Playbook-level helpers see only each other.
+    // Playbook-level helpers see only each other; playbook probes see them.
     let root_resolver = WeaveResolver::new(vec![pb.root.join("lib")]);
+    for p in pb.probes.values() {
+        if let Some(probe) = compile_probe(ctx, &root_resolver, &p.script, &mut diags) {
+            probes.insert(p.name.clone(), probe);
+        }
+    }
     compile_lib(ctx, &root_resolver, &pb.root.join("lib"), &mut diags);
 
     if diags.is_empty() {
         Ok(ScriptSet {
             resources,
             gatherers,
+            probes,
         })
     } else {
         Err(diags)
     }
+}
+
+fn compile_probe(
+    ctx: &Context,
+    resolver: &WeaveResolver,
+    script: &ScriptSource,
+    diags: &mut Vec<Diag>,
+) -> Option<CompiledProbe> {
+    let path = script.display_path();
+    let (unit, source) = compile_script(ctx, resolver, script, diags)?;
+    let ready = entry_kind::<bool>(&unit, "ready", &path, &source, diags)?;
+    Some(CompiledProbe { unit, ready })
 }
 
 /// Compile one script and everything it imports. The whole graph becomes

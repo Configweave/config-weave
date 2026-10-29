@@ -27,12 +27,14 @@ pub fn extract_playbook(src: &Source) -> Result<PlaybookDoc, Diags> {
 
     let mut gathers = Vec::new();
     let mut vars = Vec::new();
+    let mut probes = Vec::new();
     let mut plays = Vec::new();
     for item in &block.items {
         let Item::Block(b) = item else { continue };
         match b.kind.as_str() {
             "gather" => gathers.push(extract_gather(b, &mut diags)),
             "vars" => vars = extract_kvs(b, "vars", &mut diags),
+            "probe" => probes.push(extract_probe(b, &mut diags)),
             "play" => plays.push(extract_play(b, &mut diags)),
             _ => {} // preserved by the sync, not editable in forms
         }
@@ -45,6 +47,7 @@ pub fn extract_playbook(src: &Source) -> Result<PlaybookDoc, Diags> {
             version,
             gathers,
             vars,
+            probes,
             plays,
         })
     } else {
@@ -62,6 +65,7 @@ pub fn extract_package(src: &Source) -> Result<PackageDoc, Diags> {
 
     let mut gatherers = Vec::new();
     let mut resources = Vec::new();
+    let mut probes = Vec::new();
     let mut composites = Vec::new();
     let mut tests = Vec::new();
     let mut scenarios = Vec::new();
@@ -70,6 +74,7 @@ pub fn extract_package(src: &Source) -> Result<PackageDoc, Diags> {
         match b.kind.as_str() {
             "gatherer" => gatherers.push(extract_gatherer(b, &mut diags)),
             "resource" => resources.push(extract_resource(b, &mut diags)),
+            "probe" => probes.push(extract_probe(b, &mut diags)),
             "composite" => composites.push(extract_composite(b, &mut diags)),
             "test" => tests.push(extract_test(b, &mut diags)),
             "scenario" => scenarios.push(extract_scenario(b, &mut diags)),
@@ -83,6 +88,7 @@ pub fn extract_package(src: &Source) -> Result<PackageDoc, Diags> {
             description,
             gatherers,
             resources,
+            probes,
             composites,
             tests,
             scenarios,
@@ -136,12 +142,26 @@ fn extract_step(b: &Block, diags: &mut Diags) -> StepDoc {
     StepDoc {
         orig: Some(name.clone()),
         description: req_lit_string(b, "description", &ctx, diags),
-        resource: req_lit_string(b, "resource", &ctx, diags),
+        resource: opt_lit_string(b, "resource", &ctx, diags),
+        wait: extract_wait(b, &ctx, diags),
         condition: expr_source(b, "condition"),
         requires: string_list(b, "requires", &ctx, diags),
         concurrency: opt_lit_string(b, "concurrency", &ctx, diags),
         properties: child_kvs(b, "properties", diags),
         name,
+    }
+}
+
+/// A step's wait fields. `wait_for` is a reference, so a plain string
+/// like `resource`; the durations and `fail_on_error` may be expressions
+/// (a var, a composite `args.…`), so they carry raw source / a [`Val`].
+/// Which of `resource`/`wait_for` is set is the loader's to validate.
+fn extract_wait(b: &Block, ctx: &str, diags: &mut Diags) -> WaitDoc {
+    WaitDoc {
+        wait_for: opt_lit_string(b, "wait_for", ctx, diags),
+        interval: expr_source(b, "interval"),
+        timeout: expr_source(b, "timeout"),
+        fail_on_error: field_expr(b, "fail_on_error").map(val_of),
     }
 }
 
@@ -185,6 +205,20 @@ fn extract_resource(b: &Block, diags: &mut Diags) -> ResourceDoc {
     }
 }
 
+/// A probe (package or playbook-local): a resource's shape minus the
+/// scheduling fields, since a wait step is always parallel and unlocked.
+fn extract_probe(b: &Block, diags: &mut Diags) -> ProbeDoc {
+    let name = label_string(b, "probe", diags);
+    let ctx = format!("probe '{name}'");
+    ProbeDoc {
+        orig: Some(name.clone()),
+        description: req_lit_string(b, "description", &ctx, diags),
+        script: req_lit_string(b, "script", &ctx, diags),
+        params: extract_params(b, diags),
+        name,
+    }
+}
+
 fn extract_composite(b: &Block, diags: &mut Diags) -> CompositeDoc {
     let name = label_string(b, "composite", diags);
     let ctx = format!("composite '{name}'");
@@ -210,7 +244,8 @@ fn extract_composite_step(b: &Block, diags: &mut Diags) -> CompositeStepDoc {
     CompositeStepDoc {
         orig: Some(name.clone()),
         description: req_lit_string(b, "description", &ctx, diags),
-        resource: req_lit_string(b, "resource", &ctx, diags),
+        resource: opt_lit_string(b, "resource", &ctx, diags),
+        wait: extract_wait(b, &ctx, diags),
         condition: expr_source(b, "condition"),
         requires: string_list(b, "requires", &ctx, diags),
         concurrency: opt_lit_string(b, "concurrency", &ctx, diags),
@@ -223,8 +258,8 @@ fn extract_params(parent: &Block, diags: &mut Diags) -> Vec<ParamDoc> {
     extract_params_of(parent, "param", diags)
 }
 
-/// `extract_params` over an arbitrary declaration block kind: resources
-/// and gatherers declare `param`, composites declare `arg`.
+/// `extract_params` over an arbitrary declaration block kind: resources,
+/// gatherers and probes declare `param`, composites declare `arg`.
 fn extract_params_of(parent: &Block, kind: &str, diags: &mut Diags) -> Vec<ParamDoc> {
     let mut params = Vec::new();
     for item in &parent.items {
@@ -433,7 +468,8 @@ fn opt_lit_int(b: &Block, name: &str, ctx: &str, diags: &mut Diags) -> Option<i6
     }
 }
 
-/// The raw source of an expression-valued field (condition).
+/// The raw source of an expression-valued field (condition, interval,
+/// timeout).
 fn expr_source(b: &Block, name: &str) -> Option<String> {
     field_expr(b, name).map(to_source_expr)
 }

@@ -13,6 +13,7 @@ type WeavePackage {
   description: utf8
   @children("gatherer") gatherers: list<WeaveGathererDecl>
   @children("resource") resources: list<WeaveResourceDecl>
+  @children("probe") probes: list<WeaveProbeDecl>
   @children("composite") composites: list<WeaveCompositeDecl>
   @children("test") tests: list<WeaveTestDecl>
   @children("scenario") scenarios: list<WeaveScenarioDecl>
@@ -108,6 +109,19 @@ type WeaveResourceDecl {
   @children("param") params: list<WeaveParamDecl>
 }
 
+// A readiness check, invoked from a step with `wait_for` instead of
+// `resource`. The script exports `fn ready(params: Value) -> bool` (or
+// `Result[bool, string]`); apply polls it every `interval` until it returns
+// true or `timeout` passes, and check runs it once without waiting.
+// Probes share one namespace with resources and composites.
+@block("probe")
+type WeaveProbeDecl {
+  @inline(0) name: utf8
+  description: utf8
+  script: utf8
+  @children("param") params: list<WeaveParamDecl>
+}
+
 // One declared parameter: coarse type, requiredness, default, description.
 @block("param")
 type WeaveParamDecl {
@@ -177,12 +191,19 @@ type WeaveTestDecl {
 // A resource invocation, used by both a `test` and a `composite` body.
 // Block kinds are one-per-namespace in WCL, so the two share a schema and
 // the loader rejects the fields that belong only to the other: `expect` is
-// a test's assertion, `concurrency` a composite step's tightening.
+// a test's assertion, `concurrency` a composite step's tightening, and
+// `wait_for` (with `interval`, `timeout`, `fail_on_error`) a composite
+// step's readiness wait. A step names exactly one of `resource` and
+// `wait_for`.
 @block("step")
 type WeaveStepDecl {
   @inline(0) name: utf8
   description: utf8
-  resource: utf8
+  resource: utf8?
+  wait_for: utf8?
+  interval: std.Duration?
+  timeout: std.Duration?
+  @schemaless fail_on_error: bool?
   @default("converge") expect: utf8
   @schemaless condition: bool?
   requires: list<utf8>?

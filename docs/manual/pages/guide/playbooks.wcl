@@ -6,12 +6,12 @@ page guide_playbooks {
   chapter_header "Playbooks, plays and steps" {
     kicker       = "The guide · explanation"
     reading_time = "8 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
   p <<'PROSE'
-A playbook describes the desired state of a system. It is a directory whose root holds `playbook.wcl`, an optional `lib/` of shared wscript helpers, and a `pkgs/` directory of packages. The WCL document declares a set of plays. Each play is a group of steps, and each step invokes a resource from a package with a set of properties. This chapter explains each of those layers and how they fit together. The field-by-field tables for every block live in [playbook.wcl](ref_playbook).
+A playbook describes the desired state of a system. It is a directory whose root holds `playbook.wcl`, an optional `lib/` of shared wscript helpers, and a `pkgs/` directory of packages. The WCL document declares a set of plays. Each play is a group of steps, and each step invokes a resource from a package with a set of properties, or waits on a probe. This chapter explains each of those layers and how they fit together. The field-by-field tables for every block live in [playbook.wcl](ref_playbook).
 PROSE
 
   h2 "The playbook directory"
@@ -114,12 +114,29 @@ PROSE
   list {
     li "`condition` is a bool expression. When it evaluates to false the step reports Skipped and none of its phases run."
     li "`requires` is a list of sibling step names. Each name adds an ordering edge: the step waits until every named step has finished. Ordering is not a success demand; a skipped dependency does not block the step."
-    li "`concurrency` tightens the resource's concurrency class for this step alone. A step can make a `parallel` resource `exclusive`, but never the reverse."
+    li "`concurrency` tightens the resource's concurrency class for this step alone. A step can make a `parallel` resource `exclusive`, but never the reverse. A wait step is always `parallel`."
   }
 
   p <<'PROSE'
 At run time each step walks the check, apply, re-check lifecycle described in [The convergence contract](guide_convergence).
 PROSE
+
+  p <<'PROSE'
+A step can wait instead of converging. A wait step names a probe with `wait_for` in place of `resource`, and a `timeout`. `apply` polls the probe until an upstream system is ready, and `check` runs it once without waiting. A step names exactly one of the two fields. Wait steps, probes and the built-in `weave.command` probe are explained in [Waiting for upstream systems](guide_waiting).
+PROSE
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+step "db" {
+  description = "Wait for Postgres"
+  wait_for = "weave.command"
+  interval = 10s
+  timeout = 2h
+  properties { command = "pg_isready -h db.internal" }
+}
+SRC
+  }
 
   callout "Property names shadow variables" {
     kind = :warning
@@ -190,7 +207,7 @@ PROSE
 
   callout "Fields a composite step may carry" {
     kind = :info
-    body = "A step inside a composite body may carry its own `concurrency` field. An `expect` field, which belongs to testlab steps, is rejected in a composite body."
+    body = "A step inside a composite body may carry its own `concurrency` field, and may be a wait step with `wait_for`. An `expect` field, which belongs to testlab steps, is rejected in a composite body."
   }
 
   h2 "Where to go next"

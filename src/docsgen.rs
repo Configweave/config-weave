@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::diag::Diag;
-use crate::model::{CoarseType, ParamDecl, Play, PlayItem, Playbook};
+use crate::model::{CoarseType, ParamDecl, Play, PlayItem, Playbook, Step, StepKind};
 
 /// The `wcl` binary to drive the wdoc build. Defaults to a PATH lookup;
 /// `CONFIG_WEAVE_WCL` pins a specific binary (used by tests/CI).
@@ -79,16 +79,20 @@ pub fn serve(outdir: &Path, addr: Option<&str>) -> Result<(), Diag> {
 }
 
 /// Number of pages `emit` produces: one index, one per play (unless
-/// `pkg_only`), one per package, and one per resource, composite and
-/// gatherer — including the playbook's own composites.
+/// `pkg_only`), one per package, and one per resource, composite, probe
+/// and gatherer — including the playbook's own composites and probes.
 fn page_count(pb: &Playbook, pkg_only: bool) -> usize {
     let per_pkg: usize = pb
         .packages
         .values()
-        .map(|p| 1 + p.resources.len() + p.composites.len() + p.gatherers.len())
+        .map(|p| 1 + p.resources.len() + p.composites.len() + p.probes.len() + p.gatherers.len())
         .sum();
     let plays = if pkg_only { 0 } else { pb.plays.len() };
-    let local = if pkg_only { 0 } else { pb.composites.len() };
+    let local = if pkg_only {
+        0
+    } else {
+        pb.composites.len() + pb.probes.len()
+    };
     1 + plays + per_pkg + local
 }
 
@@ -153,6 +157,14 @@ fn resource_page(pkg: &str, res: &str) -> String {
     format!("res_{}_{}", ident(pkg), ident(res))
 }
 
+fn probe_page(pkg: &str, name: &str) -> String {
+    if pkg.is_empty() {
+        format!("probe__{}", ident(name))
+    } else {
+        format!("probe_{}_{}", ident(pkg), ident(name))
+    }
+}
+
 fn gatherer_page(pkg: &str, g: &str) -> String {
     format!("gath_{}_{}", ident(pkg), ident(g))
 }
@@ -172,6 +184,18 @@ fn page_link(label: &str, page: &str) -> String {
 /// `_mode_` inside `safe_mode_password` would italicize.
 fn code(s: &str) -> String {
     format!("`{s}`")
+}
+
+/// A play step's target cell: a resource step links its resource page, a
+/// wait step reads as a wait and links its probe page.
+fn step_target_link(s: &Step) -> String {
+    match s.kind {
+        StepKind::Resource => page_link(&s.target(), &resource_page(&s.package, &s.resource)),
+        StepKind::Wait => format!(
+            "waits on {}",
+            page_link(&s.target(), &probe_page(&s.package, &s.resource))
+        ),
+    }
 }
 
 fn emit(pb: &Playbook, pkg_only: bool) -> String {
@@ -195,6 +219,9 @@ fn emit(pb: &Playbook, pkg_only: bool) -> String {
         for c in pb.composites.values() {
             emit_composite(&mut w, "", c);
         }
+        for p in pb.probes.values() {
+            emit_probe(&mut w, "", p);
+        }
     }
     for pkg in pb.packages.values() {
         emit_package(&mut w, pkg);
@@ -204,6 +231,9 @@ fn emit(pb: &Playbook, pkg_only: bool) -> String {
         for c in pkg.composites.values() {
             emit_composite(&mut w, &pkg.name, c);
         }
+        for p in pkg.probes.values() {
+            emit_probe(&mut w, &pkg.name, p);
+        }
         for g in pkg.gatherers.values() {
             emit_gatherer(&mut w, &pkg.name, g);
         }
@@ -212,8 +242,9 @@ fn emit(pb: &Playbook, pkg_only: bool) -> String {
 }
 
 /// The site block: an mdBook-style `:book` site whose sidebar `toc` mirrors
-/// the page tree — overview, plays, then each package with its resources and
-/// gatherers grouped under their own section headings.
+/// the page tree — overview, plays, the playbook's own composites and probes,
+/// then each package with its resources, composites, probes and gatherers
+/// grouped under their own section headings.
 fn emit_site(w: &mut String, pb: &Playbook, pkg_only: bool) {
     let _ = writeln!(w, "site main {{");
     let _ = writeln!(w, "  default_template = :book");
@@ -246,6 +277,18 @@ fn emit_site(w: &mut String, pb: &Playbook, pkg_only: bool) {
         }
         let _ = writeln!(w, "    }}");
     }
+    if !pkg_only && !pb.probes.is_empty() {
+        let _ = writeln!(w, "    chapter \"Probes\" {{");
+        for p in pb.probes.values() {
+            let _ = writeln!(
+                w,
+                "      chapter \"{}\" {{ page = {} }}",
+                esc(&p.name),
+                probe_page("", &p.name)
+            );
+        }
+        let _ = writeln!(w, "    }}");
+    }
     if !pb.packages.is_empty() {
         let _ = writeln!(w, "    chapter \"Packages\" {{");
         for pkg in pb.packages.values() {
@@ -271,6 +314,18 @@ fn emit_site(w: &mut String, pb: &Playbook, pkg_only: bool) {
                         "          chapter \"{}\" {{ page = {} }}",
                         esc(&c.name),
                         composite_page(&pkg.name, &c.name)
+                    );
+                }
+                let _ = writeln!(w, "        }}");
+            }
+            if !pkg.probes.is_empty() {
+                let _ = writeln!(w, "        chapter \"Probes\" {{");
+                for p in pkg.probes.values() {
+                    let _ = writeln!(
+                        w,
+                        "          chapter \"{}\" {{ page = {} }}",
+                        esc(&p.name),
+                        probe_page(&pkg.name, &p.name)
                     );
                 }
                 let _ = writeln!(w, "        }}");
@@ -438,10 +493,7 @@ fn emit_play(w: &mut String, pb: &Playbook, play: &Play) {
             w,
             "      | \"{}\" | \"{}\" | \"{}\" | \"{}\" |  \"{}\" |",
             esc(&code(&path)),
-            esc(&page_link(
-                &format!("{}.{}", s.package, s.resource),
-                &resource_page(&s.package, &s.resource)
-            )),
+            esc(&step_target_link(s)),
             esc(&s
                 .condition_src
                 .as_deref()
@@ -547,11 +599,25 @@ fn emit_package(w: &mut String, pkg: &crate::model::Package) {
         }
         let _ = writeln!(w, "  }}");
     }
+    if !pkg.probes.is_empty() {
+        let _ = writeln!(w, "  h2 \"Probes\"");
+        let _ = writeln!(w, "  table {{\n    rows:");
+        let _ = writeln!(w, "      | \"Probe\" | \"Description\" |");
+        for p in pkg.probes.values() {
+            let _ = writeln!(
+                w,
+                "      | \"{}\" | \"{}\" |",
+                esc(&page_link(&p.name, &probe_page(&pkg.name, &p.name))),
+                esc(&p.description)
+            );
+        }
+        let _ = writeln!(w, "  }}");
+    }
     let _ = writeln!(w, "}}");
     let _ = writeln!(w);
 }
 
-// Resource, composite and gatherer pages carry only their own name in the
+// Resource, composite, probe and gatherer pages carry only their own name in the
 // title and heading — the package is evident from the book tree on the left.
 
 fn emit_resource(w: &mut String, pkg: &str, res: &crate::model::ResourceDecl) {
@@ -631,10 +697,11 @@ fn emit_composite(w: &mut String, pkg: &str, c: &crate::model::CompositeDecl) {
         "      | \"Step\" | \"Resource\" | \"Requires\" | \"Description\" |"
     );
     for s in &c.steps {
-        let target = if s.package.is_empty() {
-            s.resource.clone()
-        } else {
-            format!("{}.{}", s.package, s.resource)
+        // A resource step's target may name another composite, so only a
+        // wait step — whose target is always a probe — gets a link.
+        let target = match s.kind {
+            StepKind::Resource => s.target(),
+            StepKind::Wait => step_target_link(s),
         };
         let _ = writeln!(
             w,
@@ -656,6 +723,68 @@ fn emit_composite(w: &mut String, pkg: &str, c: &crate::model::CompositeDecl) {
     if !c.params.is_empty() {
         let _ = writeln!(ex, "  properties {{");
         for line in example_param_lines(&c.params, "    ") {
+            let _ = writeln!(ex, "{line}");
+        }
+        let _ = writeln!(ex, "  }}");
+    }
+    let _ = writeln!(ex, "}}");
+    emit_example(w, &ex);
+
+    let _ = writeln!(w, "}}");
+    let _ = writeln!(w);
+}
+
+/// A probe's page: what it takes and how a wait step polls it. `pkg` is
+/// empty for a playbook-local probe, which is referenced by bare name.
+fn emit_probe(w: &mut String, pkg: &str, p: &crate::model::ProbeDecl) {
+    let reference = if pkg.is_empty() {
+        p.name.clone()
+    } else {
+        format!("{}.{}", pkg, p.name)
+    };
+    let _ = writeln!(
+        w,
+        "page {} {{ sites = [:main]  title = \"Probe: {}\"",
+        probe_page(pkg, &p.name),
+        esc(&p.name)
+    );
+    let _ = writeln!(w, "  h1 \"Probe: {}\"", esc(&p.name));
+    let _ = writeln!(w, "  p \"{}\"", esc(&p.description));
+    if pkg.is_empty() {
+        let _ = writeln!(
+            w,
+            "  p \"Declared in this playbook, so a wait step references it by \
+             bare name: {}\"",
+            esc(&format!("wait_for = \"{reference}\""))
+        );
+    }
+    let _ = writeln!(
+        w,
+        "  p \"{}\"",
+        esc(&format!(
+            "A wait step polls this probe every {} until its script's {} returns \
+             true or the step's {} passes. An error counts as not ready unless the \
+             step sets {}.",
+            code("interval"),
+            code("ready(params) -> bool"),
+            code("timeout"),
+            code("fail_on_error = true")
+        ))
+    );
+    emit_param_table(w, &p.params);
+    emit_symbol_values(w, &p.params, &[]);
+
+    // A generated wait step: the resource page's example, naming the probe
+    // with `wait_for` and carrying the two durations that bound the wait.
+    let mut ex = String::new();
+    let _ = writeln!(ex, "step \"{}\" {{", esc(&p.name));
+    let _ = writeln!(ex, "  description = \"{}\"", esc(&p.description));
+    let _ = writeln!(ex, "  wait_for = \"{}\"", esc(&reference));
+    let _ = writeln!(ex, "  interval = 30s");
+    let _ = writeln!(ex, "  timeout = 30min");
+    if !p.params.is_empty() {
+        let _ = writeln!(ex, "  properties {{");
+        for line in example_param_lines(&p.params, "    ") {
             let _ = writeln!(ex, "{line}");
         }
         let _ = writeln!(ex, "  }}");
@@ -899,4 +1028,112 @@ fn emit_decl_table(w: &mut String, params: &[ParamDecl], heading: &str, noun: &s
         );
     }
     let _ = writeln!(w, "  }}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A playbook with a package probe, a playbook-local probe, and a play
+    /// that waits on both.
+    fn wait_playbook() -> (tempfile::TempDir, Playbook) {
+        let dir = tempfile::tempdir().unwrap();
+        let pkg_dir = dir.path().join("pkgs/net");
+        std::fs::create_dir_all(pkg_dir.join("probes")).unwrap();
+        std::fs::write(
+            pkg_dir.join("package.wcl"),
+            r#"package "net" {
+  description = "Network readiness"
+
+  probe "http_ok" {
+    description = "Ready once a URL answers 2xx"
+    script = "probes/http_ok.ws"
+    param "url" {
+      description = "URL to request"
+      type = "string"
+      required = true
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let ready = "use value\n\nfn ready(params: Value) -> bool {\n    true\n}\n";
+        std::fs::write(pkg_dir.join("probes/http_ok.ws"), ready).unwrap();
+        std::fs::create_dir_all(dir.path().join("probes")).unwrap();
+        std::fs::write(dir.path().join("probes/flag.ws"), ready).unwrap();
+        std::fs::write(
+            dir.path().join("playbook.wcl"),
+            r#"playbook "Waits" {
+  description = "Wait steps"
+  version = "0.1.0"
+
+  probe "flag" {
+    description = "Ready once the flag is set"
+    script = "probes/flag.ws"
+  }
+
+  play "up" {
+    description = "Wait for things"
+    step "api" {
+      description = "Wait for the API"
+      wait_for = "net.http_ok"
+      timeout = 1h
+      properties { url = "https://api.internal/health" }
+    }
+    step "flag" {
+      description = "Wait for the flag"
+      wait_for = "flag"
+      timeout = 5min
+      requires = ["api"]
+    }
+  }
+}
+"#,
+        )
+        .unwrap();
+        let loaded = crate::model::load(dir.path());
+        assert!(
+            loaded.diags.is_empty(),
+            "fixture must validate: {:?}",
+            loaded.diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+        let pb = loaded.playbook.unwrap();
+        (dir, pb)
+    }
+
+    #[test]
+    fn a_probe_gets_a_page_with_a_wait_step_example() {
+        let (_dir, pb) = wait_playbook();
+        let src = emit(&pb, false);
+        assert!(src.contains("page probe_net_http_ok {"), "{src}");
+        assert!(src.contains("title = \"Probe: http_ok\""), "{src}");
+        assert!(src.contains("wait_for = \"net.http_ok\""), "{src}");
+        assert!(src.contains("interval = 30s"), "{src}");
+        assert!(src.contains("    url = \"...\""), "{src}");
+        // Listed on its package page and in the site's book tree.
+        assert!(src.contains("[http_ok](probe_net_http_ok)"), "{src}");
+        assert!(src.contains("chapter \"http_ok\" { page = probe_net_http_ok }"));
+        // The playbook-local probe is documented by bare name.
+        assert!(src.contains("page probe__flag {"), "{src}");
+        assert!(src.contains("wait_for = \\\"flag\\\""), "{src}");
+        // The built-in `weave.command` probe renders like any package probe.
+        assert!(src.contains("page probe_weave_command {"), "{src}");
+        let probes = 1 + 1 + pb.packages["weave"].probes.len();
+        let without = page_count(&pb, false) - probes;
+        assert_eq!(src.matches("\npage ").count(), without + probes);
+    }
+
+    #[test]
+    fn a_play_links_a_wait_step_to_its_probe_page() {
+        let (_dir, pb) = wait_playbook();
+        let src = emit(&pb, false);
+        assert!(
+            src.contains("waits on [net.http_ok](probe_net_http_ok)"),
+            "{src}"
+        );
+        assert!(src.contains("waits on [flag](probe__flag)"), "{src}");
+        assert!(!src.contains("res_net_http_ok"), "{src}");
+        assert!(!src.contains("res__flag"), "{src}");
+    }
 }

@@ -6,12 +6,12 @@ page guide_packages {
   chapter_header "Packages, resources and gatherers" {
     kicker       = "The guide · explanation"
     reading_time = "10 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
   p <<'PROSE'
-A package bundles resources, gatherers, composites and tests under `pkgs/<name>/` inside a playbook directory. Its name qualifies every reference from the playbook, so a step names `core.file_present` and a gather names `core.os_info`. A package is the unit of sharing: it holds no playbook-specific values, so the same directory works in any playbook. This chapter explains what a package declares and how each part reaches the host. The field tables are in [package.wcl](ref_package).
+A package bundles resources, gatherers, probes, composites and tests under `pkgs/<name>/` inside a playbook directory. Its name qualifies every reference from the playbook, so a step names `core.file_present` and a gather names `core.os_info`. A package is the unit of sharing: it holds no playbook-specific values, so the same directory works in any playbook. This chapter explains what a package declares and how each part reaches the host. The field tables are in [package.wcl](ref_package).
 PROSE
 
   h2 "Directory layout"
@@ -176,6 +176,12 @@ PROSE
 A gatherer documents its result with `returns "key" { description type }` child blocks. These are mostly documentation: the generated docs render a Returns table, and the engine does not check that the gathered map carries these keys or only these keys. A key declared `type = "symbol"` is the exception and is typed. Its value binds into the variable space as a real WCL symbol, its declared set is enforced against what the script returned, and a playbook compares it as `init.init == :systemd`. Comparing a symbol fact against the string `"systemd"` is silently false rather than an error, so keep the symbol spelling on both sides. Only top-level keys are typed.
 PROSE
 
+  h2 "Probes"
+
+  p <<'PROSE'
+A probe is a readiness check for something the package does not own, such as a database or an API. Its script exports `ready(params: Value) -> bool`, and a playbook step waits on it with `wait_for = "package.probe"` instead of `resource`. A probe declares `param` blocks like a resource does, but has no concurrency class or lock, because a wait step is always `parallel`. Probes share one namespace with the package's resources and composites. How wait steps behave is explained in [Waiting for upstream systems](guide_waiting).
+PROSE
+
   h2 "Tests and scenarios"
 
   p <<'PROSE'
@@ -191,7 +197,7 @@ PROSE
   h2 "The built-in weave package"
 
   p <<'PROSE'
-config-weave carries one package inside its own binary. It is named `weave`, the name is reserved, and a `pkgs/weave/` directory is rejected at load rather than allowed to shadow it. It loads through the ordinary package path, so `validate`, `list`, `docs` and the run path treat it like any other package. Both of its resources are escape hatches for imperative work: a real resource models desired state and belongs in a package, and these exist so a playbook can keep shell automation it has not converted yet.
+config-weave carries one package inside its own binary. It is named `weave`, the name is reserved, and a `pkgs/weave/` directory is rejected at load rather than allowed to shadow it. It loads through the ordinary package path, so `validate`, `list`, `docs` and the run path treat it like any other package. It declares two resources and one probe. Both resources are escape hatches for imperative work: a real resource models desired state and belongs in a package, and these exist so a playbook can keep shell automation it has not converted yet. The probe, `weave.command`, lets a wait step use a shell command as its readiness check.
 PROSE
 
   h3 "weave.execute"
@@ -239,6 +245,29 @@ PROSE
 
   p <<'PROSE'
 `execute_once` takes the same `shell`, `cwd`, `env`, `timeout` and `reboot_on` parameters as `execute`. The `id` must be free of path separators, `..`, and the characters a registry value name will not take.
+PROSE
+
+  h3 "weave.command"
+
+  p <<'PROSE'
+`weave.command` is a probe, not a resource, so a step names it with `wait_for`. It runs its `command` parameter as a shell script on every attempt. Exit status 0 means ready, and any other status means not ready yet.
+PROSE
+
+  code wcl {
+    filename = "playbook.wcl"
+    source = <<'SRC'
+step "db" {
+  description = "Wait for Postgres"
+  wait_for = "weave.command"
+  interval = 10s
+  timeout = 2h
+  properties { command = "pg_isready -h db.internal" }
+}
+SRC
+  }
+
+  p <<'PROSE'
+It takes the same `shell`, `cwd` and `env` parameters as `execute`. Its `timeout` parameter kills one attempt after that long, and a killed attempt is a probe error. The step's own `timeout` field is separate and limits the whole wait. A script that cannot start, because of a bad `cwd` or a missing interpreter, is also a probe error. See [Waiting for upstream systems](guide_waiting).
 PROSE
 
   h2 "Installing packages from git"

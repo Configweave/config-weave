@@ -369,6 +369,114 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
   The built-in `weave` resources declare no lock.
 - An empty lock name is a validation error.
 
+## Probes and wait steps (post-v1 extension)
+
+A playbook can wait for something it does not own (a database, an API, a
+file another host writes) before continuing. A **probe** is a declared
+readiness check; a **wait step** names one with `wait_for` instead of
+`resource` and polls it until it is ready or the step's `timeout` passes.
+The decision and the rejected alternatives are ADR 0002
+(`docs/adr/0002-probes-and-wait-steps.md`). Bindings fixed here:
+
+- **Vocabulary.** `probe "name" { description, script, param … }` is legal
+  in a package and directly under `playbook { }`. Its `param` blocks are
+  the resource `param` shape, and a wait step's `properties` are validated
+  against them by the same code as a resource step's, which is what makes
+  a probe generic: one `net.http_ok` with a `url` param serves every wait.
+  In a package, probes share the one namespace with resources and
+  composites. A playbook-local probe is referenced by bare name and shares
+  the bare-name namespace with playbook composites; its `script` is
+  relative to the playbook directory and its `use` imports resolve against
+  the playbook's `lib/`. `Playbook::probe(package, name)` addresses both,
+  with an empty package meaning playbook-local (the `composite` scheme).
+- **The step.** `resource` became optional in both `WeaveStep` and the
+  shared `WeaveStepDecl`; `step_target` in `model/load.rs` demands exactly
+  one of `resource` / `wait_for` and records `Step::kind`
+  (`StepKind::Resource` / `StepKind::Wait`). The probe reference reuses
+  `Step::package` / `Step::resource`, so `Step::target()` and every report
+  shape need no new field: a wait step's report `resource` is the probe
+  reference. Naming a probe with `resource =` (or the reverse) gets a hint
+  pointing at the other field.
+- **Wait-only fields** (`WAIT_FIELDS`): `timeout` (required), `interval`
+  (default 30s), `fail_on_error` (default false). On a resource step any
+  of them is a validation error. `interval`/`timeout` are typed
+  `std.Duration` in the schema, so the units are WCL's: `min`, never `m`
+  (`1m` fails in WCL itself with `'m' is not a unit of type
+  'std.Duration'`). Both floors are 1s. A static value is range-checked by
+  `check_wait_fields` at validate; a dynamic one (a var, `args.patience`)
+  by `plan_wait`, through the same `wait::check_field`, so both report one
+  message. `fail_on_error` is `@schemaless` like `condition`.
+- **Test steps cannot wait.** `step` is one schema shared by `test` and
+  `composite`, so the loader rejects `wait_for` and the wait fields on a
+  test step. A test asserts convergence; the test's own `ready` command
+  already covers waiting for the instance.
+- **The `ready` contract.** A probe script exports exactly
+  `fn ready(params: Value) -> bool` or `-> Result[bool, string]`, checked
+  at validate like every other entry point (`CompiledProbe` in
+  `engine/scripts.rs`). `true` = ready, `false` = not ready, `Err` or a VM
+  fault = a probe error. Each attempt runs in a fresh VM
+  (`call_ready` builds one per call), so a probe cannot carry state from
+  one attempt to the next. A probe is a declared, compiled script rather
+  than an inline expression on the step, so a typo fails `validate`
+  instead of surfacing hours into an apply.
+- **Check never waits.** `wait::run` in check mode returns after one
+  attempt: ready → `AlreadyConfigured`; not ready or a probe error →
+  `NotConfigured` with `not ready; apply waits up to <timeout>` /
+  `probe failed: <msg>; apply waits up to <timeout>`; a probe error under
+  `fail_on_error` → `Error`. `check` stays a fast dry run.
+- **Apply polls.** Ready on attempt 1 → `AlreadyConfigured`; ready later →
+  `Configured` with `ready after <d> (<n> attempts)`; deadline passed →
+  `Error` with `not ready after <d> (<n> attempts)`, plus `; last probe
+  failed: <msg>` when the last attempt errored. A probe error counts as
+  not ready unless `fail_on_error`, which fails at the first one. The last
+  pause is cut to `deadline - now` so a final attempt lands on the
+  deadline. Messages format durations with `wait::human` (`4m12s`), which
+  is output only and not WCL syntax. No status was added; the existing
+  set reads naturally, and `reboot_required` is never produced.
+- **Off-pool scheduling.** `schedule` dispatches a `Plan::Wait` onto its
+  own thread (`spawn_waiter`), never a `--jobs` worker, so `Done::worker`
+  is `Option`. N waiters in a pool of N workers would otherwise block every
+  resource step until one timed out. A waiter still increments
+  `in_flight`, which gives the other rules for free: a `global` step's
+  `in_flight == 0` barrier drains waiters, `global_running` holds new
+  waiters back, and a sequential play (`parallel = false`, now passed to
+  `schedule` as `sequential`) gates on `in_flight > 0` rather than on its
+  single worker, since a waiter does not occupy that worker.
+- **Always parallel.** A wait step accepts only `concurrency =
+  "parallel"`, and a composite invocation's tightening skips wait steps in
+  the body. A probe has no `concurrency` or `lock`. Holding an `exclusive`
+  class or a lock for hours would stall every step that needs it.
+- **Halt cancellation: an exception to PRD §9.** §9 says a halt lets
+  in-flight steps finish, with no mid-flight cancellation, because killing
+  a half-finished installer is worse than waiting. That still holds for
+  resource steps. Wait steps are cancelled: the scheduler trips a shared
+  `wait::Cancel` when the run halts (another step's Error without
+  `--continue-on-error`, or RebootRequired in apply), every waiter wakes
+  from its `Condvar` pause and reports `NotRun` with `wait cancelled after
+  <d> because the run halted`. Cancelling between attempts mutates
+  nothing, while letting a 3h wait run out would hold a halted run open for
+  hours. A `ready` call already running is not interrupted; the cancel
+  lands at the next pause. In apply, dependents of a wait step that errors
+  or is cancelled are `not run`, as for any dependency.
+- **Built-in probe `weave.command`** (`src/builtin/command.ws`, sharing
+  `lib.ws` with the `execute` resources): `command` is run on every
+  attempt, exit 0 = ready, any other exit = not ready. `shell`, `cwd`,
+  `env` as for `weave.execute`. Its `timeout` property kills one attempt
+  (a killed attempt is a probe error) and is distinct from the step's
+  `timeout`, which bounds the whole wait. A script that cannot start (bad
+  `cwd`, no interpreter) is a probe error; a command bash cannot find is
+  exit 127, so it is "not ready", not an error.
+- **Output.** Events: `step_phase` with phase `waiting`, then
+  `step_waiting` (`idx`, `name`, `attempt`, `elapsed_secs`,
+  `timeout_secs`, `error`) after every unsuccessful attempt. The NDJSON
+  file log gets a DEBUG `probe not ready` record per unsuccessful attempt
+  (`step`, `probe`, `attempt`, `elapsed_secs`, `error`). Rich mode's live
+  line shows `name (waiting, attempt 14, 7m of 3h)`. Probe errors are
+  scrubbed of decrypted secrets before they reach an event, the log or a
+  message. `list --json` gains a `probes` array (name, description,
+  params) per package and at the top level, and a composite's step entry
+  names `wait_for` instead of `resource` for a wait step.
+
 ## Host API decisions (PRD §7)
 
 - `shell::run` splits its command with shell-words and executes the

@@ -118,7 +118,7 @@ This is the whole surface: every block and every field of `package.wcl`. Every `
 
 ### package
 
-The root block, exactly one per file. Resources and composites share one namespace, so a package may not declare both under the same name.
+The root block, exactly one per file. Resources, probes and composites share one namespace, so a package may not declare two of them under the same name.
 
 | Field | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
@@ -126,6 +126,7 @@ The root block, exactly one per file. Resources and composites share one namespa
 | `description` | string | yes | | One-line summary for the docs |
 | `gatherer` | block, repeatable | no | none | Fact collectors |
 | `resource` | block, repeatable | no | none | Units of desired state |
+| `probe` | block, repeatable | no | none | Readiness checks for wait steps |
 | `composite` | block, repeatable | no | none | Reusable blocks of steps |
 | `test` | block, repeatable | no | none | Convergence tests |
 | `scenario` | block, repeatable | no | none | Scripted multi-machine tests |
@@ -183,6 +184,29 @@ The script exports `check(params: Value)` and `apply(params: Value)`, each retur
 | `script` | string | yes | | Path of the wscript file, relative to the package directory |
 | `concurrency` | string | no | `"parallel"` | Scheduling class: `parallel`, `exclusive` or `global` |
 | `lock` | string | no | none | Lock group, scoped to this package: at most one step of any resource here naming the same lock runs at a time |
+| `param` | block, repeatable | no | none | Declared parameters |
+
+### probe
+
+```wcl
+probe "http_ok" {
+  description = "Ready once a URL answers with a 2xx status"
+  script = "probes/http_ok.ws"
+  param "url" {
+    description = "URL to request"
+    type = "string"
+    required = true
+  }
+}
+```
+
+A readiness check. A playbook step waits on it with `wait_for = "package.probe"` instead of `resource` (wait-step fields, statuses and scheduling: playbook.md). The script exports `ready(params: Value) -> bool` or `-> Result[bool, string]`, checked at validate (scripts.md): `true` ready, `false` not ready, `Err` or a VM fault a probe error. A wait step's `properties` are validated against the `param` blocks exactly as for a resource, so one probe serves any number of waits. A probe has no `concurrency` or `lock`; a wait step is always `parallel`.
+
+| Field | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| label | string | yes | | Probe name, referenced as `package.probe`; shares the namespace with resources and composites |
+| `description` | string | yes | | One-line summary for the docs |
+| `script` | string | yes | | Path of the wscript file, relative to the package directory |
 | `param` | block, repeatable | no | none | Declared parameters |
 
 ### param
@@ -265,7 +289,7 @@ composite "site" {
 }
 ```
 
-A named, parameterised block of steps, invoked from a playbook step as `package.composite`. The loader expands each invocation into a container of ordinary steps, reported under `container/…/invocation/inner`. The body sees only its own arguments, never gatherer results, `vars` or `--var` overrides; pass a fact in as a property. Inside the body an unqualified `resource` names this package's own resource or composite. `requires` inside the body reaches only sibling steps of the same invocation. A `concurrency` on the invoking step tightens every step of the body. Nesting is capped at eight levels and a cycle of invocations is rejected by name.
+A named, parameterised block of steps, invoked from a playbook step as `package.composite`. The loader expands each invocation into a container of ordinary steps, reported under `container/…/invocation/inner`. The body sees only its own arguments, never gatherer results, `vars` or `--var` overrides; pass a fact in as a property. Inside the body an unqualified `resource` names this package's own resource or composite, and an unqualified `wait_for` this package's own probe. `requires` inside the body reaches only sibling steps of the same invocation. A `concurrency` on the invoking step tightens every resource step of the body; wait steps stay `parallel`. Nesting is capped at eight levels and a cycle of invocations is rejected by name.
 
 | Field | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
@@ -274,7 +298,7 @@ A named, parameterised block of steps, invoked from a playbook step as `package.
 | `arg` | block, repeatable | no | none | Declared arguments |
 | `step` | block, repeatable | no | none | The body |
 
-Body step fields: `description`, `resource`, `condition`, `requires`, `concurrency`, `properties`. A body step may not carry `expect`; that field belongs to a test step.
+Body step fields: `description`, `resource` or `wait_for` (exactly one), `condition`, `requires`, `concurrency`, `properties`, and on a wait step `interval`, `timeout`, `fail_on_error`. A body step may not carry `expect`; that field belongs to a test step.
 
 ### arg
 
@@ -335,7 +359,7 @@ resource "cache_updated" { description = "…" script = "resources/cache_updated
 
 ## The built-in `weave` package
 
-Ships inside the binary (`src/builtin/`), loads through the ordinary package path, and shows in `validate`, `list` and `docs` like any other package. Both resources are escape hatches for imperative work; a real resource models desired state and belongs in a package. Both are `concurrency = "parallel"`.
+Ships inside the binary (`src/builtin/`), loads through the ordinary package path, and shows in `validate`, `list` and `docs` like any other package. It holds two resources and one probe. Both resources are escape hatches for imperative work; a real resource models desired state and belongs in a package. Both are `concurrency = "parallel"`. The probe, `weave.command`, is for wait steps.
 
 ### weave.execute
 
@@ -385,6 +409,30 @@ Runs `run` once per host and records that it ran. `check` reports `AlreadyConfig
 
 Unix truncates an exit status to 0 to 255, so only Windows can report the four-digit installer codes in `reboot_on`.
 
+### weave.command
+
+A probe: name it with `wait_for`, never `resource`. Runs `command` on every attempt; exit 0 means ready, any other exit means not ready yet.
+
+```wcl
+step "db" {
+  description = "Wait for Postgres"
+  wait_for = "weave.command"
+  interval = 10s
+  timeout = 2h
+  properties { command = "pg_isready -h db.internal" }
+}
+```
+
+| Param | Type | Required | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `command` | string | yes | | Script run on every attempt; exit 0 means ready |
+| `shell` | symbol | no | `:auto` | Same values as `weave.execute` |
+| `cwd` | string | no | `""` | Working directory; empty means where config-weave was run from |
+| `env` | map | no | none | Extra environment variables, string to string |
+| `timeout` | duration | no | `0s` | Kill one attempt after this long; a killed attempt is a probe error. Distinct from the step's `timeout`, which limits the whole wait. Zero or omitted means no limit; under one second rounds up to one |
+
+A script that cannot start (bad `cwd`, no interpreter) is a probe error. A command bash cannot find exits 127, which is "not ready", so a typo in `command` waits out the whole timeout; run `check` first to see it in one attempt.
+
 ## config-weave pkg
 
 ```console
@@ -423,6 +471,8 @@ Default repository: when `pkg add` or `pkg search` runs with no repository regis
 - A composite body sees no gatherer results or vars; pass them in as arguments.
 - A step may tighten `concurrency` and never loosen it; declaring `parallel` on a step of an `exclusive` resource fails validation.
 - `weave.execute` fails when `run` succeeds but the guard still exits non-zero; make the action satisfy the guard.
+- `weave.command` is a probe: `resource = "weave.command"` is a validation error; use `wait_for`.
+- A probe's name cannot repeat a resource's or composite's name in the same package.
 - `weave.execute_once` ignores edits to `run`; change `id` to run again, and set `$CONFIG_WEAVE_STATE_DIR` to test without touching `/var/lib` or the registry.
 - A `secret()` call in a package is a validation error; secrets belong in the playbook.
 - Local edits inside an installed `pkgs/<name>/` are overwritten by `pkg update`.

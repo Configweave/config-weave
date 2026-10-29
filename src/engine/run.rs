@@ -15,9 +15,16 @@
 //! that package. A step starts only when both its class and its lock
 //! allow; one waiting on either is passed over, never blocking the scan.
 //!
+//! Wait steps (`wait_for`) sit outside all of that: each runs on its own
+//! thread rather than a pool worker, so any number may wait without
+//! starving the pool, and they are always `parallel`. They still count as
+//! in flight, so a `global` step drains them and a sequential play
+//! (`parallel = false`) runs them one step at a time like anything else.
+//!
 //! Halting (Error without --continue-on-error, or RebootRequired in
-//! apply) stops dispatching and lets in-flight steps finish — no
-//! mid-flight cancellation.
+//! apply) stops dispatching and lets in-flight resource steps finish — no
+//! mid-flight cancellation of a half-run script. Wait steps are the
+//! exception: they are cancelled at their next pause and report `NotRun`.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
@@ -30,14 +37,15 @@ use wscript_std::DynValue;
 use crate::convert::{FieldValueError, field_value_dyn};
 use crate::diag::Diag;
 use crate::hostapi::{ApplyResult, CheckResult, log};
-use crate::model::{CompositeFrame, Concurrency, ParamDecl, Play, Playbook, Step};
+use crate::model::{CompositeFrame, Concurrency, ParamDecl, Play, Playbook, Step, StepKind};
 
 use super::dag;
 use super::events::{Event, EventSink, Phase};
 use super::gather::apply_param_defaults;
-use super::scripts::{CompiledResource, EntryKind, ScriptSet};
+use super::scripts::{CompiledProbe, CompiledResource, EntryKind, ScriptSet};
 use super::status::*;
 use super::vars::VarStore;
+use super::wait::{self, Cancel, WaitSpec};
 
 pub struct RunOptions {
     pub mode: Mode,
@@ -63,6 +71,12 @@ enum Plan {
         /// `(package, lock name)` — lock names are package-scoped.
         lock: Option<(String, String)>,
         params: DynValue,
+    },
+    /// A wait step: poll the probe until ready or the timeout passes.
+    Wait {
+        probe_key: String,
+        params: DynValue,
+        spec: WaitSpec,
     },
 }
 
@@ -112,7 +126,16 @@ pub fn run_play(
 
     // ---- dispatch phase.
     let workers = if play.parallel { opts.jobs.max(1) } else { 1 };
-    let reports = schedule(&steps, &plans, &dag, scripts, ctx, opts, workers);
+    let reports = schedule(
+        &steps,
+        &plans,
+        &dag,
+        scripts,
+        ctx,
+        opts,
+        workers,
+        !play.parallel,
+    );
 
     let gathered = pb
         .gathers
@@ -359,6 +382,9 @@ fn plan_from_block(pb: &Playbook, step: &Step, block: &Block<'_>) -> Plan {
         Ok(false) => return Plan::Skip(None),
         Err(e) => return Plan::Fail(e),
     }
+    if step.kind == StepKind::Wait {
+        return plan_wait(pb, step, block);
+    }
     let Some(decl) = pb.resource(&step.package, &step.resource) else {
         return Plan::Fail("resource declaration missing".into());
     };
@@ -380,6 +406,53 @@ fn plan_from_block(pb: &Playbook, step: &Step, block: &Block<'_>) -> Plan {
         concurrency,
         lock: decl.lock.clone().map(|l| (step.package.clone(), l)),
         params: DynValue::Map(params),
+    }
+}
+
+/// A wait step's plan: the probe's properties with defaults applied, and
+/// the polling policy evaluated in the step's scope (so `timeout` may come
+/// from a variable or a composite argument).
+fn plan_wait(pb: &Playbook, step: &Step, block: &Block<'_>) -> Plan {
+    let Some(decl) = pb.probe(&step.package, &step.resource) else {
+        return Plan::Fail("probe declaration missing".into());
+    };
+    let mut params = match read_properties(block) {
+        Ok(p) => p,
+        Err(e) => return Plan::Fail(e),
+    };
+    if let Err(errors) = apply_param_defaults(&mut params, &decl.params) {
+        return Plan::Fail(errors.join("; "));
+    }
+    let mut fields: HashMap<&str, DynValue> = HashMap::new();
+    for f in block.fields() {
+        let name = f.name();
+        let Some(key) = ["interval", "timeout", "fail_on_error"]
+            .into_iter()
+            .find(|k| *k == name)
+        else {
+            continue;
+        };
+        match field_value_dyn(&f) {
+            Ok(fv) => {
+                fields.insert(key, fv.value);
+            }
+            Err(FieldValueError::Convert(e)) => return Plan::Fail(format!("'{key}': {e}")),
+            Err(FieldValueError::Unresolved(e) | FieldValueError::Eval(e)) => {
+                return Plan::Fail(format!("'{key}': {e}"));
+            }
+        }
+    }
+    match wait::spec(
+        fields.get("interval"),
+        fields.get("timeout"),
+        fields.get("fail_on_error"),
+    ) {
+        Ok(spec) => Plan::Wait {
+            probe_key: step.target(),
+            params: DynValue::Map(params),
+            spec,
+        },
+        Err(e) => Plan::Fail(e),
     }
 }
 
@@ -416,12 +489,15 @@ struct Job {
 
 struct Done {
     idx: usize,
-    worker: usize,
+    /// The pool worker that ran the step; `None` for a wait step, which
+    /// runs on its own thread.
+    worker: Option<usize>,
     status: StepStatus,
     message: Option<String>,
     duration: Duration,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn schedule(
     steps: &[&Step],
     plans: &[Plan],
@@ -430,6 +506,7 @@ fn schedule(
     ctx: &Context,
     opts: &RunOptions,
     workers: usize,
+    sequential: bool,
 ) -> Vec<StepReport> {
     let n = steps.len();
     let mut reports: Vec<Option<StepReport>> = (0..n).map(|_| None).collect();
@@ -440,6 +517,8 @@ fn schedule(
     let mut running_exclusive: HashSet<String> = HashSet::new();
     let mut held_locks: HashSet<(String, String)> = HashSet::new();
     let mut global_running = false;
+    let cancel = Cancel::new();
+    let mut waiter_handles = Vec::new();
 
     let (done_tx, done_rx) = mpsc::channel::<Done>();
     let (job_txs, worker_handles): (Vec<_>, Vec<_>) = (0..workers)
@@ -491,7 +570,7 @@ fn schedule(
                         log::clear_sink();
                         let _ = done.send(Done {
                             idx: job.idx,
-                            worker: worker_id,
+                            worker: Some(worker_id),
                             status,
                             message,
                             duration: started.elapsed(),
@@ -502,7 +581,9 @@ fn schedule(
             (tx, handle)
         })
         .unzip();
-    drop(done_tx);
+    // Waiters each take a clone; the scheduler only ever receives while
+    // something is in flight, so holding this one open cannot block it.
+    let wait_done = done_tx;
     let mut idle_workers: VecDeque<usize> = (0..workers).collect();
 
     let deps_satisfied = |i: usize, completed: &[bool]| dag.deps[i].iter().all(|&d| completed[d]);
@@ -578,7 +659,47 @@ fn schedule(
                         });
                         if !opts.continue_on_error {
                             halted = true;
+                            cancel.cancel();
                         }
+                        progressed = true;
+                    }
+                    Plan::Wait {
+                        probe_key,
+                        params,
+                        spec,
+                    } => {
+                        if global_running || (sequential && in_flight > 0) {
+                            continue;
+                        }
+                        dispatched[i] = true;
+                        in_flight += 1;
+                        let Some(probe) = scripts.probes.get(probe_key) else {
+                            let _ = wait_done.send(Done {
+                                idx: i,
+                                worker: None,
+                                status: StepStatus::Error,
+                                message: Some(format!("no compiled probe '{probe_key}'")),
+                                duration: Duration::ZERO,
+                            });
+                            progressed = true;
+                            continue;
+                        };
+                        waiter_handles.push(spawn_waiter(
+                            WaitJob {
+                                idx: i,
+                                probe_key: probe_key.clone(),
+                                unit: probe.unit.clone(),
+                                ready: probe.ready,
+                                params: params.clone(),
+                                spec: *spec,
+                                step_label: steps[i].name.clone(),
+                                mode: opts.mode,
+                            },
+                            ctx.clone(),
+                            opts.events.clone(),
+                            std::sync::Arc::clone(&cancel),
+                            wait_done.clone(),
+                        ));
                         progressed = true;
                     }
                     Plan::Run {
@@ -587,8 +708,13 @@ fn schedule(
                         lock,
                         params,
                     } => {
-                        // Concurrency gating.
-                        if global_running || idle_workers.is_empty() {
+                        // Concurrency gating. A sequential play has one worker,
+                        // but a wait step runs off the pool, so it is counted
+                        // here instead.
+                        if global_running
+                            || idle_workers.is_empty()
+                            || (sequential && in_flight > 0)
+                        {
                             continue;
                         }
                         match concurrency {
@@ -675,7 +801,9 @@ fn schedule(
         // Wait for one completion.
         let Ok(done) = done_rx.recv() else { break };
         in_flight -= 1;
-        idle_workers.push_back(done.worker);
+        if let Some(w) = done.worker {
+            idle_workers.push_back(w);
+        }
         completed[done.idx] = true;
         if let Plan::Run {
             resource_key,
@@ -699,6 +827,9 @@ fn schedule(
             StepStatus::RebootRequired if opts.mode == Mode::Apply => halted = true,
             _ => {}
         }
+        if halted {
+            cancel.cancel();
+        }
         let report = step_report(steps[done.idx], done.status, done.message, done.duration);
         (opts.events)(Event::StepFinished {
             idx: done.idx,
@@ -708,9 +839,15 @@ fn schedule(
     }
 
     drop(job_txs);
+    drop(wait_done);
     for handle in worker_handles {
         if handle.join().is_err() {
             tracing::error!("worker thread panicked");
+        }
+    }
+    for handle in waiter_handles {
+        if handle.join().is_err() {
+            tracing::error!("wait thread panicked");
         }
     }
 
@@ -737,6 +874,89 @@ fn quick_report(step: &Step, status: StepStatus, message: Option<String>) -> Ste
 /// straight from a resource script and may quote a parameter it was given
 /// — is scrubbed of decrypted secrets before it reaches the event stream,
 /// the report or the log.
+/// Everything a wait step's thread needs, as owned data.
+struct WaitJob {
+    idx: usize,
+    probe_key: String,
+    unit: wscript::CompiledUnit,
+    ready: EntryKind,
+    params: DynValue,
+    spec: WaitSpec,
+    step_label: String,
+    mode: Mode,
+}
+
+/// Run one wait step on a thread of its own, reporting through `done`.
+fn spawn_waiter(
+    job: WaitJob,
+    ctx: Context,
+    events: EventSink,
+    cancel: std::sync::Arc<Cancel>,
+    done: mpsc::Sender<Done>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let _guard = crate::hostapi::worker_init();
+        let started = Instant::now();
+        events(Event::StepStarted {
+            idx: job.idx,
+            name: job.step_label.clone(),
+        });
+        crate::logging::install_step_sink(&job.step_label, &job.probe_key);
+        events(Event::StepPhase {
+            idx: job.idx,
+            name: job.step_label.clone(),
+            phase: Phase::Waiting,
+        });
+        let probe = CompiledProbe {
+            unit: job.unit,
+            ready: job.ready,
+        };
+        let on_attempt = |a: &wait::Attempt| {
+            let error = a.error.as_deref().map(scrub);
+            tracing::debug!(
+                step = %job.step_label,
+                probe = %job.probe_key,
+                attempt = a.attempt,
+                elapsed_secs = a.elapsed.as_secs_f64(),
+                error = error.as_deref().unwrap_or(""),
+                "probe not ready"
+            );
+            events(Event::StepWaiting {
+                idx: job.idx,
+                name: job.step_label.clone(),
+                attempt: a.attempt,
+                elapsed: a.elapsed,
+                timeout: job.spec.timeout,
+                error,
+            });
+        };
+        let (status, message) = wait::run(
+            || call_ready(&probe, &ctx, job.params.clone()),
+            &job.spec,
+            job.mode,
+            &cancel,
+            &on_attempt,
+        );
+        log::clear_sink();
+        let _ = done.send(Done {
+            idx: job.idx,
+            worker: None,
+            status,
+            message,
+            duration: started.elapsed(),
+        });
+    })
+}
+
+/// Scrub decrypted secrets from text bound for events or the log.
+fn scrub(text: &str) -> String {
+    if crate::secrets::redact::active() {
+        crate::secrets::redact::scrub(text)
+    } else {
+        text.to_string()
+    }
+}
+
 fn step_report(
     step: &Step,
     status: StepStatus,
@@ -750,7 +970,7 @@ fn step_report(
     StepReport {
         name: step.name.clone(),
         container_path: step.container_path.clone(),
-        resource: format!("{}.{}", step.package, step.resource),
+        resource: step.target(),
         status,
         message,
         duration,
@@ -811,6 +1031,19 @@ fn call_check(
             .map_err(|e| e.to_string()),
         EntryKind::Fallible => vm
             .call_unit::<_, Result<CheckResult, String>>(&res.unit, "check", (params,))
+            .map_err(|e| e.to_string())
+            .and_then(|r| r),
+    }
+}
+
+fn call_ready(probe: &CompiledProbe, ctx: &Context, params: DynValue) -> Result<bool, String> {
+    let mut vm = crate::hostapi::vm(ctx);
+    match probe.ready {
+        EntryKind::Plain => vm
+            .call_unit(&probe.unit, "ready", (params,))
+            .map_err(|e| e.to_string()),
+        EntryKind::Fallible => vm
+            .call_unit::<_, Result<bool, String>>(&probe.unit, "ready", (params,))
             .map_err(|e| e.to_string())
             .and_then(|r| r),
     }

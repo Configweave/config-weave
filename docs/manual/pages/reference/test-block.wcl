@@ -6,7 +6,7 @@ page ref_test_block {
   chapter_header "The test block" {
     kicker       = "Reference · reference"
     reading_time = "7 min read"
-    updated      = "2026-10-19"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
@@ -88,7 +88,7 @@ SRC
   }
 
   p <<'PROSE'
-A step of the synthesized playbook, with the fields of a playbook [step](ref_playbook) plus `expect`. The steps run under one play in dependency order with the ordinary scheduler, so `requires` orders them exactly as it does in a playbook. Validation rejects a step whose expectation is `converge` or `already_configured` when it requires a step expecting `error` or `reboot_required`, because the dependent could never run. A test step may not declare `concurrency`; that field belongs to playbook and composite steps.
+A step of the synthesized playbook, with the fields of a playbook [step](ref_playbook) plus `expect`. The steps run under one play in dependency order with the ordinary scheduler, so `requires` orders them exactly as it does in a playbook. Validation rejects a step whose expectation is `converge` or `already_configured` when it requires a step expecting `error` or `reboot_required`, because the dependent could never run. A test step may not declare `concurrency`; that field belongs to playbook and composite steps. A test step cannot wait either. `wait_for`, `interval`, `timeout` and `fail_on_error` are validation errors on a test step, which always names a resource; the test's own `ready` command is how a test waits for its instance.
 PROSE
 
   table {

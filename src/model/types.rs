@@ -24,6 +24,9 @@ pub struct Playbook {
     pub vars: Vec<VarDecl>,
     /// Playbook-local composites, referenced from a step by bare name.
     pub composites: BTreeMap<String, CompositeDecl>,
+    /// Playbook-local probes, referenced from a wait step by bare name.
+    /// They share that bare-name namespace with `composites`.
+    pub probes: BTreeMap<String, ProbeDecl>,
     pub plays: Vec<Play>,
     pub packages: BTreeMap<String, Package>,
 }
@@ -44,6 +47,16 @@ impl Playbook {
             self.composites.get(name)
         } else {
             self.packages.get(package)?.composites.get(name)
+        }
+    }
+
+    /// A probe by the same addressing as [`Playbook::composite`]: an empty
+    /// package means the playbook-local namespace.
+    pub fn probe(&self, package: &str, name: &str) -> Option<&ProbeDecl> {
+        if package.is_empty() {
+            self.probes.get(name)
+        } else {
+            self.packages.get(package)?.probes.get(name)
         }
     }
 
@@ -120,8 +133,11 @@ pub struct Container {
 pub struct Step {
     pub name: String,
     pub description: String,
+    /// Package of the resource or probe; empty for a playbook-local probe.
     pub package: String,
+    /// The resource name, or the probe name for a wait step.
     pub resource: String,
+    pub kind: StepKind,
     pub requires: Vec<String>,
     /// Step-level concurrency tightening, if declared.
     pub concurrency: Option<Concurrency>,
@@ -145,7 +161,25 @@ pub struct Step {
     pub span: (usize, usize),
 }
 
+/// What a step runs: a resource through check/apply, or a probe polled
+/// until it reports ready.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepKind {
+    Resource,
+    Wait,
+}
+
 impl Step {
+    /// The target as the author wrote it: `package.name`, or the bare name
+    /// of a playbook-local probe.
+    pub fn target(&self) -> String {
+        if self.package.is_empty() {
+            self.resource.clone()
+        } else {
+            format!("{}.{}", self.package, self.resource)
+        }
+    }
+
     /// The enclosing *playbook* containers, with composite invocation
     /// segments stripped. Only these carry inheritable conditions.
     pub fn playbook_path(&self) -> &[String] {
@@ -220,6 +254,8 @@ pub struct Package {
     pub resources: BTreeMap<String, ResourceDecl>,
     /// Composites, sharing one namespace with `resources`.
     pub composites: BTreeMap<String, CompositeDecl>,
+    /// Readiness probes, sharing the same namespace.
+    pub probes: BTreeMap<String, ProbeDecl>,
     /// Convergence tests, in declaration order.
     pub tests: Vec<TestDecl>,
     /// Wscript-scripted scenarios, in declaration order.
@@ -245,6 +281,16 @@ pub struct ResourceDecl {
     /// Lock group, scoped to the declaring package: at most one step of
     /// any resource in this package naming the same lock runs at a time.
     pub lock: Option<String>,
+    pub params: Vec<ParamDecl>,
+}
+
+/// A readiness check a wait step polls. Its script exports
+/// `fn ready(params: Value) -> bool` (or `Result[bool, string]`).
+#[derive(Debug)]
+pub struct ProbeDecl {
+    pub name: String,
+    pub description: String,
+    pub script: ScriptSource,
     pub params: Vec<ParamDecl>,
 }
 

@@ -1,7 +1,7 @@
 # Writing wscript scripts for config-weave
 
 Everything needed to write a resource (`check` + `apply`), a gatherer (`gather`),
-a test `verify` script or a scenario `run` script. The per-module function
+a probe (`ready`), a test `verify` script or a scenario `run` script. The per-module function
 tables of the host API (`fs`, `shell`, `log`, …) are in host-api.md.
 
 ## The convergence contract
@@ -59,7 +59,8 @@ Validation compiles every script against the host API and checks that the
 exported functions exist with an accepted signature before anything runs. Each
 entry point accepts two signatures: a plain one returning the result directly,
 and a fallible one wrapped in `Result[…, string]` so the body can use `?`. An
-`Err` becomes the step's *error* status with the string as its message. A VM
+`Err` becomes the step's *error* status with the string as its message (a
+probe's `Err` is the exception: see `ready`). A VM
 fault (index out of bounds, `unwrap()` on `None`) is reported the same way.
 Only the entry file's functions are exported; a helper in `lib/` cannot supply
 `check`. Generic functions cannot be entry points. This is the whole set of
@@ -99,6 +100,37 @@ block with the gatherer's declared defaults applied. A key the gatherer declares
 with `returns … type = "symbol"` comes back as the bare string, such as
 `"systemd"`, and the engine binds it into the playbook as the symbol
 `:systemd`. A failed gather aborts the run before any step executes.
+
+### ready (probe)
+
+```rust
+fn ready(params: Value) -> bool
+fn ready(params: Value) -> Result[bool, string]
+```
+
+A probe's only entry point. `params` is the wait step's properties with the
+probe's declared defaults applied. `true` = ready, `false` = not ready yet.
+`Err` or a VM fault = a probe error, which the wait step counts as not ready
+and keeps polling, unless the step sets `fail_on_error = true` (then the first
+error fails the step). Check mode calls it once; apply calls it every
+`interval` until `true` or the step's `timeout`. Each attempt runs in a fresh
+VM, so nothing carries over between attempts. Read the host only. Return
+`Ok(false)` for "not yet" and `Err` for "will not get better", so
+`fail_on_error` can tell them apart. Statuses: playbook.md, Wait steps.
+
+```rust
+use value
+use http
+
+fn ready(params: Value) -> Result[bool, string] {
+    let url = match params.get("url") {
+        Some(v) => v.as_string().unwrap_or(""),
+        None => "",
+    }
+    let resp = http::get(url, Value::Map(#{ "timeout": Value::Int(10) }))?
+    Ok(resp.status >= 200 && resp.status < 300)
+}
+```
 
 ### verify (test)
 
@@ -162,6 +194,11 @@ The status a step reports, as printed in human output and as the stable
 | skipped | `skipped` | The step's or an enclosing container's `condition` was false. |
 | error | `error` | An `Err`, a VM fault, or a re-check that disagreed with `apply`. |
 | not run | `not_run` | The run halted before the step, or a dependency errored or did not run. |
+
+A wait step reports from the same set: ready on the first attempt is *already
+configured*, ready after waiting *configured*, not ready in check *not
+configured*, timed out or a fatal probe error *error*, cancelled by a halt *not
+run*. It never reports *reboot required*.
 
 Exit code of a run: 1 if any step is *error*, else 3 in apply mode if any step
 is *reboot required*, else 0.

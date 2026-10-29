@@ -6,12 +6,12 @@ page ref_scripts {
   chapter_header "Script entry points" {
     kicker       = "Reference · reference"
     reading_time = "6 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
   p <<'PROSE'
-Every wscript file that config-weave runs exports one or two named functions with a fixed signature. Validation compiles each script against the host API and checks that the exported functions exist with an accepted signature before anything runs. A script that does not satisfy its contract fails validation with a message naming the entry point. Each entry point accepts two signatures: a plain one that returns the result directly, and a fallible one that wraps it in `Result[…, string]` so the body can use `?`. An `Err` returned from a resource or gatherer becomes the step's *error* status with the string as its message. A VM fault, such as an index out of bounds or `unwrap()` on `None`, is reported the same way. Where each script lives and what it may import is covered in [The host API](guide_host_api).
+Every wscript file that config-weave runs exports one or two named functions with a fixed signature. Validation compiles each script against the host API and checks that the exported functions exist with an accepted signature before anything runs. A script that does not satisfy its contract fails validation with a message naming the entry point. Each entry point accepts two signatures: a plain one that returns the result directly, and a fallible one that wraps it in `Result[…, string]` so the body can use `?`. An `Err` returned from a resource or gatherer becomes the step's *error* status with the string as its message. A probe's `Err` is handled differently; see [ready](ref_scripts). A VM fault, such as an index out of bounds or `unwrap()` on `None`, is reported the same way. Where each script lives and what it may import is covered in [The host API](guide_host_api).
 PROSE
 
   h2 "check"
@@ -68,6 +68,26 @@ SRC
     rows:
       | "Parameter" | "Type" | "Meaning" |
       | "`params`" | "`Value`" | "The gather's parameters as a map, keyed by parameter name." |
+  }
+
+  h2 "ready"
+
+  code rust {
+    filename = "probes/http_ok.ws"
+    source = <<'SRC'
+fn ready(params: Value) -> bool
+fn ready(params: Value) -> Result[bool, string]
+SRC
+  }
+
+  p <<'PROSE'
+Exported by a probe script, the only entry point a probe has. Reports whether an upstream system is ready. A wait step calls it once in check mode, and once per `interval` in apply mode until it returns `true` or the step's `timeout` passes. `true` means ready and `false` means not ready yet. An `Err`, or a VM fault, is a probe error: the step treats it as not ready and keeps polling, unless the step sets `fail_on_error = true`, in which case the first error fails the step. A probe should not change the host. `params` is the wait step's properties with the probe's declared defaults applied. The statuses a wait step reports are in [Waiting for upstream systems](guide_waiting).
+PROSE
+
+  table {
+    rows:
+      | "Parameter" | "Type" | "Meaning" |
+      | "`params`" | "`Value`" | "The wait step's properties as a map, keyed by parameter name." |
   }
 
   h2 "verify"
@@ -151,17 +171,17 @@ SRC
 SRC
   }
 
-  p "The statuses a step can report, as printed in human output and as the stable `status` id in `--json` output. The first six are the outcomes of the lifecycle; *not run* marks a step left undispatched when a run halts early, or blocked by a dependency that errored or did not run."
+  p "The statuses a step can report, as printed in human output and as the stable `status` id in `--json` output. The first six are the outcomes of the lifecycle; *not run* marks a step left undispatched when a run halts early, or blocked by a dependency that errored or did not run. A wait step reports from the same set, as the last column shows."
 
   table {
     rows:
-      | "Status" | "JSON id" | "Meaning" |
-      | "already configured" | "`already_configured`" | "`check` returned `AlreadyConfigured`; nothing to do." |
-      | "configured" | "`configured`" | "`apply` ran and the re-check returned `AlreadyConfigured`." |
-      | "not configured" | "`not_configured`" | "Check mode only: `check` returned `NotConfigured`." |
-      | "reboot required" | "`reboot_required`" | "`check` or `apply` returned `RebootRequired`." |
-      | "skipped" | "`skipped`" | "The step's or an enclosing container's `condition` was false." |
-      | "error" | "`error`" | "An `Err`, a VM fault, or a re-check that disagreed with `apply`." |
-      | "not run" | "`not_run`" | "The run halted before the step, or a dependency errored or did not run." |
+      | "Status" | "JSON id" | "Meaning" | "For a wait step" |
+      | "already configured" | "`already_configured`" | "`check` returned `AlreadyConfigured`; nothing to do." | "The probe was ready on the first attempt." |
+      | "configured" | "`configured`" | "`apply` ran and the re-check returned `AlreadyConfigured`." | "Apply mode: the probe became ready after waiting." |
+      | "not configured" | "`not_configured`" | "Check mode only: `check` returned `NotConfigured`." | "Check mode only: the probe was not ready, or failed without `fail_on_error`." |
+      | "reboot required" | "`reboot_required`" | "`check` or `apply` returned `RebootRequired`." | "Never." |
+      | "skipped" | "`skipped`" | "The step's or an enclosing container's `condition` was false." | "The same." |
+      | "error" | "`error`" | "An `Err`, a VM fault, or a re-check that disagreed with `apply`." | "The timeout passed, or a probe error under `fail_on_error`." |
+      | "not run" | "`not_run`" | "The run halted before the step, or a dependency errored or did not run." | "The same, or the run halted while the step was waiting." |
   }
 }

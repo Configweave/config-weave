@@ -6,7 +6,7 @@ page apx_troubleshooting {
   chapter_header "Troubleshooting" {
     kicker       = "Appendices · explanation"
     reading_time = "11 min read"
-    updated      = "2026-10-19"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
@@ -25,7 +25,7 @@ PROSE
   h2 "validate reports that a script does not satisfy a contract"
 
   p <<'PROSE'
-**Symptom.** A diagnostic reads `script does not satisfy the 'check' contract` (or `apply`, `gather`, `verify`), or `scenario script does not satisfy the 'run(lab: Lab) -> bool' contract`.
+**Symptom.** A diagnostic reads `script does not satisfy the 'check' contract` (or `apply`, `gather`, `ready`, `verify`), or `scenario script does not satisfy the 'run(lab: Lab) -> bool' contract`.
 
 **Cause.** The script compiled, but it does not export the named function with one of the two accepted signatures. Only the entry file's functions are exported, so a function defined in an imported helper does not count.
 

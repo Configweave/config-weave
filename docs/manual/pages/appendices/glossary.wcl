@@ -6,7 +6,7 @@ page apx_glossary {
   chapter_header "Glossary" {
     kicker       = "Appendices · reference"
     reading_time = "4 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
@@ -25,16 +25,18 @@ page apx_glossary {
       | "Gatherer" | "A package-declared fact collector implemented by a wscript script exporting `gather(params) -> Value`. A playbook gather block runs one and binds its result to a variable. See [Packages, resources and gatherers](guide_packages)." |
       | "Host API" | "The wscript module surface config-weave registers for scripts: `log`, `fs`, `path`, `shell`, `http`, `hash`, `archive`, `env`, `sys`, `data`, `template`, `time`, `json`, `toml`, `xml`, `regex`, and on Windows `registry`, `acl`, `service` and `com`. Exactly what `config-weave wscripti` emits. See [The host API](guide_host_api)." |
       | "Lock group" | "A name a resource declares in `lock`. At most one step of any resource in the same package naming that lock runs at a time. See [Scheduling and concurrency](guide_scheduling)." |
-      | "Package" | "A bundle of resources, gatherers, composites, tests and scenarios under `pkgs/<name>/`. Its name qualifies references from playbooks, as in `core.file_present`. See [Packages, resources and gatherers](guide_packages)." |
+      | "Package" | "A bundle of resources, gatherers, probes, composites, tests and scenarios under `pkgs/<name>/`. Its name qualifies references from playbooks, as in `core.file_present`. See [Packages, resources and gatherers](guide_packages)." |
       | "Play" | "A named group of steps inside a playbook. Steps run in parallel by default; `parallel = false` forces declaration order. `check` and `apply` target one play. Plural: plays. See [Playbooks, plays and steps](guide_playbooks)." |
       | "Playbook" | "A directory holding `playbook.wcl`, plus optional `lib/` and `pkgs/`, describing the desired state of a system. The unit config-weave checks or applies. See [Playbooks, plays and steps](guide_playbooks)." |
+      | "Probe" | "A readiness check declared in a package or a playbook, implemented by a wscript script exporting `ready(params) -> bool`. A wait step names it with `wait_for`. The built-in `weave.command` probe is ready when a shell script exits 0. See [Waiting for upstream systems](guide_waiting)." |
       | "Resource" | "A declared unit of desired state in a package, implemented by a wscript script exporting `check()` and `apply()`. Referenced from steps as `pkg.resource`. See [Packages, resources and gatherers](guide_packages)." |
       | "Scenario" | "A scripted, multi-stage test over a declared vmlab lab. A wscript driver brings VMs up by name, applies config-weave, reboots and asserts, for flows the three-run protocol cannot express, such as a Windows domain controller promotion. See [The testlab](guide_testlab)." |
-      | "Step" | "One unit of work in a play. Names a resource or composite and supplies properties, and carries an optional condition, `requires` for ordering, and a concurrency tightening. See [Playbooks, plays and steps](guide_playbooks)." |
+      | "Step" | "One unit of work in a play. Names a resource or composite, or a probe for a wait step, and supplies properties, and carries an optional condition, `requires` for ordering, and a concurrency tightening. See [Playbooks, plays and steps](guide_playbooks)." |
       | "Testlab" | "The `config-weave test` command and its runner. Runs package tests in disposable vmlab instances, a container from an OCI image or a VM from a template, proving convergence with the three-run protocol. See [The testlab](guide_testlab)." |
       | "Three-run protocol" | "The test sequence `check`, `apply`, `apply`, all run with `--json --continue-on-error`. Run 2 proves in-process convergence; run 3 proves cross-process idempotence. See [The test block](ref_test_block)." |
       | "Verify script" | "A wscript script exporting `verify(facts) -> bool`, run inside a test instance after the three runs to make custom assertions about the converged state. Also called verify. See [Script entry points](ref_scripts)." |
       | "VM instance" | "A testlab instance started from a vmlab template (`template = \"x86_64/ubuntu-24.04\"`) as a full virtual machine: Linux or Windows, with a real init system, kernel and reboots. See [The testlab](guide_testlab)." |
+      | "Wait step" | "A step that names a probe with `wait_for` instead of a resource. `check` runs the probe once; `apply` polls it every `interval` until it is ready or `timeout` passes. Runs outside the worker pool, is always `parallel`, and is cancelled when the run halts. See [Waiting for upstream systems](guide_waiting)." |
       | "wscript" | "The statically typed, Rust-flavoured scripting language that resources, gatherers, verify scripts and scenario drivers are written in. Scripts have the `.ws` extension, may import helpers from `lib/`, and compile against the host API. See [wscript: values, types and functions](guide_wscript_basics)." |
   }
 }

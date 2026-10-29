@@ -6,12 +6,12 @@ page ref_package {
   chapter_header "package.wcl" {
     kicker       = "Reference · reference"
     reading_time = "11 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
   p <<'PROSE'
-`package.wcl` is the WCL document under `pkgs/<name>/` inside a playbook directory. It holds one `package` block, which declares the package's gatherers, resources, composites, tests and scenarios. The engine appends the system import `<weave/package.wcl>` when it opens the package, so you never write an import line. The package name qualifies every reference from a playbook: a resource `file_present` in package `core` is `core.file_present`. What a package is for is explained in [Packages, resources and gatherers](guide_packages); this chapter lists every block and field.
+`package.wcl` is the WCL document under `pkgs/<name>/` inside a playbook directory. It holds one `package` block, which declares the package's gatherers, resources, probes, composites, tests and scenarios. The engine appends the system import `<weave/package.wcl>` when it opens the package, so you never write an import line. The package name qualifies every reference from a playbook: a resource `file_present` in package `core` is `core.file_present`. What a package is for is explained in [Packages, resources and gatherers](guide_packages); this chapter lists every block and field.
 PROSE
 
   table {
@@ -38,6 +38,7 @@ package "core" {
 
   gatherer "os_info" { … }
   resource "file_present" { … }
+  probe "http_ok" { … }
   composite "site" { … }
   test "file_present_converges" { … }
   scenario "reboot_survives" { … }
@@ -45,7 +46,7 @@ package "core" {
 SRC
   }
 
-  p "The root block. Resources and composites share one namespace, so a package may not declare both under the same name."
+  p "The root block. Resources, probes and composites share one namespace, so a package may not declare two of them under the same name."
 
   table {
     rows:
@@ -54,6 +55,7 @@ SRC
       | "`description`" | "string" | "yes" | "One-line summary for the docs." |
       | "`gatherer`" | "block, repeatable" | "no" | "Fact collectors. See [gatherer](ref_package)." |
       | "`resource`" | "block, repeatable" | "no" | "Units of desired state. See [resource](ref_package)." |
+      | "`probe`" | "block, repeatable" | "no" | "Readiness checks for wait steps. See [probe](ref_package)." |
       | "`composite`" | "block, repeatable" | "no" | "Reusable blocks of steps. See [composite](ref_package)." |
       | "`test`" | "block, repeatable" | "no" | "Convergence tests. See [The test block](ref_test_block)." |
       | "`scenario`" | "block, repeatable" | "no" | "Scripted multi-machine tests. See [scenario](ref_package)." |
@@ -138,6 +140,40 @@ PROSE
       | "`param`" | "block, repeatable" | "no" | "Declared parameters. See [param](ref_package)." |
   }
 
+  h2 "probe"
+
+  code wcl {
+    source = <<'SRC'
+probe "http_ok" {
+  description = "Ready once a URL answers with a 2xx status"
+  script = "probes/http_ok.ws"
+
+  param "url" {
+    description = "URL to request"
+    type = "string"
+    required = true
+  }
+}
+SRC
+  }
+
+  p <<'PROSE'
+A readiness check. A wait step names it with `wait_for = "package.probe"` instead of `resource`, and the engine polls it until it reports ready or the step's `timeout` passes. Its script exports `ready(params: Value) -> bool` (or the `Result` form, see [Script entry points](ref_scripts)); `true` means ready, `false` not ready yet, and `Err` is a probe error. `validate` compiles the script and checks the signature. A step's `properties` are validated against the probe's `param` blocks exactly as a resource step's are, so one probe with a `url` parameter serves any number of wait steps. A probe has no `concurrency` or `lock`: a wait step is always `parallel`. The wait step fields are in [step in playbook.wcl](ref_playbook), and the behaviour in [Waiting for upstream systems](guide_waiting).
+PROSE
+
+  table {
+    rows:
+      | "Field" | "Type" | "Required" | "Meaning" |
+      | "label" | "string" | "yes" | "The probe name, referenced as `package.probe`. Shares a namespace with this package's resources and composites." |
+      | "`description`" | "string" | "yes" | "One-line summary for the docs." |
+      | "`script`" | "string" | "yes" | "Path of the wscript file, relative to the package directory." |
+      | "`param`" | "block, repeatable" | "no" | "Declared parameters. See [param](ref_package)." |
+  }
+
+  p <<'PROSE'
+The built-in `weave` package ships one probe, `weave.command`. It runs its `command` parameter as a shell script on every attempt and reports ready when the script exits 0. It takes `shell`, `cwd` and `env` like `weave.execute`, plus a `timeout` that kills a single attempt; see [Packages, resources and gatherers](guide_packages).
+PROSE
+
   h2 "param"
 
   code wcl {
@@ -159,7 +195,7 @@ SRC
   }
 
   p <<'PROSE'
-One declared parameter of a resource or gatherer. Validation checks each supplied value against the coarse type, applies the default when the value is absent, and rejects a missing required parameter or an undeclared name. Two types have a fixed spelling. A `symbol` value is written `:name` wherever it appears; the quoted spelling is an error, because both reach the script as the same text. A `duration` value is a bare WCL unit literal with suffix `ns`, `us`, `ms`, `s`, `min`, `h` or `d` (minutes are `min`, because `m` is metres), and the script receives a plain `Int` of nanoseconds.
+One declared parameter of a resource, probe or gatherer. Validation checks each supplied value against the coarse type, applies the default when the value is absent, and rejects a missing required parameter or an undeclared name. Two types have a fixed spelling. A `symbol` value is written `:name` wherever it appears; the quoted spelling is an error, because both reach the script as the same text. A `duration` value is a bare WCL unit literal with suffix `ns`, `us`, `ms`, `s`, `min`, `h` or `d` (minutes are `min`, because `m` is metres), and the script receives a plain `Int` of nanoseconds.
 PROSE
 
   table {
@@ -244,7 +280,7 @@ SRC
   }
 
   p <<'PROSE'
-A named, parameterised block of steps, invoked from a playbook step as `package.composite`. It has the same shape and rules as a playbook composite, described under [composite in playbook.wcl](ref_playbook): the loader expands each invocation into a container of ordinary steps, the body sees only its own arguments through `args.name`, and `requires` inside the body reaches only sibling steps. Inside a package body an unqualified `resource` names this package's own resource or composite. A body step may not carry `expect`; that field belongs to a test step.
+A named, parameterised block of steps, invoked from a playbook step as `package.composite`. It has the same shape and rules as a playbook composite, described under [composite in playbook.wcl](ref_playbook): the loader expands each invocation into a container of ordinary steps, the body sees only its own arguments through `args.name`, and `requires` inside the body reaches only sibling steps. Inside a package body an unqualified `resource` names this package's own resource or composite, and an unqualified `wait_for` names this package's own probe. An invocation's `concurrency` tightens the resource steps of the body but not its wait steps, which stay `parallel`. A body step may not carry `expect`; that field belongs to a test step.
 PROSE
 
   table {
@@ -253,7 +289,7 @@ PROSE
       | "label" | "string" | "yes" | "The composite name. Shares a namespace with this package's resources." |
       | "`description`" | "string" | "yes" | "One-line summary for the docs." |
       | "`arg`" | "block, repeatable" | "no" | "Declared arguments, with the fields of [arg](ref_playbook)." |
-      | "`step`" | "block, repeatable" | "no" | "The body. Each step takes `description`, `resource`, `condition`, `requires`, `concurrency` and `properties`." |
+      | "`step`" | "block, repeatable" | "no" | "The body. Each step takes `description`, `resource` or `wait_for`, `condition`, `requires`, `concurrency` and `properties`, and a wait step also takes `interval`, `timeout` and `fail_on_error`." |
   }
 
   h2 "test"
@@ -304,7 +340,7 @@ concurrency = "parallel" | "exclusive" | "global"
 SRC
   }
 
-  p "A resource declares its class in the `concurrency` field. A step may tighten the class of the resource it invokes, and an invocation of a composite tightens every step of the body, but nothing may loosen a class: a step declaring a looser class than its resource fails validation. The built-in `weave.execute` resource is `parallel` for this reason; a script that touches a shared lock declares `concurrency = \"exclusive\"` on the step. How the scheduler applies the classes is in [Scheduling and concurrency](guide_scheduling)."
+  p "A resource declares its class in the `concurrency` field. A step may tighten the class of the resource it invokes, and an invocation of a composite tightens every step of the body, but nothing may loosen a class: a step declaring a looser class than its resource fails validation. The built-in `weave.execute` resource is `parallel` for this reason; a script that touches a shared lock declares `concurrency = \"exclusive\"` on the step. A wait step is always `parallel` and runs outside the worker pool, but a `global` step still waits for running wait steps to finish. How the scheduler applies the classes is in [Scheduling and concurrency](guide_scheduling)."
 
   table {
     rows:
@@ -331,5 +367,5 @@ resource "cache_updated" {
 SRC
   }
 
-  p "A resource may name a lock group in its `lock` field. At most one step of any resource in the same package naming the same lock runs at a time, across resource types: `exclusive` serialises one resource, a lock serialises a set of them that contend for one external lock, such as a package manager's database. A step starts only when both its concurrency class and its lock allow, and a step waiting on a lock never holds up other ready steps. Lock names are scoped to the declaring package, so two packages that both say `apk-db` do not serialise against each other. The lock belongs to the resource: a step cannot set it, and a composite's inner steps take the lock of the resource they name. An empty lock name fails validation."
+  p "A resource may name a lock group in its `lock` field. At most one step of any resource in the same package naming the same lock runs at a time, across resource types: `exclusive` serialises one resource, a lock serialises a set of them that contend for one external lock, such as a package manager's database. A step starts only when both its concurrency class and its lock allow, and a step waiting on a lock never holds up other ready steps. Lock names are scoped to the declaring package, so two packages that both say `apk-db` do not serialise against each other. The lock belongs to the resource: a step cannot set it, and a composite's inner steps take the lock of the resource they name. A wait step never holds a lock. An empty lock name fails validation."
 }

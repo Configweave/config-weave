@@ -2,6 +2,7 @@
 //! terminal mode and the NDJSON log.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::status::{StepReport, StepStatus};
 
@@ -10,6 +11,8 @@ pub enum Phase {
     Checking,
     Applying,
     Rechecking,
+    /// A wait step polling its probe.
+    Waiting,
 }
 
 impl Phase {
@@ -18,6 +21,7 @@ impl Phase {
             Phase::Checking => "checking",
             Phase::Applying => "applying",
             Phase::Rechecking => "re-checking",
+            Phase::Waiting => "waiting",
         }
     }
 }
@@ -55,6 +59,18 @@ pub enum Event {
         idx: usize,
         name: String,
         phase: Phase,
+    },
+    /// A wait step's probe reported not ready (or failed) and the step
+    /// will try again after its interval.
+    StepWaiting {
+        idx: usize,
+        name: String,
+        attempt: u32,
+        elapsed: Duration,
+        timeout: Duration,
+        /// The probe's error, when it failed rather than reporting not
+        /// ready. Already scrubbed of secrets.
+        error: Option<String>,
     },
     StepFinished {
         idx: usize,

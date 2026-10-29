@@ -21,6 +21,7 @@ import "./pages/guide/playbooks.wcl"
 import "./pages/guide/packages.wcl"
 import "./pages/guide/variables.wcl"
 import "./pages/guide/scheduling.wcl"
+import "./pages/guide/waiting.wcl"
 import "./pages/guide/wscript-basics.wcl"
 import "./pages/guide/wscript-data.wcl"
 import "./pages/guide/wscript-flow.wcl"
@@ -115,6 +116,7 @@ site manual {
       chapter "Packages, resources and gatherers"          { page = guide_packages }
       chapter "Variables and secrets"                      { page = guide_variables }
       chapter "Scheduling and concurrency"                 { page = guide_scheduling }
+      chapter "Waiting for upstream systems"               { page = guide_waiting }
       chapter "wscript: values, types and functions"       { page = guide_wscript_basics }
       chapter "wscript: structs, enums and matching"       { page = guide_wscript_data }
       chapter "wscript: containers, loops, traits and faults" { page = guide_wscript_flow }

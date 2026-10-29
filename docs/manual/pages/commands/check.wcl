@@ -6,12 +6,12 @@ page cmd_check {
   chapter_header "config-weave check" {
     kicker       = "Commands · reference"
     reading_time = "2 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
   p <<'PROSE'
-`check` reports the configuration status of every step in a play and never changes the machine. It runs the same validation, gatherer phase and DAG walk as `apply`, but stops after each step's first `check` call and never invokes `apply`. Run it before an `apply` to see what would change, and after one to confirm the machine converged. See [Check, then apply](howto_check_apply).
+`check` reports the configuration status of every step in a play and never changes the machine. It runs the same validation, gatherer phase and DAG walk as `apply`, but stops after each step's first `check` call and never invokes `apply`. A wait step runs its probe once and never waits: not ready reports Not Configured with the message `not ready; apply waits up to 3h`. Run it before an `apply` to see what would change, and after one to confirm the machine converged. See [Check, then apply](howto_check_apply).
 PROSE
 
   h2 "Synopsis"
@@ -38,7 +38,7 @@ SRC
   table {
     rows:
       | "Option" | "Value" | "Meaning" |
-      | "`--events-ndjson`" | "" | "Stream one JSON event per line to stderr: run and gather lifecycle plus per-step phase progress. Stdout still carries the final report." |
+      | "`--events-ndjson`" | "" | "Stream one JSON event per line to stderr: run and gather lifecycle plus per-step phase progress. Stdout still carries the final report. The events are listed under [config-weave apply](cmd_apply)." |
       | "`--continue-on-error`" | "" | "Keep checking the remaining steps after a step's check returns Error." |
       | "`--jobs`" | "`N`" | "Worker pool size." |
   }
@@ -65,6 +65,6 @@ SRC
   h2 "Exit status"
 
   p <<'PROSE'
-0 when every step reported without error, whether or not any is NotConfigured. A NotConfigured step is a finding, not a failure. 1 when any step's check returned Error. 2 when validation failed or the play does not exist. `check` never returns 3: a RebootRequired result is reported as the step's status, but only `apply` turns it into an exit code.
+0 when every step reported without error, whether or not any is NotConfigured. A NotConfigured step is a finding, not a failure, and that includes a wait step whose probe is not ready. 1 when any step's check returned Error, or a wait step with `fail_on_error = true` hit a probe error. 2 when validation failed or the play does not exist. `check` never returns 3: a RebootRequired result is reported as the step's status, but only `apply` turns it into an exit code.
 PROSE
 }

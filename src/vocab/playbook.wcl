@@ -15,6 +15,7 @@ type WeavePlaybook {
   @children("gather") gathers: list<WeaveGather>
   @child("vars") vars: WeaveVars?
   @children("composite") composites: list<WeaveCompositeDecl>
+  @children("probe") probes: list<WeaveProbeDecl>
   @children("play") plays: list<WeavePlay>
 }
 
@@ -46,6 +47,31 @@ type WeaveCompositeDecl {
 // its own block kind so the body can read the values as `args.name`.
 @block("arg")
 type WeaveArgDecl {
+  @inline(0) name: utf8
+  description: utf8
+  type: utf8
+  @default(false) required: bool
+  @schemaless default: utf8?
+  @children("symbol") symbols: list<WeaveSymbolDecl>
+}
+
+// A playbook-local readiness check, referenced from a step by bare name
+// (`wait_for = "db_up"`); the identical block in a `package.wcl` is shared
+// and referenced qualified. `script` is relative to the playbook directory
+// and exports `fn ready(params: Value) -> bool` (or `Result[bool, string]`).
+// Probes share the bare-name namespace with playbook composites.
+@block("probe")
+type WeaveProbeDecl {
+  @inline(0) name: utf8
+  description: utf8
+  script: utf8
+  @children("param") params: list<WeaveParamDecl>
+}
+
+// One declared parameter of a probe: coarse type, requiredness, default,
+// description. The same shape as `param` in the package vocabulary.
+@block("param")
+type WeaveParamDecl {
   @inline(0) name: utf8
   description: utf8
   type: utf8
@@ -102,11 +128,19 @@ type WeaveContainer {
   @children("container") containers: list<WeaveContainer>
 }
 
+// A step names exactly one of `resource` (a resource or composite) and
+// `wait_for` (a probe). A wait step polls its probe every `interval`
+// (default 30s, at least 1s) until it reports ready or `timeout` (required)
+// passes; `fail_on_error` makes a probe error fatal instead of "not ready".
 @block("step")
 type WeaveStep {
   @inline(0) name: utf8
   description: utf8
-  resource: utf8
+  resource: utf8?
+  wait_for: utf8?
+  interval: std.Duration?
+  timeout: std.Duration?
+  @schemaless fail_on_error: bool?
   @schemaless condition: bool?
   requires: list<utf8>?
   concurrency: utf8?

@@ -1137,6 +1137,29 @@ fn cmd_wcl_render() -> u8 {
     }
 }
 
+/// A probe's inventory entry. Shared by the playbook-local map and each
+/// package's.
+fn probes_json(
+    probes: &std::collections::BTreeMap<String, model::ProbeDecl>,
+) -> Vec<serde_json::Value> {
+    probes
+        .values()
+        .map(|p| {
+            serde_json::json!({
+                "name": p.name,
+                "description": p.description,
+                "params": p.params.iter().map(|d| serde_json::json!({
+                    "name": d.name,
+                    "description": d.description,
+                    "type": d.ty.as_str(),
+                    "required": d.required,
+                    "default": d.default.as_ref().map(convert::dyn_to_json),
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
 /// A composite's inventory entry: its arguments, and what it expands into.
 /// Shared by the playbook-local map and each package's.
 fn composites_json(
@@ -1155,16 +1178,19 @@ fn composites_json(
                     "required": p.required,
                     "default": p.default.as_ref().map(convert::dyn_to_json),
                 })).collect::<Vec<_>>(),
-                "steps": c.steps.iter().map(|s| serde_json::json!({
-                    "name": s.name,
-                    "description": s.description,
-                    "resource": if s.package.is_empty() {
-                        s.resource.clone()
-                    } else {
-                        format!("{}.{}", s.package, s.resource)
-                    },
-                    "requires": s.requires,
-                })).collect::<Vec<_>>(),
+                "steps": c.steps.iter().map(|s| {
+                    // A wait step names a probe; the key says which.
+                    let key = match s.kind {
+                        model::StepKind::Resource => "resource",
+                        model::StepKind::Wait => "wait_for",
+                    };
+                    serde_json::json!({
+                        "name": s.name,
+                        "description": s.description,
+                        key: s.target(),
+                        "requires": s.requires,
+                    })
+                }).collect::<Vec<_>>(),
             })
         })
         .collect()
@@ -1268,6 +1294,7 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
                     "builtin": pkg.is_builtin(),
                     "resources": resources,
                     "composites": composites_json(&pkg.composites),
+                    "probes": probes_json(&pkg.probes),
                     "gatherers": gatherers,
                     "tests": tests,
                     "scenarios": scenarios,
@@ -1282,6 +1309,7 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
                 "description": pb.description,
                 "plays": plays,
                 "composites": composites_json(&pb.composites),
+                "probes": probes_json(&pb.probes),
                 "packages": packages,
             })
         );
@@ -1309,6 +1337,12 @@ fn cmd_list(cli: &Cli, dir: &std::path::Path) -> u8 {
                 if c.steps.len() == 1 { "" } else { "s" },
                 c.description
             );
+        }
+    }
+    if !pb.probes.is_empty() {
+        println!("probes:");
+        for p in pb.probes.values() {
+            println!("  {} — {}", p.name, p.description);
         }
     }
     EXIT_OK

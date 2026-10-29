@@ -69,11 +69,13 @@ config-weave check ./my-playbook baseline --json \
   | jq '[.steps[] | select(.status == "not_configured")] | length'
 ```
 
-Exit: 0 when every step reported without error, whether or not any is `not_configured` (drift is a finding, not a failure). 1 when any step's check returned Error. 2 when validation failed or the play does not exist. Never 3: a RebootRequired result is only a status in check mode.
+A wait step runs its probe once and never waits; not ready is `not_configured` with `not ready; apply waits up to <timeout>`.
+
+Exit: 0 when every step reported without error, whether or not any is `not_configured` (drift is a finding, not a failure). 1 when any step's check returned Error, or a wait step with `fail_on_error = true` hit a probe error. 2 when validation failed or the play does not exist. Never 3: a RebootRequired result is only a status in check mode.
 
 ## apply
 
-Converges one play. For each step: `check`; if NotConfigured, `apply`, then `check` again. A step whose re-check does not report AlreadyConfigured is an Error with the message `apply claimed success but the re-check disagrees`.
+Converges one play. For each step: `check`; if NotConfigured, `apply`, then `check` again. A step whose re-check does not report AlreadyConfigured is an Error with the message `apply claimed success but the re-check disagrees`. A wait step instead polls its probe every `interval` until ready or `timeout` (statuses: playbook.md, Wait steps).
 
 ```console
 config-weave apply [OPTIONS] <PLAYBOOK_DIR> <PLAY>
@@ -87,20 +89,20 @@ config-weave apply [OPTIONS] <PLAYBOOK_DIR> <PLAY>
 | Option | Value | Meaning |
 |---|---|---|
 | `--events-ndjson` | | As for `check`. Combine with `--json` for a fully machine-readable run. |
-| `--continue-on-error` | | Keep dispatching after an Error instead of halting once in-flight steps finish. |
-| `--jobs` | `N` | Worker pool size. |
+| `--continue-on-error` | | Keep dispatching after an Error instead of halting once in-flight steps finish. Without it a halt also cancels wait steps at their next pause (`not_run`). |
+| `--jobs` | `N` | Worker pool size. Wait steps run on their own threads and never take a worker. |
 
 ```console
 config-weave apply ./my-playbook baseline --var hostname=web01 --json > report.json
 ```
 
-Exit: 0 when every step is `configured`, `already_configured` or `skipped`. 1 when any step ended in Error (including a re-check disagreement). 2 when validation failed, a variable or password could not be resolved, or the play does not exist. 3 when a step returned RebootRequired and no step errored: the play halted, later steps report `not run`; reboot and run `apply` again to resume through the DAG. Error takes priority over reboot.
+Exit: 0 when every step is `configured`, `already_configured` or `skipped`. 1 when any step ended in Error (including a re-check disagreement and a wait step that timed out). 2 when validation failed, a variable or password could not be resolved, or the play does not exist. 3 when a step returned RebootRequired and no step errored: the play halted, later steps report `not run`; reboot and run `apply` again to resume through the DAG. Error takes priority over reboot.
 
 A second `apply` with nothing changed must report every step `already_configured`. A step reporting `configured` again has a `check` that depends on state from the previous process, or an `apply` that does not produce what `check` looks for.
 
 ## list
 
-Prints the plays with step counts and descriptions, then any playbook-local composites. Loads the playbook and reports load errors, but does not run the full validation pipeline and never executes a script.
+Prints the plays with step counts and descriptions, then any playbook-local composites, then any playbook-local probes (under `probes:`). Loads the playbook and reports load errors, but does not run the full validation pipeline and never executes a script.
 
 ```console
 config-weave list [OPTIONS] <PLAYBOOK_DIR>
@@ -110,7 +112,7 @@ config-weave list [OPTIONS] <PLAYBOOK_DIR>
 |---|---|
 | `PLAYBOOK_DIR` | The playbook directory. |
 
-Only `--json` has an effect: it prints the complete inventory instead. Top-level keys: `playbook`, `version`, `description`, `plays` (`name`, `description`, `steps` count), `composites`, `packages`. Each package entry: `name`, `description`, `builtin`, `resources` (`name`, `description`, `concurrency`, `params`), `composites`, `gatherers` (`name`, `description`, `params`), `tests` (`name`, `description`, `machine_kind`, `source`, `group`), `scenarios` (`name`, `description`). A composite entry: `name`, `description`, `args`, `steps`. A param: `name`, `description`, `type`, `required`, `default`.
+Only `--json` has an effect: it prints the complete inventory instead. Top-level keys: `playbook`, `version`, `description`, `plays` (`name`, `description`, `steps` count), `composites`, `probes`, `packages`. Each package entry: `name`, `description`, `builtin`, `resources` (`name`, `description`, `concurrency`, `params`), `composites`, `probes` (`name`, `description`, `params`), `gatherers` (`name`, `description`, `params`), `tests` (`name`, `description`, `machine_kind`, `source`, `group`), `scenarios` (`name`, `description`). A composite entry: `name`, `description`, `args`, `steps`; each step has `name`, `description`, `requires`, and `resource`, or `wait_for` for a wait step. A param: `name`, `description`, `type`, `required`, `default`.
 
 ```console
 config-weave list ./my-playbook
@@ -356,7 +358,7 @@ The terminal mode is chosen once per run from `--json`, `--no-color` and whether
 
 | Mode | Selected by | Behaviour |
 |---|---|---|
-| Rich | Default when stdout is a terminal | Colour, Unicode icons, a live progress line on stderr with phase detail, per-step timing. The final report repeats only the summary. |
+| Rich | Default when stdout is a terminal | Colour, Unicode icons, a live progress line on stderr with phase detail (a wait step shows `api_up (waiting, attempt 14, 7m of 3h)`), per-step timing. The final report repeats only the summary. |
 | Plain | `--no-color`, or stdout not a terminal | ASCII, one line per step in declaration order, then a summary line. No cursor movement. |
 | JSON | `--json` | One complete JSON object on stdout at completion. Nothing else on stdout. Script log output goes to stderr or the log file. |
 
@@ -390,7 +392,7 @@ Schema-stable. Steps appear in declaration order whatever order they finished in
 }
 ```
 
-`container_path` lists enclosing container names outermost first; composite expansions appear as `container/…/invocation/inner`.
+`container_path` lists enclosing container names outermost first; composite expansions appear as `container/…/invocation/inner`. For a wait step `resource` is the probe reference (`net.http_ok`, or a playbook-local probe's bare name).
 
 ### `--json` report shape for test
 
@@ -414,13 +416,13 @@ Schema-stable. Steps appear in declaration order whatever order they finished in
 
 Accepted by `check`, `apply` and `test`. One JSON object per line on stderr while the run is in progress, each with an `event` field. It replaces the live progress line and leaves stdout to the final report. This is the whole event set.
 
-check/apply: `run_started` (`play`, `mode`, `steps` with `name`, `resource`, `container_path`), `gather_started` (`unique` count), `gather_finished`, `step_started` (`idx`, `name`), `step_phase` (`idx`, `name`, `phase` of `checking`, `applying`, `re-checking`), `step_finished` (`idx`, `name`, `container_path`, `resource`, `status`, `message`, `duration_secs`), `step_resolved` (`idx`, `name`, `status`; a step resolved without running, such as `skipped` or `not_run`).
+check/apply (each stamped with `ts`, epoch millis): `run_started` (`play`, `mode`, `steps` with `name`, `resource`, `container_path`), `gather_started` (`unique` count), `gather_finished`, `step_started` (`idx`, `name`), `step_phase` (`idx`, `name`, `phase` of `checking`, `applying`, `re-checking`, or `waiting` for a wait step), `step_waiting` (`idx`, `name`, `attempt`, `elapsed_secs`, `timeout_secs`, `error`: `null` when the probe returned false, else the scrubbed probe error; sent after every unsuccessful attempt of a wait step), `step_finished` (`idx`, `name`, `container_path`, `resource`, `status`, `message`, `duration_secs`), `step_resolved` (`idx`, `name`, `status`; a step resolved without running, such as `skipped` or `not_run`).
 
 test (each stamped with `ts`, epoch millis): `run_started` (`playbook`, `groups`, `tests` list with `package`, `test`, `group` index or null for scenarios, `machine_kind`, `source`), `group_provisioning`, `instance_ready` (`group`, `label`, `machine_kind`, `source`, `attach` with the raw vmlab id), `test_started`, `phase` (`phase` of `ready`, `setup`, `gather` with `name`, `check`, `first_apply`, `second_apply`, `verify`), `log` (`context`, `stream`, `chunk` tail-truncated at 8 KiB, `truncated`), `gather_result`, `step_result`, `verify_result`, `test_finished` (`outcome`, `duration_secs`, `error`), `group_teardown` (`kept`, `handle`, `warning`), `run_finished` (`exit_code`, `passed`, `failed`, `errors`, `duration_secs`). `run_finished` is written before the stdout report. A supervisor that kills the process must remove the instances named in `instance_ready` itself.
 
 ### `--log-file` and `--log-level`
 
-File logging is independent of the terminal mode. `--log-file PATH` installs an NDJSON subscriber at `--log-level` (`trace`, `debug`, `info`, `warn`, `error`; default `info`). Every script `log::*` call becomes one line with `step` and `resource` (or `gatherer`) fields attached, alongside the engine's own events. The file is buffered and flushed at process exit. `-v` controls the terminal only: script `log::info` and above always reach stderr as `[step] level: message`; `log::debug` needs `-v`.
+File logging is independent of the terminal mode. `--log-file PATH` installs an NDJSON subscriber at `--log-level` (`trace`, `debug`, `info`, `warn`, `error`; default `info`). Every script `log::*` call becomes one line with `step` and `resource` (or `gatherer`) fields attached, alongside the engine's own events. At `debug`, each unsuccessful wait-step attempt writes a `probe not ready` record with `step`, `probe`, `attempt`, `elapsed_secs`, `error`. The file is buffered and flushed at process exit. `-v` controls the terminal only: script `log::info` and above always reach stderr as `[step] level: message`; `log::debug` needs `-v`.
 
 ## Exit codes
 
@@ -454,9 +456,12 @@ This is the whole set the source reads (`CONFIG_WEAVE_STATE_DIR` is read by the 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `validate`/`check`/`apply`/`test` stops with a diagnostic inside a `.ws` file: unknown module, unknown function, type mismatch, unresolvable import | Stage 5 compiles every script against the closed host API before anything runs. Imports resolve as a host module first, then a `.ws` file in the importing file's directory, the package's `lib/`, then the playbook's `lib/`. | Correct the module or function name. Run `config-weave wscripti` and point the editor's wscript checker at it. For an import, confirm the `.ws` extension and that the file sits in a searched directory. |
-| `script does not satisfy the 'check' contract` (or `apply`, `gather`, `verify`), or `scenario script does not satisfy the 'run(lab: Lab) -> bool' contract` | The script compiled but does not export the named function with one of the two accepted signatures. Only the entry file's functions count; a helper's do not. | Match the entry-point signature exactly, including the `Value` parameter type and the return type. Use the `Result[…, string]` form only when the body uses `?`. |
+| `script does not satisfy the 'check' contract` (or `apply`, `gather`, `ready`, `verify`), or `scenario script does not satisfy the 'run(lab: Lab) -> bool' contract` | The script compiled but does not export the named function with one of the two accepted signatures. Only the entry file's functions count; a helper's do not. | Match the entry-point signature exactly, including the `Value` parameter type and the return type. Use the `Result[…, string]` form only when the body uses `?`. |
 | A step or gather diagnostic: property unknown, required one missing, wrong type, symbol must use a colon, duration must be a unit literal | `properties` and `params` are validated against the `param` declarations. A `symbol` is only accepted as `:name` (and must be one of the enumerated symbols when listed). A `duration` is only accepted as a bare unit literal such as `30min`. | Look up the parameter table in the package's `package.wcl` and correct the spelling or form. |
 | `url = url` (or a composite body's `properties { path = path }`) fails with a self-reference or cycle | A property or parameter field shadows an outer variable of the same name inside its block, so the field refers to itself. | Rename the variable (`tool_url`). Inside a composite body read arguments as `args.path`, which never collides. |
+| `'m' is not a unit of type 'std.Duration'` | Minutes are `min` in WCL. `m` is not a duration unit, in `interval`/`timeout` or in a `duration` property. | Write `10min`. Output messages print `10m`; that spelling is output only. |
+| `step '…' names neither 'resource' nor 'wait_for'`, `names both`, `declares 'interval', which only a wait step (wait_for) takes`, `waits with no 'timeout'`, or `names the probe '…' as a resource` | A step names exactly one of `resource` and `wait_for`. The wait fields belong to wait steps, and a wait step needs `timeout`. | Use `wait_for` for a probe (`weave.command`, `pkg.probe`, a bare playbook probe) and `resource` for anything else. Add `timeout`. |
+| A wait step never becomes ready; apply ends `error` with `not ready after 2h (…)` | The probe keeps returning false. With `weave.command`, a command bash cannot find exits 127, which reads as not ready, not as an error. | Run `check` to see one attempt's result in seconds. Fix the command or probe; set `fail_on_error = true` when a probe error means stop. |
 | `steps may only tighten` | A step declared a looser concurrency class than its resource (for example `parallel` on an `exclusive` resource). | Remove the step's `concurrency` or choose a class at least as strict as the resource's. |
 | `apply claimed success but the re-check disagrees` (or `re-check failed:` plus an error); play halts | `apply` returned Success but the immediate re-check did not return AlreadyConfigured, or the second `check` itself errored. | Make `check` and `apply` agree on the same definition of converged (compare content, not existence; wait for service state to settle). Run `config-weave test` to catch it in a clean instance. |
 | A test passes run 2 but fails run 3: expected `already_configured`, got `configured` | The resource converges within one process but not across processes. Run 3 is a fresh `config-weave apply`, so in-memory state is gone. | Make `check` read state from the host every time. Anything `apply` records must live on disk, in the registry, or in the configured system. |

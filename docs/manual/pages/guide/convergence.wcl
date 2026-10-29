@@ -6,12 +6,12 @@ page guide_convergence {
   chapter_header "The convergence contract" {
     kicker       = "The guide · explanation"
     reading_time = "5 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
   p <<'PROSE'
-Every resource script in config-weave obeys one rule, and the engine enforces it on every step. The rule has two halves. `check` never changes the host. It only reports whether the host already matches the desired state. `apply` changes the host so that a second `check` reports that the host now matches. The engine runs that second check itself, after every apply, and treats any other answer as a failure.
+Every resource script in config-weave obeys one rule, and the engine enforces it on every step that names a resource. The rule has two halves. `check` never changes the host. It only reports whether the host already matches the desired state. `apply` changes the host so that a second `check` reports that the host now matches. The engine runs that second check itself, after every apply, and treats any other answer as a failure.
 PROSE
 
   p <<'PROSE'
@@ -52,6 +52,10 @@ PROSE
 
   p <<'PROSE'
 A step with a `condition` that evaluates to false skips all three phases and reports Skipped. A skipped step does not block the steps that depend on it; see [Scheduling and concurrency](guide_scheduling).
+PROSE
+
+  p <<'PROSE'
+A wait step has no resource, so it does not walk this lifecycle. It names a probe, which reports whether an upstream system is ready, and changes nothing. The statuses still read the same way. In check mode the probe runs once: ready reports Already Configured, not ready reports Not Configured. In apply mode the engine polls the probe. Ready on the first attempt reports Already Configured, ready after waiting reports Configured, and still not ready at the step's `timeout` reports Error. See [Waiting for upstream systems](guide_waiting).
 PROSE
 
   h2 "Convergence across processes"

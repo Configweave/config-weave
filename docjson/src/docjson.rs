@@ -47,6 +47,9 @@ pub struct PlaybookDoc {
     pub gathers: Vec<GatherDoc>,
     #[serde(default)]
     pub vars: Vec<Kv>,
+    /// Playbook-local probes, referenced from a wait step by bare name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<ProbeDoc>,
     #[serde(default)]
     pub plays: Vec<PlayDoc>,
 }
@@ -89,7 +92,12 @@ pub struct StepDoc {
     #[serde(default, rename = "_orig", skip_serializing_if = "is_none")]
     pub orig: Option<String>,
     pub description: String,
-    pub resource: String,
+    /// A resource or composite reference. None on a wait step, which
+    /// names a probe in `wait_for` instead.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub resource: Option<String>,
+    #[serde(flatten)]
+    pub wait: WaitDoc,
     /// Raw WCL expression source.
     #[serde(default, skip_serializing_if = "is_none")]
     pub condition: Option<String>,
@@ -113,6 +121,27 @@ pub struct ContainerDoc {
     pub items: Vec<PlayItemDoc>,
 }
 
+/// The wait half of a step (playbook or composite body): `wait_for`
+/// names a probe in place of `resource`, and the rest tune the poll.
+/// All None on a resource step. Flattened into the step, so the JSON
+/// keys sit beside `resource`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct WaitDoc {
+    /// Probe reference: `pkg.probe`, or a bare playbook-local name.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub wait_for: Option<String>,
+    /// Raw WCL expression source (a duration literal such as `30s`, or
+    /// an expression such as `args.patience`). None = the default.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub interval: Option<String>,
+    /// Raw WCL expression source, as `interval`.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub timeout: Option<String>,
+    /// A plain bool, or an expression. None = the default (false).
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub fail_on_error: Option<Val>,
+}
+
 // -------------------------------------------------------------- package
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -123,6 +152,8 @@ pub struct PackageDoc {
     pub gatherers: Vec<GathererDoc>,
     #[serde(default)]
     pub resources: Vec<ResourceDoc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<ProbeDoc>,
     #[serde(default)]
     pub composites: Vec<CompositeDoc>,
     #[serde(default)]
@@ -159,6 +190,19 @@ pub struct ResourceDoc {
     pub params: Vec<ParamDoc>,
 }
 
+/// A probe: a readiness check a wait step names with `wait_for`. Shared
+/// by packages and playbooks (the playbook-local form is identical).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProbeDoc {
+    pub name: String,
+    #[serde(default, rename = "_orig", skip_serializing_if = "is_none")]
+    pub orig: Option<String>,
+    pub description: String,
+    pub script: String,
+    #[serde(default)]
+    pub params: Vec<ParamDoc>,
+}
+
 /// A composite: a named, parameterised block of steps invoked like a
 /// resource. Its declarations are `arg` blocks rather than `param` ones,
 /// and its body is a list of steps, so it round-trips separately.
@@ -182,7 +226,12 @@ pub struct CompositeStepDoc {
     #[serde(default, rename = "_orig", skip_serializing_if = "is_none")]
     pub orig: Option<String>,
     pub description: String,
-    pub resource: String,
+    /// A resource or composite reference. None on a wait step, which
+    /// names a probe in `wait_for` instead.
+    #[serde(default, skip_serializing_if = "is_none")]
+    pub resource: Option<String>,
+    #[serde(flatten)]
+    pub wait: WaitDoc,
     #[serde(default, skip_serializing_if = "is_none")]
     pub condition: Option<String>,
     #[serde(default)]

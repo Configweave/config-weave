@@ -57,7 +57,17 @@ converged) with an action, and the re-check enforces convergence;
 `/var/lib/config-weave/once/` (Windows: `HKLM\Software\config-weave\Once`,
 override with `$CONFIG_WEAVE_STATE_DIR`) — the only persistent state
 config-weave owns, a deliberate PRD §17 exception scoped as a migration
-aid. `docs/notes.md` records the bindings for both.
+aid; the `weave.command` probe waits until a shell script exits 0.
+`docs/notes.md` records the bindings for all three.
+A **probe** is a declared readiness script (`fn ready(params: Value) ->
+bool`) in a package or a playbook; a **wait step** names one with
+`wait_for` instead of `resource` and needs a `timeout` (`interval`
+defaults to 30s; minutes are `min`, never `m`). `check` runs the probe
+once and never waits; `apply` polls it. Wait steps run off the `--jobs`
+pool, are always `parallel`, are drained by `global` steps, and are
+cancelled when the run halts — a deliberate PRD §9 exception recorded in
+`docs/adr/0002-probes-and-wait-steps.md`; the wait-step code is
+`src/engine/wait.rs`.
 `config-weave pkg` (`src/pkgrepo/`) installs packages from git repos:
 `pkgs/repo.wcl` records registered repos + installed packages with
 their source commit; add/remove/update/search plus `pkg repo

@@ -13,6 +13,7 @@ use std::sync::Mutex;
 
 use crate::engine::events::{Event, EventSink, Phase};
 use crate::engine::status::{RunReport, StepStatus};
+use crate::engine::wait::human;
 use crate::testlab::report::{TestOutcome, TestRunReport};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +66,8 @@ fn format_step_path(name: &str, container_path: &[String]) -> String {
 /// permanent lines; a single live status line at the bottom shows what is
 /// in flight with its phase.
 struct RichState {
-    in_flight: BTreeMap<usize, (String, Phase)>,
+    /// Step name and what it is doing, for the live line.
+    in_flight: BTreeMap<usize, (String, String)>,
     gathering: Option<usize>,
     live_line_shown: bool,
 }
@@ -120,6 +122,22 @@ pub fn run_ndjson_sink() -> EventSink {
                 "name": name,
                 "phase": phase.as_str(),
             }),
+            Event::StepWaiting {
+                idx,
+                name,
+                attempt,
+                elapsed,
+                timeout,
+                error,
+            } => json!({
+                "event": "step_waiting",
+                "idx": idx,
+                "name": name,
+                "attempt": attempt,
+                "elapsed_secs": elapsed.as_secs_f64(),
+                "timeout_secs": timeout.as_secs_f64(),
+                "error": error,
+            }),
             Event::StepFinished { idx, report } => json!({
                 "event": "step_finished",
                 "idx": idx,
@@ -168,10 +186,26 @@ fn rich_event(s: &mut RichState, event: Event) {
             }
         }
         Event::StepStarted { idx, name } => {
-            s.in_flight.insert(idx, (name, Phase::Checking));
+            s.in_flight
+                .insert(idx, (name, Phase::Checking.as_str().to_string()));
         }
         Event::StepPhase { idx, name, phase } => {
-            s.in_flight.insert(idx, (name, phase));
+            s.in_flight.insert(idx, (name, phase.as_str().to_string()));
+        }
+        Event::StepWaiting {
+            idx,
+            name,
+            attempt,
+            elapsed,
+            timeout,
+            ..
+        } => {
+            let state = format!(
+                "waiting, attempt {attempt}, {} of {}",
+                human(elapsed),
+                human(timeout)
+            );
+            s.in_flight.insert(idx, (name, state));
         }
         Event::StepFinished { idx, report } => {
             s.in_flight.remove(&idx);
@@ -206,7 +240,7 @@ fn rich_event(s: &mut RichState, event: Event) {
         let items: Vec<String> = s
             .in_flight
             .values()
-            .map(|(name, phase)| format!("{name} ({})", phase.as_str()))
+            .map(|(name, state)| format!("{name} ({state})"))
             .collect();
         let _ = write!(err, "{DIM}⟳ {}{RESET}", items.join(", "));
         s.live_line_shown = true;

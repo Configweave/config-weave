@@ -6,12 +6,12 @@ page cmd_list {
   chapter_header "config-weave list" {
     kicker       = "Commands · reference"
     reading_time = "2 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
   p <<'PROSE'
-`list` prints the plays defined in a playbook, with their step counts and descriptions, followed by any playbook-local composites. It loads the playbook and reports load errors, but it does not run the full validation pipeline and never executes a script. With `--json` it prints the complete inventory instead: plays, composites and every package with its resources, gatherers, tests and scenarios.
+`list` prints the plays defined in a playbook, with their step counts and descriptions, followed by any playbook-local composites and probes. It loads the playbook and reports load errors, but it does not run the full validation pipeline and never executes a script. With `--json` it prints the complete inventory instead: plays, composites, probes and every package with its resources, composites, probes, gatherers, tests and scenarios.
 PROSE
 
   h2 "Synopsis"
@@ -46,10 +46,12 @@ my-playbook v0.1.0 — A starter playbook
   web  (5 steps) — Web tier
 composites:
   user_with_home  (2 steps) — A user and its home directory
+probes:
+  marker — Ready once the marker file exists
 SRC
   }
 
-  p "The JSON inventory. Each package entry carries `name`, `description`, `builtin`, `resources` (with `concurrency`, `lock` and `params`), `composites`, `gatherers`, `tests` (with `machine_kind`, `source` and `group`) and `scenarios`."
+  p "The JSON inventory. Each package entry carries `name`, `description`, `builtin`, `resources` (with `concurrency`, `lock` and `params`), `composites`, `probes`, `gatherers`, `tests` (with `machine_kind`, `source` and `group`) and `scenarios`. The top level also carries the playbook-local `composites` and `probes`. Each probe entry has `name`, `description` and `params`. Each composite lists its `steps`, and a wait step in that list names its probe under `wait_for` where a resource step has `resource`."
 
   code console {
     source = <<'SRC'

@@ -8,6 +8,7 @@ pub mod run;
 pub mod scripts;
 pub mod status;
 pub mod vars;
+pub mod wait;
 
 use crate::diag::Diag;
 use crate::model::Playbook;
@@ -47,7 +48,7 @@ pub fn execute(
             .iter()
             .map(|s| events::PlannedStep {
                 name: s.name.clone(),
-                resource: format!("{}.{}", s.package, s.resource),
+                resource: s.target(),
                 container_path: s.container_path.clone(),
             })
             .collect(),

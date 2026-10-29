@@ -88,6 +88,7 @@ step "remove" {
 Rules:
 
 - A test step has no `concurrency` field; that field belongs to playbook and composite steps, and validation rejects it here.
+- A test step cannot wait: `wait_for`, `interval`, `timeout` and `fail_on_error` are validation errors (`declares a wait; a test step names a resource, and the test's own 'ready' command is how a test waits for its instance`). Use the test's `ready` field to wait for the instance.
 - Validation rejects a step expecting `converge` or `already_configured` that requires a step expecting `error` or `reboot_required`, because the dependent could never run.
 
 ### `gather`
@@ -405,7 +406,7 @@ From that directory `vmlab exec`, `vmlab container exec` and `vmlab console` wor
 - **`x86_64/debian-13` template has no working vmlab agent** in the local template store; use `x86_64/ubuntu-24.04` for apt-family VM tests.
 - **`memory` is a WCL byte size string** such as `"512MiB"` or `"4GiB"`, and every test in a group declares the same value.
 - **Grouped tests share state.** No reset happens between tests in a group; a second test that touches the first test's path sees its leftovers and fails run 1.
-- **No variables, no `secret()`, no `concurrency` in a test.** Each is a validation error.
+- **No variables, no `secret()`, no `concurrency`, no wait steps in a test.** Each is a validation error.
 - **Wrong-kind override does nothing.** `--image` leaves template tests untouched, and `--template` leaves image tests untouched.
 - **Scenario labs are fixed at declaration.** A VM missing from `vmlab.wcl` cannot be added by the driver; `lab.machine(name)` fails with an unknown name.
 - **Killed runs leak instances.** Under `--events-ndjson`, a supervisor that kills `config-weave test` removes the instances named by `instance_ready` events itself.
