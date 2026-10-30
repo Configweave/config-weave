@@ -657,3 +657,43 @@ fn a_test_step_cannot_wait() {
         "{stderr}"
     );
 }
+
+/// A command the shell cannot find (exit 127) is a probe error, not "not
+/// ready": `check` names it, and `fail_on_error` stops on it at once rather
+/// than a typo waiting out the whole timeout.
+#[test]
+fn a_command_the_shell_cannot_find_is_a_probe_error() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    let step = |fail_on_error: &str| {
+        format!(
+            r#"  play "p" {{
+    description = "typo"
+    step "db" {{
+      description = "misspelt command"
+      wait_for = "weave.command"
+      interval = 1s
+      timeout = 1h
+{fail_on_error}      properties {{ command = "pg_isredy_no_such_command" }}
+    }}
+  }}
+"#
+        )
+    };
+
+    write_playbook(root, &step(""));
+    let (code, stdout, stderr) = run_in(root, &["--no-color", "check", ".", "p"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(
+        stdout.contains("probe failed: the probe command exited 127")
+            && stdout.contains("command not found"),
+        "{stdout}"
+    );
+
+    write_playbook(root, &step("      fail_on_error = true\n"));
+    let started = Instant::now();
+    let (code, stdout, stderr) = run_in(root, &["--no-color", "apply", ".", "p"]);
+    assert_eq!(code, 1, "{stdout}{stderr}");
+    assert!(stdout.contains("exited 127"), "{stdout}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+}

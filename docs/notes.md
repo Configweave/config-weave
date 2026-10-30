@@ -464,8 +464,11 @@ The decision and the rejected alternatives are ADR 0002
   `env` as for `weave.execute`. Its `timeout` property kills one attempt
   (a killed attempt is a probe error) and is distinct from the step's
   `timeout`, which bounds the whole wait. A script that cannot start (bad
-  `cwd`, no interpreter) is a probe error; a command bash cannot find is
-  exit 127, so it is "not ready", not an error.
+  `cwd`, no interpreter) is a probe error, and so are exit 126 (not
+  executable) and 127 (command not found): otherwise a typo in `command`
+  reads as "not ready" and waits out the whole timeout with nothing naming
+  the cause. PowerShell reports an unknown command as exit 1, so under
+  `shell = :powershell` that case is still "not ready".
 - **Output.** Events: `step_phase` with phase `waiting`, then
   `step_waiting` (`idx`, `name`, `attempt`, `elapsed_secs`,
   `timeout_secs`, `error`) after every unsuccessful attempt. The NDJSON

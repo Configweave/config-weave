@@ -431,7 +431,7 @@ step "db" {
 | `env` | map | no | none | Extra environment variables, string to string |
 | `timeout` | duration | no | `0s` | Kill one attempt after this long; a killed attempt is a probe error. Distinct from the step's `timeout`, which limits the whole wait. Zero or omitted means no limit; under one second rounds up to one |
 
-A script that cannot start (bad `cwd`, no interpreter) is a probe error. A command bash cannot find exits 127, which is "not ready", so a typo in `command` waits out the whole timeout; run `check` first to see it in one attempt.
+A script that cannot start (bad `cwd`, no interpreter) is a probe error, and so is exit 126 (not executable) or 127 (command not found): `check` shows `probe failed: the probe command exited 127: …`, `fail_on_error` stops on it, and a timeout report names it. Any other non-zero exit is "not ready". PowerShell exits 1 for an unknown command, so under `shell = :powershell` a typo still reads as not ready.
 
 ## config-weave pkg
 

@@ -60,7 +60,7 @@ PROSE
   }
 
   p <<'PROSE'
-Two timeouts are in play here, and they do different jobs. The `timeout` property limits a single attempt, so a hung `curl` cannot stall the wait. The step's own `timeout` field limits the whole wait. A script that cannot start at all, because `cwd` does not exist or the interpreter is missing, is a probe error. A command that bash cannot find is not: bash starts, prints `command not found` and exits 127, which reads as "not ready". A typo in `command` therefore shows up as a wait that never ends. Run `check` first, and the not-ready result appears in seconds.
+Two timeouts are in play here, and they do different jobs. The `timeout` property limits a single attempt, so a hung `curl` cannot stall the wait. The step's own `timeout` field limits the whole wait. A script that cannot start at all, because `cwd` does not exist or the interpreter is missing, is a probe error. So is exit 126 (the command is not executable) or 127 (the shell cannot find it). A typo in `command` therefore shows up in `check` as `probe failed: the probe command exited 127: …command not found`, rather than as a wait that never ends. PowerShell reports an unknown command as exit 1, so under `shell = :powershell` a typo still reads as "not ready"; run `check` and read the result.
 PROSE
 
   h2 "Declaring a probe"

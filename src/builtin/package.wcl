@@ -106,7 +106,7 @@ package "weave" {
     script = "command.ws"
 
     param "command" {
-      description = "Script run on every attempt. Exit status 0 means ready; any other status means not ready yet."
+      description = "Script run on every attempt. Exit status 0 means ready; any other status means not ready yet, except the shell's 126 (not executable) and 127 (command not found), which are probe errors so a typo surfaces instead of waiting out the timeout."
       type = "string"
       required = true
     }
