@@ -48,6 +48,10 @@ struct Cli {
     #[arg(long = "var-file", global = true, value_name = "PATH")]
     var_file: Option<PathBuf>,
 
+    /// Like --var-file, but every value is secret: scrubbed from all output.
+    #[arg(long = "secret-var-file", global = true, value_name = "PATH")]
+    secret_var_file: Option<PathBuf>,
+
     /// Read the secrets password from stdin (one line).
     #[arg(long, global = true)]
     password_stdin: bool,
@@ -499,11 +503,27 @@ fn cmd_validate(cli: &Cli, dir: &std::path::Path) -> u8 {
     }
 }
 
-/// Build the override store from `--var` / `--var-file` flags.
+/// Build the override store from `--var` / `--var-file` /
+/// `--secret-var-file` flags.
 fn override_store(cli: &Cli) -> Result<VarStore, Vec<Diag>> {
     let mut store = VarStore::new();
+    let mut plain = std::collections::HashSet::new();
     if let Some(path) = &cli.var_file {
         for (name, value) in engine::vars::load_var_file(path)? {
+            plain.insert(name.clone());
+            store.insert(&name, Origin::VarFile, value);
+        }
+    }
+    if let Some(path) = &cli.secret_var_file {
+        for (name, value) in secrets::load_secret_var_file(path)? {
+            // Either file could be meant, and guessing wrong would quietly
+            // use a value the caller marked secret, or drop one.
+            if plain.contains(&name) {
+                return Err(vec![Diag::bare(format!(
+                    "variable '{name}' is set by both --var-file and --secret-var-file; \
+                     set it in one of them"
+                ))]);
+            }
             store.insert(&name, Origin::VarFile, value);
         }
     }

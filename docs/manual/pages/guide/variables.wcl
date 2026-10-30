@@ -6,7 +6,7 @@ page guide_variables {
   chapter_header "Variables and secrets" {
     kicker       = "The guide · explanation"
     reading_time = "6 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-10-30"
     version      = "config-weave 0.1.0"
   }
 
@@ -20,11 +20,12 @@ PROSE
     li "A `gather` block binds a gatherer's result to the variable named by its label, so `gather \"os\"` gives you `os.family`."
     li "The `vars` block holds free-form `name = expr` bindings. An expression may reference gatherer results and other vars."
     li "`--var-file file.wcl` supplies a flat `name = value` collection. Each expression evaluates standalone and cannot reference other variables."
+    li "`--secret-var-file file.wcl` is a `--var-file` whose values are secret. It sits at the same precedence, and every string and number in it is scrubbed from output the way a decrypted `secret()` value is. Use it when a caller, such as a lab tool, hands you a value that must not reach a log. A name may appear in only one of the two files."
     li "`--var KEY=VALUE` supplies one value. VALUE is parsed as a WCL expression when possible, so `--var count=3` is an int, and falls back to a plain string otherwise. The flag repeats."
   }
 
   p <<'PROSE'
-When the same name is bound in more than one place, the later source wins, in this order from lowest to highest: the `vars` declaration, then the gatherer result, then `--var-file`, then `--var`. The engine binds all of them by generating an in-memory system import of `let` declarations, so every expression in the playbook sees one flat scope.
+When the same name is bound in more than one place, the later source wins, in this order from lowest to highest: the `vars` declaration, then the gatherer result, then `--var-file` or `--secret-var-file`, then `--var`. The engine binds all of them by generating an in-memory system import of `let` declarations, so every expression in the playbook sees one flat scope.
 PROSE
 
   h2 "When expressions evaluate"

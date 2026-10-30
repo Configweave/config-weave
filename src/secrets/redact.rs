@@ -2,8 +2,9 @@
 //! strips them out of anything user-visible.
 //!
 //! Registration happens in the `secret()` builtin, as values are handed to
-//! the evaluator — so the registry only ever holds values this run
-//! actually decrypted. Scrubbing is applied at the output choke points
+//! the evaluator, and for every value a caller supplies through
+//! `--secret-var-file` (see [`super::varfile`]) — so the registry only ever
+//! holds values this run decrypted or was told are secret. Scrubbing is applied at the output choke points
 //! (diagnostics, the script log/print bridge, run reports and the event
 //! stream), because a resource script is free to echo a parameter it was
 //! given and nothing downstream can tell that string from any other.
@@ -23,7 +24,7 @@ fn registry() -> &'static RwLock<Vec<String>> {
     REG.get_or_init(|| RwLock::new(Vec::new()))
 }
 
-/// Record a decrypted plaintext so later output can be scrubbed of it.
+/// Record a secret value so later output can be scrubbed of it.
 pub fn register(plaintext: &str) {
     if plaintext.len() < MIN_LEN {
         return;
@@ -56,7 +57,7 @@ pub fn scrub(text: &str) -> String {
     out
 }
 
-/// True when at least one secret has been decrypted this run. Lets hot
+/// True when at least one secret has been registered this run. Lets hot
 /// paths skip the allocation `scrub` would make.
 pub fn active() -> bool {
     registry().read().map(|r| !r.is_empty()).unwrap_or(false)

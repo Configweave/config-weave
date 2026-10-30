@@ -363,6 +363,7 @@ SRC
       | "`vars` declaration" | "lowest" | "Expressions may reference gatherer results and other variables." |
       | "gatherer result" | "second" | "Bound under the gather label. All gathers run concurrently before steps." |
       | "`--var-file file.wcl`" | "third" | "A flat `name = value` file. Each expression evaluates standalone and cannot reference other variables." |
+      | "`--secret-var-file file.wcl`" | "third" | "The same as `--var-file`, but every value is scrubbed from output. A name may not appear in both files." |
       | "`--var KEY=VALUE`" | "highest" | "Repeatable. VALUE parses as a WCL expression when it can, so `--var count=3` is an int; otherwise it is a plain string." |
   }
 

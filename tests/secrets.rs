@@ -696,3 +696,97 @@ fn secrets_commands_work_on_a_playbook_that_does_not_validate() {
     let after = encrypt(dir.path());
     assert!(!after.contains(SECRET), "{after}");
 }
+
+// ---------------------------------------------------- --secret-var-file
+
+/// A value a caller marks secret through `--secret-var-file` joins the
+/// redaction set: it reaches the resource intact but is scrubbed from the
+/// log file, the run report and the event stream, inside longer strings
+/// too. The same value through `--var-file` is not.
+#[test]
+fn a_secret_var_file_value_is_scrubbed_everywhere() {
+    let dir = fixture("    db_password = \"placeholder\"");
+    let vars = dir.path().join("vars.wcl");
+    std::fs::write(&vars, format!("db_password = \"{SECRET}\"\n")).unwrap();
+    let log = dir.path().join("run.ndjson");
+
+    for (flag, secret) in [("--var-file", false), ("--secret-var-file", true)] {
+        let _ = std::fs::remove_file(&log);
+        let _ = std::fs::remove_file(dir.path().join("out.txt"));
+        let (code, stdout, stderr) = run_in(
+            dir.path(),
+            &[
+                "apply",
+                ".",
+                "p",
+                "--json",
+                "--events-ndjson",
+                flag,
+                vars.to_str().unwrap(),
+                "--log-file",
+                log.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(code, 0, "{stdout}{stderr}");
+        // The resource got the real value either way.
+        let written = std::fs::read_to_string(dir.path().join("out.txt")).unwrap();
+        assert_eq!(written, SECRET);
+
+        let logged = std::fs::read_to_string(&log).unwrap();
+        let seen = |text: &str| text.contains(SECRET);
+        if secret {
+            assert!(!seen(&logged), "{flag} leaked into the log:\n{logged}");
+            assert!(logged.contains("echo saw value=***"), "{logged}");
+            assert!(!seen(&stdout), "{flag} leaked into the report:\n{stdout}");
+            assert!(!seen(&stderr), "{flag} leaked into events:\n{stderr}");
+        } else {
+            assert!(seen(&logged), "--var-file is not secret:\n{logged}");
+        }
+    }
+}
+
+#[test]
+fn a_broken_secret_var_file_does_not_quote_its_values() {
+    let dir = fixture("    db_password = \"placeholder\"");
+    let vars = dir.path().join("vars.wcl");
+    std::fs::write(&vars, format!("db_password = \"{SECRET}\n")).unwrap();
+    let (code, stdout, stderr) = run_in(
+        dir.path(),
+        &[
+            "check",
+            ".",
+            "p",
+            "--secret-var-file",
+            vars.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 2, "{stdout}{stderr}");
+    assert!(!stderr.contains(SECRET), "{stderr}");
+    assert!(stderr.contains("not shown"), "{stderr}");
+}
+
+#[test]
+fn a_name_in_both_var_files_is_refused() {
+    let dir = fixture("    db_password = \"placeholder\"");
+    let plain = dir.path().join("plain.wcl");
+    let secret = dir.path().join("secret.wcl");
+    std::fs::write(&plain, "db_password = \"plain-value\"\n").unwrap();
+    std::fs::write(&secret, format!("db_password = \"{SECRET}\"\n")).unwrap();
+    let (code, stdout, stderr) = run_in(
+        dir.path(),
+        &[
+            "check",
+            ".",
+            "p",
+            "--var-file",
+            plain.to_str().unwrap(),
+            "--secret-var-file",
+            secret.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(code, 2, "{stdout}{stderr}");
+    assert!(
+        stderr.contains("set by both --var-file and --secret-var-file"),
+        "{stderr}"
+    );
+}

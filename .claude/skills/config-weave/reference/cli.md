@@ -31,6 +31,7 @@ This is the whole surface. Every option is accepted by every subcommand; only th
 |---|---|---|
 | `--var` | `KEY=VALUE` | Override a playbook variable. Repeatable. `KEY` must be an identifier. `VALUE` is parsed as a WCL expression when it is one, otherwise taken as a plain string. |
 | `--var-file` | `PATH` | Merge a WCL file's top-level `name = value` fields into scope. Each field is evaluated on its own and cannot reference other variables. `--var` wins over `--var-file`. |
+| `--secret-var-file` | `PATH` | Like `--var-file`, but every value is secret. Each string and number in the file, including those inside lists and maps, is scrubbed from all output: reports, the event stream, diagnostics, script `log` output and `--log-file`. Values shorter than four characters are not masked. A name set in both files is an error. If the file fails to load, the error gives the count but not the text, because the text would quote the file's values. |
 | `--password-stdin` | | Read the secrets password from stdin (one line). Trailing newline stripped. |
 | `--password-file` | `PATH` | Read the secrets password from a file. Trailing newline stripped. |
 | `--jobs` | `N` | Worker pool size for step execution. Default `min(cpu_count, 8)`. `test` forwards it into the instances, overriding a test's own `jobs`. |

@@ -10,8 +10,8 @@
 //!
 //! Layout: [`crypto`] is the blob format, [`scan`] finds call sites,
 //! [`rewrite`] edits them in place, [`password`] resolves the password,
-//! [`env`] registers the WCL builtin and [`redact`] keeps decrypted values
-//! out of output.
+//! [`env`] registers the WCL builtin, [`varfile`] loads `--secret-var-file`,
+//! and [`redact`] keeps decrypted and caller-marked values out of output.
 
 pub mod crypto;
 pub mod env;
@@ -19,6 +19,7 @@ pub mod password;
 pub mod redact;
 pub mod rewrite;
 pub mod scan;
+pub mod varfile;
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +28,7 @@ use crate::diag::{Diag, wcl_span};
 pub use env::SecretCtx;
 pub use password::PasswordArgs;
 pub use scan::{SecretCall, State};
+pub use varfile::load_secret_var_file;
 
 /// Read and scan `<dir>/playbook.wcl`.
 fn open_playbook(dir: &Path) -> Result<(PathBuf, String, Vec<SecretCall>), Vec<Diag>> {

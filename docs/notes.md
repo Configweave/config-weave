@@ -322,6 +322,17 @@ a `pkgs/weave/` folder is rejected rather than allowed to shadow it.
 - `--var-file` files are flat `name = value` collections parsed without a
   document schema; expressions evaluate standalone (they cannot reference
   other variables).
+- `--secret-var-file` (issue #13, for vmlab's `secret = true` variables)
+  loads exactly like `--var-file`, at the same precedence (`Origin::VarFile`).
+  Every string and number leaf of every value is registered with
+  `secrets::redact` before anything runs, so it is scrubbed at the same
+  choke points as a decrypted `secret()`: diagnostics, the script log/print
+  bridge (and so `--log-file`), step reports and events. Map keys are names
+  and stay visible; values under `redact`'s 4-character minimum are not
+  masked. A name in both var files is an error rather than a precedence
+  rule, because either file could be the one meant. A load failure reports
+  only a count: a parse or eval diagnostic renders the source line, which
+  is the secret.
 - `--var KEY=VALUE` parses VALUE as a WCL expression when possible
   (`--var count=3` is an int), falling back to a plain string.
 - Gather params must evaluate before variables resolve, so they may

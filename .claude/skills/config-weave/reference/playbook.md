@@ -472,6 +472,7 @@ one for the same name. The engine binds all of them into one flat scope.
 | `vars` declaration | lowest | Expressions may reference gatherer results and other variables. |
 | gatherer result | second | Bound under the gather label. |
 | `--var-file file.wcl` | third | A flat `name = value` file. Each expression evaluates standalone and cannot reference other variables. Names must be identifiers. |
+| `--secret-var-file file.wcl` | third | The same as `--var-file`, but every string and number in it is scrubbed from all output, like a decrypted `secret()`. A name in both files is an error. Load errors are withheld, because they would quote values. Map literals are written `{ key: value }`. |
 | `--var KEY=VALUE` | highest | Repeatable. KEY must be an identifier. VALUE parses as a WCL expression when it can (`count=3` is an int, `debug=true` a bool); otherwise it is a plain string. A flag without `=` is an error. |
 
 ```console

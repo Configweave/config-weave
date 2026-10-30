@@ -43,7 +43,8 @@ author writes `secret("plaintext")` anywhere an expression is legal,
 `playbook.wcl` (Argon2id + XChaCha20-Poly1305, `CWENC1` blobs), and
 check/apply/test decrypt with a password from `$CONFIG_WEAVE_PASSWORD` /
 `--password-stdin` / `--password-file`. An un-encrypted `secret()` fails
-validation; decrypted values are scrubbed from all output.
+validation; decrypted values are scrubbed from all output, as are the
+values of a caller-supplied `--secret-var-file`.
 A **composite** is a named, parameterised block of steps declared in a
 package or a playbook and invoked from a step like a resource. Its `arg`
 declarations bind into the body bare and as `args.name`; the loader
