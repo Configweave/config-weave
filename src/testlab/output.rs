@@ -63,7 +63,10 @@ fn miette_summary(s: &str) -> Option<String> {
     let lines: Vec<&str> = s.lines().map(str::trim).collect();
     let headline = lines.iter().position(|l| l.starts_with('×'))?;
     let mut parts = vec![lines[headline]];
-    if let Some(help) = lines[headline + 1..].iter().find(|l| l.starts_with("help:")) {
+    if let Some(help) = lines[headline + 1..]
+        .iter()
+        .find(|l| l.starts_with("help:"))
+    {
         parts.push(help);
     }
     Some(parts.join(" / "))
