@@ -75,6 +75,13 @@ jobs:
         run: |
           IS_RELEASE=$(git log -1 --format='%(trailers:key=release,valueonly)')
           IS_PRERELEASE=$(git log -1 --format='%(trailers:key=pre-release,valueonly)')
+          # Optional bump override from HEAD's bump: trailer. Checked before the
+          # skip below, so a bad value always fails.
+          BUMP_TRAILER=$(git log -1 --format='%(trailers:key=bump,valueonly)')
+          if [[ -n "$BUMP_TRAILER" && ! "$BUMP_TRAILER" =~ ^(major|minor|patch)$ ]]; then
+            echo "::error::bump: trailer must be major, minor or patch, got '$BUMP_TRAILER'" >&2
+            exit 1
+          fi
 
           if [[ "$IS_RELEASE" != "true" && "$IS_PRERELEASE" != "true" ]]; then
             echo "do_release=false" >> "$GITHUB_OUTPUT"
@@ -120,6 +127,8 @@ jobs:
             fi
           done < <(git log --format='%H' $RANGE)
           [[ "$BUMP" == "none" ]] && BUMP="patch"
+          # A bump: trailer replaces the scanned bump. A promotion below still wins.
+          if [[ -n "$BUMP_TRAILER" ]]; then BUMP="$BUMP_TRAILER"; fi
 
           case "$BUMP" in
             major)
