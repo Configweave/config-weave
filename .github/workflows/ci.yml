@@ -12,11 +12,15 @@ name: CI
 # workflow must see every push to main — a release commit that touches
 # nothing buildable (e.g. an empty `chore: release`) still has to run.
 
+# Triggers: pushes to main, release/** and v* tags, plus manual runs. Card
+# branches, next and pull requests start no workflow: card work is validated
+# locally with `just ci::check` (AGENTS.md). A v* tag push runs only the test
+# job: the version, build and release jobs are gated on refs/heads/main.
+
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
+    tags: ['v*']
   workflow_dispatch: {}
 
 jobs:
