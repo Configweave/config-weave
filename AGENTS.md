@@ -24,7 +24,9 @@ dependencies.
   `terrarium run`, then end your turn):
   `terrarium repo checkout config-weave --target config-weave-helios-build --branch <card-branch> --path /tmp/src/<card-id>`
   `terrarium run config-weave-helios-build --name <card-id>-check -- sh -c 'cd /tmp/src/<card-id> && just ci::check'`
-  After a new push, run `repo checkout` again: it updates the checkout.
+  After a new push, run `repo checkout` again and check the HEAD line it
+  prints. After a rebase or force push it says "the branch has diverged" and
+  keeps the old commit: use a new `--path` then.
 - There is no affected-test selector: the Rust suite runs whole. A single
   part can be run while you work (`just ci::lint`, `just ci::fmt-check`,
   `just ci::test`), but the move to `review` needs the full `just ci::check`.
