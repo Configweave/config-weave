@@ -90,13 +90,21 @@ jobs:
           # older commit carried a higher version made the next release
           # count up from the lower one — v0.2.0-alpha was followed by
           # v0.1.2-alpha. Version order is the only order that matters here.
-          LAST_TAG=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | head -1)
+          # versionsort.suffix=-alpha ranks v0.3.0 above v0.3.0-alpha. Without it
+          # git ranks the suffixed tag higher, and a stable tag never becomes LAST_TAG.
+          LAST_TAG=$(git -c versionsort.suffix=-alpha tag --list 'v*' --merged HEAD --sort=-v:refname | head -1)
+          PROMOTE_FROM=""
           if [[ -z "$LAST_TAG" ]]; then
             PREV_MAJOR=0; PREV_MINOR=0; PREV_PATCH=0; RANGE="HEAD"
           else
             VER="${LAST_TAG#v}"; VER="${VER%%-*}"
             IFS='.' read -r PREV_MAJOR PREV_MINOR PREV_PATCH <<< "$VER"
             RANGE="${LAST_TAG}..HEAD"
+            # A release on top of a pre-release tag promotes it: vX.Y.Z-alpha
+            # becomes vX.Y.Z, with no bump, unless vX.Y.Z already exists.
+            if [[ "$IS_RELEASE" == "true" && "$LAST_TAG" == *-* && -z "$(git tag --list "v$VER")" ]]; then
+              PROMOTE_FROM="$LAST_TAG"
+            fi
           fi
 
           BUMP="none"
@@ -123,9 +131,13 @@ jobs:
 
           VERSION="${MAJOR}.${MINOR}.${PATCH}"
           PRERELEASE=false
-          if [[ "$IS_PRERELEASE" == "true" ]]; then
+          if [[ "$IS_PRERELEASE" == "true" && -z "$PROMOTE_FROM" ]]; then
             VERSION="${VERSION}-alpha"
             PRERELEASE=true
+          fi
+          if [[ -n "$PROMOTE_FROM" ]]; then
+            VERSION="$VER"
+            BUMP="promoted from ${PROMOTE_FROM}"
           fi
 
           echo "Calculated version: $VERSION (bump=$BUMP, prerelease=$PRERELEASE, from ${LAST_TAG:-none})"
