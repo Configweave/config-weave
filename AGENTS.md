@@ -20,6 +20,9 @@ dependencies.
 
 - Target: `config-weave-helios-build`. The sandbox has no compilers.
   `terrarium exec config-weave-helios-build -- sh -c 'cd <your checkout>/config-weave && just ci::check'`
+  The target sees only `/work/config-weave/lead`: until your workspace is
+  mounted there, ask the lead to check out your pushed commit under
+  `/work/config-weave/lead/checks/<card-id>`, and validate in that directory.
 - There is no affected-test selector: the Rust suite runs whole. A single
   part can be run while you work (`just ci::lint`, `just ci::fmt-check`,
   `just ci::test`), but the move to `review` needs the full `just ci::check`.
