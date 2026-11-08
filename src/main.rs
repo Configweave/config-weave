@@ -615,11 +615,28 @@ fn cmd_run(cli: &Cli, dir: &std::path::Path, play: &str, mode: Mode, events_ndjs
             }
             run_report.exit_code()
         }
-        Err(diags) => {
+        Err(engine::ExecError::Gather(diags)) => {
+            print_gather_diags(&diags);
+            EXIT_VALIDATION
+        }
+        Err(engine::ExecError::Diags(diags)) => {
             print_diags(&diags);
             EXIT_VALIDATION
         }
     }
+}
+
+/// Print the diagnostics of a failed gather phase, then the count line for
+/// that phase. Exit 2 is the same as for a validation failure.
+fn print_gather_diags(diags: &[Diag]) {
+    for d in diags {
+        eprintln!("{}", d.rendered);
+    }
+    eprintln!(
+        "gather phase failed with {} error{}",
+        diags.len(),
+        if diags.len() == 1 { "" } else { "s" }
+    );
 }
 
 /// Split a test filter into `(package, test)` selectors: no filter selects
