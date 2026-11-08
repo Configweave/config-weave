@@ -30,6 +30,20 @@ pub use types::{ApplyResult, CheckResult};
 
 use wscript::Context;
 
+/// Parse a `timeout` option given in seconds, as an int or a float.
+/// Returns `None` for a negative, NaN, infinite or too large value, which
+/// the caller reports as an error. `Duration::from_secs_f64` would panic on
+/// those, and a negative int would wrap through `as u64`.
+pub(crate) fn timeout_secs(v: &wscript_std::DynValue) -> Option<std::time::Duration> {
+    match v {
+        wscript_std::DynValue::Int(secs) => u64::try_from(*secs)
+            .ok()
+            .map(std::time::Duration::from_secs),
+        wscript_std::DynValue::Float(secs) => std::time::Duration::try_from_secs_f64(*secs).ok(),
+        _ => None,
+    }
+}
+
 /// Build the full host context all scripts compile and run against.
 /// Identical on every platform (PRD §7): foreign-platform functions
 /// return runtime errors instead of being absent.
@@ -109,5 +123,39 @@ pub fn worker_init() -> WorkerGuard {
     WorkerGuard {
         #[cfg(windows)]
         _com: crate::comdispatch::init_sta(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::timeout_secs;
+    use std::time::Duration;
+    use wscript_std::DynValue;
+
+    #[test]
+    fn timeout_secs_accepts_non_negative_numbers() {
+        assert_eq!(timeout_secs(&DynValue::Int(0)), Some(Duration::ZERO));
+        assert_eq!(
+            timeout_secs(&DynValue::Int(2)),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            timeout_secs(&DynValue::Float(1.5)),
+            Some(Duration::from_millis(1500))
+        );
+    }
+
+    #[test]
+    fn timeout_secs_rejects_values_that_would_panic_or_wrap() {
+        for v in [
+            DynValue::Int(-1),
+            DynValue::Float(-1.0),
+            DynValue::Float(f64::NAN),
+            DynValue::Float(f64::INFINITY),
+            DynValue::Float(1e30),
+            DynValue::String("5".into()),
+        ] {
+            assert_eq!(timeout_secs(&v), None, "{v:?}");
+        }
     }
 }

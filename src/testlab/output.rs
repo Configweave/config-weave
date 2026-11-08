@@ -38,12 +38,38 @@ pub fn tail_lines(s: &str, max: usize) -> Vec<&str> {
 /// back to the exit code when stderr is empty.
 pub fn stderr_tail(out: &Output) -> String {
     let s = String::from_utf8_lossy(&out.stderr);
-    let tail = tail_lines(&s, 3);
+    summarize_stderr(&s, out.status.code())
+}
+
+/// The message of a failed CLI run. A miette report (vmlab's error format)
+/// keeps its headline (the line that starts with "×") and its first "help:"
+/// line, because the last lines of a report are only the snippet and frame.
+/// Other output keeps its last three lines.
+fn summarize_stderr(s: &str, code: Option<i32>) -> String {
+    if let Some(msg) = miette_summary(s) {
+        return msg;
+    }
+    let tail = tail_lines(s, 3);
     if tail.is_empty() {
-        format!("(no stderr, exit {})", out.status.code().unwrap_or(-1))
+        format!("(no stderr, exit {})", code.unwrap_or(-1))
     } else {
         tail.join(" / ")
     }
+}
+
+/// The headline and the first help line of a miette report, or `None` when
+/// the text has no headline.
+fn miette_summary(s: &str) -> Option<String> {
+    let lines: Vec<&str> = s.lines().map(str::trim).collect();
+    let headline = lines.iter().position(|l| l.starts_with('×'))?;
+    let mut parts = vec![lines[headline]];
+    if let Some(help) = lines[headline + 1..]
+        .iter()
+        .find(|l| l.starts_with("help:"))
+    {
+        parts.push(help);
+    }
+    Some(parts.join(" / "))
 }
 
 /// The interesting last lines of arbitrary command output, with a caller-
@@ -81,6 +107,37 @@ mod tests {
     #[test]
     fn tail_lines_ignores_surrounding_blank_lines() {
         assert_eq!(tail_lines("\n\na\nb\n\n", 3), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn stderr_tail_keeps_miette_headline_and_help() {
+        let stderr = "Error: \n\
+              \x20 × template x86_64/ubuntu-24.04 not in the template store\n\
+              \x20  ╭─[lab.wcl:6:1]\n\
+              \x20 5 │ [vm.linux]\n\
+              \x20 6 │ agent_update = false\n\
+              \x20   · ─────────────┬─────\n\
+              \x20   ·              ╰── here\n\
+              \x20   ╰────\n\
+              \x20 help: run `vmlab template pull` to fetch it\n";
+        let msg = summarize_stderr(stderr, Some(1));
+        assert!(
+            msg.contains("not in the template store"),
+            "headline lost: {msg:?}"
+        );
+        assert!(msg.contains("help: run `vmlab template pull`"), "{msg:?}");
+        assert!(!msg.contains("agent_update"), "snippet kept: {msg:?}");
+    }
+
+    #[test]
+    fn stderr_tail_of_plain_output_is_unchanged() {
+        let stderr = "step one\nstep two\nstep three\nstep four\n";
+        assert_eq!(
+            summarize_stderr(stderr, Some(2)),
+            "step two / step three / step four"
+        );
+        assert_eq!(summarize_stderr("", Some(3)), "(no stderr, exit 3)");
+        assert_eq!(summarize_stderr("", None), "(no stderr, exit -1)");
     }
 
     #[test]

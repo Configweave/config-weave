@@ -42,11 +42,13 @@ fn parse_opts(opts: &DynValue) -> Result<Opts, String> {
                 match (k.as_str(), v) {
                     ("cwd", DynValue::String(s)) => out.cwd = Some(s.clone()),
                     ("stdin", DynValue::String(s)) => out.stdin = Some(s.clone()),
-                    ("timeout", DynValue::Int(secs)) => {
-                        out.timeout = Some(Duration::from_secs(*secs as u64));
-                    }
-                    ("timeout", DynValue::Float(secs)) => {
-                        out.timeout = Some(Duration::from_secs_f64(*secs));
+                    ("timeout", v) => {
+                        out.timeout = Some(super::timeout_secs(v).ok_or_else(|| {
+                            format!(
+                                "shell option 'timeout' must be a non-negative number of \
+                                 seconds, got {v:?}"
+                            )
+                        })?);
                     }
                     ("env", DynValue::Map(vars)) => {
                         for (name, value) in vars {
@@ -510,12 +512,23 @@ mod tests {
         std::fs::write(&fake, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let out = run_powershell(
-            fake.to_str().unwrap(),
-            "$pw = 'MARKER-hunter2'",
-            &Opts::default(),
-        )
-        .unwrap();
+        // A fork in another test thread can inherit the fake's write fd until
+        // that child execs, and our exec then fails with ETXTBSY. Each call
+        // writes its own script, so a retry only repeats the spawn.
+        let mut attempts = 0;
+        let out = loop {
+            match run_powershell(
+                fake.to_str().unwrap(),
+                "$pw = 'MARKER-hunter2'",
+                &Opts::default(),
+            ) {
+                Err(e) if e.contains("Text file busy") && attempts < 50 => {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                other => break other.unwrap(),
+            }
+        };
         assert!(!out.stdout.contains("MARKER"), "{}", out.stdout);
         let bootstrap = out.stdout.lines().nth(3).unwrap();
         let path = bootstrap.split('\'').nth(1).unwrap();

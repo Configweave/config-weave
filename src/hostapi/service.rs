@@ -107,17 +107,13 @@ fn parse_opts(opts: &DynValue, dependents: bool) -> Result<Opts, String> {
         DynValue::Map(m) => {
             for (k, v) in m {
                 match (k.as_str(), v) {
-                    ("timeout", DynValue::Int(secs)) if *secs >= 0 => {
-                        out.timeout = Duration::from_secs(*secs as u64);
-                    }
-                    ("timeout", DynValue::Float(secs)) if secs.is_finite() && *secs >= 0.0 => {
-                        out.timeout = Duration::from_secs_f64(*secs);
-                    }
                     ("timeout", other) => {
-                        return Err(format!(
-                            "service option 'timeout' must be a non-negative number of seconds, \
-                             got {other:?}"
-                        ));
+                        out.timeout = super::timeout_secs(other).ok_or_else(|| {
+                            format!(
+                                "service option 'timeout' must be a non-negative number of \
+                                 seconds, got {other:?}"
+                            )
+                        })?;
                     }
                     ("stop_dependents", DynValue::Bool(b)) if dependents => {
                         out.stop_dependents = *b;

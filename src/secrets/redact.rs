@@ -100,9 +100,18 @@ mod tests {
 
     #[test]
     fn registering_twice_keeps_one_entry() {
+        // The registry is process-wide and other tests add entries at the
+        // same time, so count only this probe value, not the total length.
+        let count = || {
+            registry()
+                .read()
+                .unwrap()
+                .iter()
+                .filter(|s| s.as_str() == "duplicate-probe-value")
+                .count()
+        };
         register("duplicate-probe-value");
-        let before = registry().read().unwrap().len();
         register("duplicate-probe-value");
-        assert_eq!(registry().read().unwrap().len(), before);
+        assert_eq!(count(), 1);
     }
 }
