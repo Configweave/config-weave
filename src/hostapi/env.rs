@@ -167,12 +167,13 @@ mod tests {
         let out = cmd.output().expect("run child test binary");
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success(), "child failed: {stdout}");
+        // libtest prints "test <name> ... " before the child's own output,
+        // so the key is searched anywhere on the line.
         let field = |key: &str| -> String {
-            stdout
-                .lines()
-                .find_map(|l| l.strip_prefix(key))
-                .unwrap_or_else(|| panic!("no {key} line in child output: {stdout}"))
-                .to_string()
+            let at = stdout
+                .find(key)
+                .unwrap_or_else(|| panic!("no {key} in child output: {stdout}"));
+            stdout[at + key.len()..].lines().next().unwrap_or("").to_string()
         };
         (field("CW_PROBE_USER="), field("CW_PROBE_HOME="))
     }
