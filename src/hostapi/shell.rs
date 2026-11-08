@@ -8,6 +8,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use wscript::{Module, Script};
@@ -98,9 +99,23 @@ fn build_command(program: &str, args: &[String], opts: &Opts) -> Command {
     cmd
 }
 
-/// Wait with an optional deadline, killing the child on timeout.
-fn wait_with_timeout(child: &mut Child, timeout: Option<Duration>) -> Result<i64, String> {
-    let deadline = timeout.map(|t| Instant::now() + t);
+/// The instant `timeout` from now. `None` when there is no timeout, or when
+/// the timeout is too large to add to the clock: such a deadline is never
+/// reached, so it is the same as none, and `Instant + Duration` would panic.
+fn deadline_after(timeout: Option<Duration>) -> Option<Instant> {
+    timeout.and_then(|t| Instant::now().checked_add(t))
+}
+
+/// Kill and reap the child after its deadline passed. Only the direct child
+/// is killed: a grandchild it started keeps running.
+fn time_out(child: &mut Child) -> String {
+    let _ = child.kill();
+    let _ = child.wait();
+    "command timed out".to_string()
+}
+
+/// Wait for the child until an optional deadline, killing it on timeout.
+fn wait_until(child: &mut Child, deadline: Option<Instant>) -> Result<i64, String> {
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return Ok(status.code().unwrap_or(-1) as i64),
@@ -108,9 +123,7 @@ fn wait_with_timeout(child: &mut Child, timeout: Option<Duration>) -> Result<i64
                 if let Some(d) = deadline
                     && Instant::now() >= d
                 {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("command timed out".to_string());
+                    return Err(time_out(child));
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -156,6 +169,7 @@ fn lossy_lines(reader: impl Read, mut each: impl FnMut(String)) {
 }
 
 fn run_captured(program: &str, args: &[String], opts: &Opts) -> Result<CmdOutput, String> {
+    let deadline = deadline_after(opts.timeout);
     let mut child = build_command(program, args, opts)
         .spawn()
         .map_err(|e| format!("cannot start '{program}': {e}"))?;
@@ -181,7 +195,7 @@ fn run_captured(program: &str, args: &[String], opts: &Opts) -> Result<CmdOutput
         buf
     });
 
-    let code = wait_with_timeout(&mut child, opts.timeout)?;
+    let code = wait_until(&mut child, deadline)?;
     let stdout = decode(&out_thread.join().unwrap_or_default());
     let stderr = decode(&err_thread.join().unwrap_or_default());
     Ok(CmdOutput {
@@ -192,9 +206,20 @@ fn run_captured(program: &str, args: &[String], opts: &Opts) -> Result<CmdOutput
     })
 }
 
+/// One output line of a streamed child.
+enum Line {
+    Out(String),
+    Err(String),
+}
+
 /// Streaming variant: lines go through `log` live (stdout → info,
 /// stderr → warn) and are captured as well.
+///
+/// The log sinks are thread-local, so helper threads read the pipes and
+/// send the lines over a channel, and this thread logs them. It receives
+/// with the deadline, so a child that stops writing still times out.
 fn run_streaming_impl(program: &str, args: &[String], opts: &Opts) -> Result<CmdOutput, String> {
+    let deadline = deadline_after(opts.timeout);
     let mut child = build_command(program, args, opts)
         .spawn()
         .map_err(|e| format!("cannot start '{program}': {e}"))?;
@@ -208,26 +233,40 @@ fn run_streaming_impl(program: &str, args: &[String], opts: &Opts) -> Result<Cmd
         .stderr
         .take()
         .ok_or_else(|| format!("cannot capture stderr of '{program}'"))?;
-    // log sinks are thread-local, so stream from this thread; drain
-    // stderr on a helper thread into a buffer, logging after.
-    let err_thread = std::thread::spawn(move || {
-        let mut lines = Vec::new();
-        lossy_lines(stderr_pipe, |line| lines.push(line));
-        lines
+    let (tx, rx) = mpsc::channel();
+    let err_tx = tx.clone();
+    // On a timeout the readers are not joined: a grandchild can hold the
+    // pipes open after the child is killed. They end at its EOF.
+    std::thread::spawn(move || {
+        lossy_lines(stdout_pipe, |line| {
+            let _ = tx.send(Line::Out(line));
+        })
     });
+    std::thread::spawn(move || {
+        lossy_lines(stderr_pipe, |line| {
+            let _ = err_tx.send(Line::Err(line));
+        })
+    });
+
     let mut stdout = String::new();
-    lossy_lines(stdout_pipe, |line| {
-        log::emit(log::Level::Info, &line);
-        stdout.push_str(&line);
-        stdout.push('\n');
-    });
-    let code = wait_with_timeout(&mut child, opts.timeout)?;
     let mut stderr = String::new();
-    for line in err_thread.join().unwrap_or_default() {
-        log::emit(log::Level::Warn, &line);
-        stderr.push_str(&line);
-        stderr.push('\n');
+    loop {
+        let next = match deadline {
+            Some(d) => rx.recv_timeout(d.saturating_duration_since(Instant::now())),
+            None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        let (level, buf, line) = match next {
+            Ok(Line::Out(line)) => (log::Level::Info, &mut stdout, line),
+            Ok(Line::Err(line)) => (log::Level::Warn, &mut stderr, line),
+            // Both pipes reached EOF.
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => return Err(time_out(&mut child)),
+        };
+        log::emit(level, &line);
+        buf.push_str(&line);
+        buf.push('\n');
     }
+    let code = wait_until(&mut child, deadline)?;
     Ok(CmdOutput {
         stdout,
         stderr,

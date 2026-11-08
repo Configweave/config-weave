@@ -6,7 +6,7 @@ page ref_mod_shell {
   chapter_header "shell module" {
     kicker       = "Reference · reference"
     reading_time = "3 min read"
-    updated      = "2026-09-02"
+    updated      = "2026-11-08"
     version      = "config-weave 0.1.0"
   }
 
@@ -17,7 +17,9 @@ command or script string and an options `Value`, and returns
 `Result[CmdOutput, string]`. The options argument is required because
 wscript functions have a fixed arity: pass `Value::Null` for the defaults,
 or a `Value::Map` with any of the keys below. A timeout kills the child and
-returns `Err`.
+returns `Err`. It kills the direct child only: a process that the child
+started, such as a command in a `bash` script, keeps running. A timeout too
+large to add to the clock means no timeout.
 PROSE
 
   table {
