@@ -36,9 +36,9 @@ use wscript::Context;
 /// those, and a negative int would wrap through `as u64`.
 pub(crate) fn timeout_secs(v: &wscript_std::DynValue) -> Option<std::time::Duration> {
     match v {
-        wscript_std::DynValue::Int(secs) => {
-            u64::try_from(*secs).ok().map(std::time::Duration::from_secs)
-        }
+        wscript_std::DynValue::Int(secs) => u64::try_from(*secs)
+            .ok()
+            .map(std::time::Duration::from_secs),
         wscript_std::DynValue::Float(secs) => std::time::Duration::try_from_secs_f64(*secs).ok(),
         _ => None,
     }
@@ -135,7 +135,10 @@ mod tests {
     #[test]
     fn timeout_secs_accepts_non_negative_numbers() {
         assert_eq!(timeout_secs(&DynValue::Int(0)), Some(Duration::ZERO));
-        assert_eq!(timeout_secs(&DynValue::Int(2)), Some(Duration::from_secs(2)));
+        assert_eq!(
+            timeout_secs(&DynValue::Int(2)),
+            Some(Duration::from_secs(2))
+        );
         assert_eq!(
             timeout_secs(&DynValue::Float(1.5)),
             Some(Duration::from_millis(1500))

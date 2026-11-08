@@ -450,7 +450,11 @@ fn bad_then_good(root: &Path, mode: &str) -> PathBuf {
             &format!("        path = \"/nonexistent\"\n        check = \"{mode}\""),
             ""
         ),
-        step("good", &format!("        path = \"{}\"", marker.display()), "")
+        step(
+            "good",
+            &format!("        path = \"{}\"", marker.display()),
+            ""
+        )
     );
     write_lifecycle_playbook(root, &plays);
     marker
