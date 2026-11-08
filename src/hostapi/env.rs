@@ -72,3 +72,96 @@ pub fn module() -> Module {
     m.fn_("is_elevated", is_elevated_impl);
     m
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::process::Command;
+
+    const PROBE: &str = "CW_ENV_PROBE";
+
+    /// Child-process body. It runs only when the parent sets `CW_ENV_PROBE`,
+    /// so a plain `cargo test` run skips it. It prints the two values.
+    #[test]
+    fn probe_identity() {
+        if std::env::var_os(PROBE).is_none() {
+            return;
+        }
+        println!("CW_PROBE_USER={}", super::current_user());
+        println!("CW_PROBE_HOME={}", super::home_dir());
+    }
+
+    /// Run `probe_identity` in a child process. The child's environment is
+    /// the parent's minus `remove`, plus `set`. The parent env stays intact.
+    fn probe(remove: &[&str], set: &[(&str, &str)]) -> (String, String) {
+        let mut cmd = Command::new(std::env::current_exe().expect("test binary path"));
+        cmd.args(["env::tests::probe_identity", "--nocapture", "--test-threads=1"]);
+        cmd.env(PROBE, "1");
+        for name in remove {
+            cmd.env_remove(name);
+        }
+        for (name, value) in set {
+            cmd.env(name, value);
+        }
+        let out = cmd.output().expect("run child test binary");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "child failed: {stdout}");
+        let field = |key: &str| -> String {
+            stdout
+                .lines()
+                .find_map(|l| l.strip_prefix(key))
+                .unwrap_or_else(|| panic!("no {key} line in child output: {stdout}"))
+                .to_string()
+        };
+        (field("CW_PROBE_USER="), field("CW_PROBE_HOME="))
+    }
+
+    /// The passwd facts as the OS reports them, read with `id` and `getent`
+    /// so the test does not reuse the code under test.
+    fn passwd_facts() -> (String, String) {
+        let name = String::from_utf8(
+            Command::new("id").arg("-un").output().expect("run id").stdout,
+        )
+        .expect("utf8")
+        .trim()
+        .to_string();
+        let entry = Command::new("getent")
+            .args(["passwd", &name])
+            .output()
+            .expect("run getent");
+        let line = String::from_utf8(entry.stdout).expect("utf8");
+        let home = line.trim().split(':').nth(5).unwrap_or("").to_string();
+        (name, home)
+    }
+
+    #[test]
+    fn current_user_and_home_fall_back_to_passwd_without_env() {
+        let (want_user, want_home) = passwd_facts();
+        assert!(!want_user.is_empty(), "id -un gave no name");
+        assert!(!want_home.is_empty(), "getent gave no home");
+
+        let (user, home) = probe(&["USER", "USERNAME", "HOME", "USERPROFILE"], &[]);
+        assert_eq!(user, want_user, "current_user with USER and USERNAME unset");
+        assert_eq!(home, want_home, "home_dir with HOME and USERPROFILE unset");
+    }
+
+    #[test]
+    fn empty_env_values_count_as_unset() {
+        let (want_user, want_home) = passwd_facts();
+        let (user, home) = probe(
+            &["USERNAME", "USERPROFILE"],
+            &[("USER", ""), ("HOME", "")],
+        );
+        assert_eq!(user, want_user, "current_user with USER=\"\"");
+        assert_eq!(home, want_home, "home_dir with HOME=\"\"");
+    }
+
+    #[test]
+    fn set_env_values_still_win() {
+        let (user, home) = probe(
+            &[],
+            &[("USER", "alice-test"), ("HOME", "/tmp/alice-test-home")],
+        );
+        assert_eq!(user, "alice-test");
+        assert_eq!(home, "/tmp/alice-test-home");
+    }
+}
