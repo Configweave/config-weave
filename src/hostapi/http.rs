@@ -55,11 +55,13 @@ fn parse_opts(opts: &DynValue, download: bool) -> Result<Opts, String> {
                             }
                         }
                     }
-                    ("timeout", DynValue::Int(secs)) => {
-                        out.timeout = Some(Duration::from_secs(*secs as u64));
-                    }
-                    ("timeout", DynValue::Float(secs)) => {
-                        out.timeout = Some(Duration::from_secs_f64(*secs));
+                    ("timeout", v) => {
+                        out.timeout = Some(super::timeout_secs(v).ok_or_else(|| {
+                            format!(
+                                "http option 'timeout' must be a non-negative number of \
+                                 seconds, got {v:?}"
+                            )
+                        })?);
                     }
                     ("redirects", DynValue::Bool(b)) => out.follow_redirects = *b,
                     ("retries", v) if download => {
