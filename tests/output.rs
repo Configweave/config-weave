@@ -191,3 +191,144 @@ fn plain_mode_auto_selected_without_tty() {
     );
     assert!(stdout.contains("[     not configured]"), "{stdout}");
 }
+
+#[test]
+fn uncreatable_log_file_exits_2_naming_the_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("m");
+    write_playbook(dir.path(), &marker);
+    // A regular file cannot be the parent directory of the log file.
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, "not a directory").unwrap();
+    let log_path = blocker.join("x.log");
+
+    let out = Command::new(bin())
+        .args(["apply", ".", "p", "--log-file", log_path.to_str().unwrap()])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.contains(log_path.to_str().unwrap()), "{stderr}");
+}
+
+#[test]
+fn log_level_is_checked_without_log_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("m");
+    write_playbook(dir.path(), &marker);
+
+    let out = Command::new(bin())
+        .args(["validate", ".", "--log-level", "bogus"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("bogus"), "{stderr}");
+}
+
+/// A playbook with one package whose gatherer `chatty` logs at debug and
+/// warn level.
+fn write_gatherer_log_playbook(root: &Path) {
+    let pkg = root.join("pkgs/probe");
+    std::fs::create_dir_all(pkg.join("gatherers")).unwrap();
+    std::fs::write(
+        root.join("playbook.wcl"),
+        r#"playbook "GatherLogs" {
+  description = "Gatherer log levels"
+  version = "0.1.0"
+
+  gather "chatty" {
+    description = "Probe"
+    from = "probe.chatty"
+  }
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("package.wcl"),
+        r#"package "probe" {
+  description = "Gatherer log probe"
+
+  gatherer "chatty" {
+    description = "Logs at debug and warn level"
+    script = "gatherers/chatty.ws"
+  }
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("gatherers/chatty.ws"),
+        r#"use value
+use log
+
+fn gather(params: Value) -> Value {
+    log::debug("debug detail")
+    log::warn("warn detail")
+    Value::Map(#{ "state": Value::String("done") })
+}
+"#,
+    )
+    .unwrap();
+}
+
+/// Run the gatherer once with the given file log level and return the
+/// parsed NDJSON lines.
+fn gather_with_log_level(root: &Path, level: &str) -> Vec<serde_json::Value> {
+    let log_path = root.join(format!("{level}.ndjson"));
+    let out = Command::new(bin())
+        .args([
+            "__gather",
+            ".",
+            "probe.chatty",
+            "--log-file",
+            log_path.to_str().unwrap(),
+            "--log-level",
+            level,
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    let log = std::fs::read_to_string(&log_path).expect("log file written");
+    log.lines()
+        .map(|line| {
+            serde_json::from_str(line)
+                .unwrap_or_else(|e| panic!("log line is not JSON: {e}\n{line}"))
+        })
+        .collect()
+}
+
+fn find_line<'a>(lines: &'a [serde_json::Value], message: &str) -> Option<&'a serde_json::Value> {
+    lines.iter().find(|v| v["fields"]["message"] == message)
+}
+
+#[test]
+fn gatherer_log_lines_keep_their_level() {
+    let dir = tempfile::tempdir().unwrap();
+    write_gatherer_log_playbook(dir.path());
+
+    let debug_lines = gather_with_log_level(dir.path(), "debug");
+    let debug = find_line(&debug_lines, "debug detail")
+        .unwrap_or_else(|| panic!("no debug line at --log-level debug: {debug_lines:?}"));
+    assert_eq!(debug["level"], "DEBUG", "{debug}");
+    let gatherer = debug["fields"]["gatherer"].as_str().unwrap_or("");
+    assert!(gatherer.contains("chatty"), "{debug}");
+    let warn = find_line(&debug_lines, "warn detail")
+        .unwrap_or_else(|| panic!("no warn line: {debug_lines:?}"));
+    assert_eq!(warn["level"], "WARN", "{warn}");
+
+    let info_lines = gather_with_log_level(dir.path(), "info");
+    assert!(
+        find_line(&info_lines, "debug detail").is_none(),
+        "debug line leaked at --log-level info: {info_lines:?}"
+    );
+    let warn = find_line(&info_lines, "warn detail")
+        .unwrap_or_else(|| panic!("no warn line at info: {info_lines:?}"));
+    assert_eq!(warn["level"], "WARN", "{warn}");
+}
