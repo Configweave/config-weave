@@ -317,10 +317,8 @@ fn gatherer_log_lines_keep_their_level() {
     let debug = find_line(&debug_lines, "debug detail")
         .unwrap_or_else(|| panic!("no debug line at --log-level debug: {debug_lines:?}"));
     assert_eq!(debug["level"], "DEBUG", "{debug}");
-    assert!(
-        debug["fields"]["gatherer"].as_str().unwrap_or("").contains("chatty"),
-        "{debug}"
-    );
+    let gatherer = debug["fields"]["gatherer"].as_str().unwrap_or("");
+    assert!(gatherer.contains("chatty"), "{debug}");
     let warn = find_line(&debug_lines, "warn detail")
         .unwrap_or_else(|| panic!("no warn line: {debug_lines:?}"));
     assert_eq!(warn["level"], "WARN", "{warn}");
