@@ -364,7 +364,7 @@ type LpFeatures extends ContentBlock {
       Html::Element {
         tag: "section", id: b.id, class: ["lp-section"], attrs: none,
         children: flatten([
-          lp_section_head(b.eyebrow, b.title, b.lede, "lp-section-head"),
+          lp_section_head(if b.eyebrow == none { "" } else { b.eyebrow }, if b.title == none { "" } else { b.title }, if b.lede == none { "" } else { b.lede }, "lp-section-head"),
           if len(items) == 0 { [] }
           else {
             [ Html::Element {
@@ -416,7 +416,7 @@ type LpCards extends ContentBlock {
       Html::Element {
         tag: "section", id: b.id, class: ["lp-section"], attrs: none,
         children: flatten([
-          lp_section_head(b.eyebrow, b.title, b.lede, "lp-section-head"),
+          lp_section_head(if b.eyebrow == none { "" } else { b.eyebrow }, if b.title == none { "" } else { b.title }, if b.lede == none { "" } else { b.lede }, "lp-section-head"),
           if len(cards) == 0 { [] }
           else {
             [ Html::Element {
@@ -486,7 +486,7 @@ type LpShowcase extends ContentBlock {
         tag: "section", id: b.id, class: ["lp-section", "lp-showcase"], attrs: none,
         children: flatten([
           panel,
-          lp_section_head(b.eyebrow, b.heading, b.body, "lp-showcase-text"),
+          lp_section_head(if b.eyebrow == none { "" } else { b.eyebrow }, b.heading, b.body, "lp-showcase-text"),
         ]),
       },
     ]
@@ -512,7 +512,7 @@ type LpSteps extends ContentBlock {
           Html::Element {
             tag: "article", id: none, class: ["lp-steps-panel"], attrs: none,
             children: flatten([
-              lp_section_head(b.eyebrow, b.title, b.lede, "lp-section-head"),
+              lp_section_head(if b.eyebrow == none { "" } else { b.eyebrow }, if b.title == none { "" } else { b.title }, if b.lede == none { "" } else { b.lede }, "lp-section-head"),
               if len(steps) == 0 { [] }
               else {
                 [ Html::Element {
@@ -568,7 +568,7 @@ type LpTerms extends ContentBlock {
       Html::Element {
         tag: "section", id: b.id, class: ["lp-section"], attrs: none,
         children: flatten([
-          lp_section_head(b.eyebrow, b.title, b.lede, "lp-section-head"),
+          lp_section_head(if b.eyebrow == none { "" } else { b.eyebrow }, if b.title == none { "" } else { b.title }, if b.lede == none { "" } else { b.lede }, "lp-section-head"),
           if len(terms) == 0 { [] }
           else {
             [ Html::Element {
