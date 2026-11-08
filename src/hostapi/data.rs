@@ -104,3 +104,117 @@ pub fn module() -> Module {
     );
     m
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The string value of `key` in section `section`, or None.
+    fn get(v: &DynValue, section: &str, key: &str) -> Option<String> {
+        let DynValue::Map(sections) = v else {
+            return None;
+        };
+        let DynValue::Map(entries) = sections.get(section)? else {
+            return None;
+        };
+        match entries.get(key)? {
+            DynValue::String(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+
+    fn section_names(v: &DynValue) -> Vec<String> {
+        let DynValue::Map(sections) = v else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = sections.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn repeated_section_merges_keys() {
+        let v = ini_parse("[a]\nx=1\n[b]\ny=2\n[a]\nz=3\n").unwrap();
+        assert_eq!(get(&v, "a", "x").as_deref(), Some("1"));
+        assert_eq!(get(&v, "a", "z").as_deref(), Some("3"));
+        assert_eq!(get(&v, "b", "y").as_deref(), Some("2"));
+        assert_eq!(section_names(&v), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn repeated_section_later_key_wins() {
+        let v = ini_parse("[a]\nx=1\n[a]\nx=2\n").unwrap();
+        assert_eq!(get(&v, "a", "x").as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn global_keys_go_under_empty_name() {
+        let v = ini_parse("g=1\n[a]\nx=2\n").unwrap();
+        assert_eq!(get(&v, "", "g").as_deref(), Some("1"));
+        assert_eq!(get(&v, "a", "x").as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn empty_global_section_is_dropped() {
+        let v = ini_parse("[a]\nx=2\n").unwrap();
+        assert_eq!(section_names(&v), vec!["a"]);
+    }
+
+    #[test]
+    fn comment_lines_are_skipped() {
+        let v = ini_parse("; top\n# also\n[a]\n; inside\nx=1\n  # indented\n").unwrap();
+        assert_eq!(section_names(&v), vec!["a"]);
+        assert_eq!(get(&v, "a", "x").as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn unterminated_header_names_its_line() {
+        let err = ini_parse("[a]\nx=1\n[b\ny=2\n").unwrap_err();
+        assert_eq!(err, "line 3: unterminated section header");
+    }
+
+    #[test]
+    fn line_without_equals_is_rejected_with_line() {
+        let err = ini_parse("[a]\njunk\n").unwrap_err();
+        assert_eq!(err, "line 2: expected key=value or [section]");
+    }
+
+    #[test]
+    fn serialize_non_string_scalars() {
+        let mut entries = HashMap::new();
+        entries.insert("n".to_string(), DynValue::Int(42));
+        entries.insert("f".to_string(), DynValue::Float(1.5));
+        entries.insert("b".to_string(), DynValue::Bool(true));
+        let mut sections = HashMap::new();
+        sections.insert("s".to_string(), DynValue::Map(entries));
+        let text = ini_serialize(&DynValue::Map(sections)).unwrap();
+        assert_eq!(text, "[s]\nb=true\nf=1.5\nn=42\n");
+    }
+
+    #[test]
+    fn serialize_rejects_nested_value() {
+        let mut inner = HashMap::new();
+        inner.insert("k".to_string(), DynValue::Map(HashMap::new()));
+        let mut sections = HashMap::new();
+        sections.insert("s".to_string(), DynValue::Map(inner));
+        assert!(ini_serialize(&DynValue::Map(sections)).is_err());
+    }
+
+    #[test]
+    fn serialize_writes_global_first_sorted_without_comments() {
+        let v = ini_parse("; c\nz=9\n[b]\ny=2\nx=1\n[a]\nq=0\n").unwrap();
+        assert_eq!(
+            ini_serialize(&v).unwrap(),
+            "z=9\n\n[a]\nq=0\n\n[b]\nx=1\ny=2\n"
+        );
+    }
+
+    #[test]
+    fn parse_serialize_parse_round_trip() {
+        let src = "g=1\n[a]\nx=2\n[b]\ny=hello world\n[a]\nz=3\n";
+        let first = ini_serialize(&ini_parse(src).unwrap()).unwrap();
+        let second = ini_serialize(&ini_parse(&first).unwrap()).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first, "g=1\n\n[a]\nx=2\nz=3\n\n[b]\ny=hello world\n");
+    }
+}
