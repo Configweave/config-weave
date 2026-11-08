@@ -589,6 +589,22 @@ mod tests {
         );
     }
 
+    /// A timeout too large to add to the clock means no deadline, not a
+    /// panic inside ureq.
+    #[test]
+    fn download_with_a_huge_timeout_runs_with_no_deadline() {
+        let body = content();
+        let b = body.clone();
+        let server = serve(move |_, _| full("200 OK", &[], &b));
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.bin");
+        let opts = Opts {
+            timeout: Some(Duration::from_secs(i64::MAX as u64)),
+            ..opts()
+        };
+        assert_eq!(fetch(&server, &dest, &opts).unwrap(), body.len() as u64);
+    }
+
     #[test]
     fn download_truncated_body_fails_without_dest_or_part() {
         let body = content();

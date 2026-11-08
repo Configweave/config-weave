@@ -456,6 +456,73 @@ mod tests {
         assert_eq!(out.stderr, "err \u{FFFD} tail\n");
     }
 
+    fn timeout_opts(v: DynValue) -> Opts {
+        parse_opts(&DynValue::Map(
+            [("timeout".to_string(), v)].into_iter().collect(),
+        ))
+        .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_times_out_and_kills_the_child() {
+        let started = Instant::now();
+        let err = run_captured("sleep", &["30".into()], &timeout_opts(DynValue::Int(1)))
+            .unwrap_err();
+        assert_eq!(err, "command timed out");
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    }
+
+    /// The child writes, then sleeps past the timeout. The lines it wrote
+    /// reach the log before the timeout fires, and the call returns soon
+    /// after it, although a grandchild (`sleep`) still holds the pipes.
+    #[cfg(unix)]
+    #[test]
+    fn run_streaming_times_out_and_logs_earlier_lines_live() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let started = Instant::now();
+        let seen: Rc<RefCell<Vec<(log::Level, String, Duration)>>> = Rc::default();
+        let sink = seen.clone();
+        log::set_sink(Box::new(move |level, msg| {
+            sink.borrow_mut()
+                .push((level, msg.to_string(), started.elapsed()));
+        }));
+        let script = "echo first; echo oops >&2; sleep 30; echo never";
+        let result = run_streaming_impl(
+            "sh",
+            &["-c".into(), script.into()],
+            &timeout_opts(DynValue::Int(1)),
+        );
+        log::clear_sink();
+        let took = started.elapsed();
+        assert_eq!(result.unwrap_err(), "command timed out");
+        assert!(took < Duration::from_secs(5), "{took:?}");
+        let seen = seen.borrow();
+        let line = |want: &str| seen.iter().find(|(_, m, _)| m == want).cloned();
+        let (level, _, at) = line("first").expect("stdout line logged");
+        assert_eq!(level, log::Level::Info);
+        assert!(at < Duration::from_secs(1), "logged at {at:?}, not live");
+        let (level, _, at) = line("oops").expect("stderr line logged");
+        assert_eq!(level, log::Level::Warn);
+        assert!(at < Duration::from_secs(1), "logged at {at:?}, not live");
+        assert!(line("never").is_none());
+    }
+
+    /// A timeout too large to add to the clock means no deadline, not a
+    /// panic.
+    #[cfg(unix)]
+    #[test]
+    fn a_huge_timeout_runs_with_no_deadline() {
+        for v in [DynValue::Int(i64::MAX), DynValue::Float(1e19)] {
+            let opts = timeout_opts(v);
+            let out = run_captured("true", &[], &opts).unwrap();
+            assert!(out.success);
+            let out = run_streaming_impl("true", &[], &opts).unwrap();
+            assert!(out.success);
+        }
+    }
+
     fn ps(script: &str) -> Vec<String> {
         powershell_argv("pwsh", "/t/script.ps1", script).1
     }

@@ -26,8 +26,19 @@ fn run_in(dir: &Path, args: &[&str]) -> (i32, String, String) {
 /// Like `run_in`, but kill the child after `limit`, so a hang fails the test
 /// instead of blocking the suite. A killed child reports code -2.
 fn run_in_within(dir: &Path, args: &[&str], limit: Duration) -> (i32, String, String) {
+    run_in_within_env(dir, args, &[], limit)
+}
+
+/// `run_in_within` with extra environment variables for the child.
+fn run_in_within_env(
+    dir: &Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+    limit: Duration,
+) -> (i32, String, String) {
     let mut child = Command::new(bin())
         .args(args)
+        .envs(envs.iter().copied())
         .current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -147,8 +158,7 @@ fn check(params: Value) -> Result[CheckResult, string] {
         shell::run("true", Value::Map(#{"timeout": Value::Float(-1.0)}))?
         return Ok(CheckResult::AlreadyConfigured)
     }
-    // A timeout this large overflows the deadline instant in the shell
-    // module: a real panic inside a host function.
+    // A timeout too large for a deadline means no deadline, not a panic.
     if mode == "huge_timeout" {
         shell::run("true", Value::Map(#{"timeout": Value::Int(9223372036854775807)}))?
         return Ok(CheckResult::AlreadyConfigured)
@@ -486,23 +496,62 @@ fn a_negative_shell_timeout_fails_the_step_and_ends_the_run() {
 }
 
 #[test]
-fn a_panic_in_a_host_function_fails_the_step_and_ends_the_run() {
+fn a_huge_shell_timeout_runs_with_no_deadline() {
     let dir = tempfile::tempdir().unwrap();
     let marker = bad_then_good(dir.path(), "huge_timeout");
     let limit = Duration::from_secs(60);
 
     let (code, stdout, stderr) =
         run_in_within(dir.path(), &["apply", ".", "p", "--jobs", "1"], limit);
+    assert_eq!(code, 0, "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(!stdout.contains("panicked"), "{stdout}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(marker.exists());
+}
+
+/// `testhook::panic` exists only in debug builds with
+/// `CONFIG_WEAVE_TEST_HOOKS` set (src/hostapi/mod.rs), so this test needs a
+/// debug build and its own copy of the probe script that uses it.
+#[cfg(debug_assertions)]
+#[test]
+fn a_panic_in_a_host_function_fails_the_step_and_ends_the_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = bad_then_good(dir.path(), "panic");
+    let script = dir.path().join("pkgs/probe/resources/marker.ws");
+    let src = std::fs::read_to_string(&script).unwrap();
+    let anchor = "    if mode == \"reboot\" { return Ok(CheckResult::RebootRequired) }\n";
+    assert!(src.contains(anchor));
+    let src = src.replacen(
+        anchor,
+        &format!(
+            "    if mode == \"panic\" {{\n        if testhook::panic(\"host boom\") {{ return Ok(CheckResult::AlreadyConfigured) }}\n    }}\n{anchor}"
+        ),
+        1,
+    );
+    std::fs::write(&script, format!("use testhook\n{src}")).unwrap();
+    let hooks = [("CONFIG_WEAVE_TEST_HOOKS", "1")];
+    let limit = Duration::from_secs(60);
+
+    let (code, stdout, stderr) = run_in_within_env(
+        dir.path(),
+        &["apply", ".", "p", "--jobs", "1"],
+        &hooks,
+        limit,
+    );
     assert_eq!(code, 1, "stdout:\n{stdout}\nstderr:\n{stderr}");
     assert!(stdout.contains("[              error]"), "{stdout}");
-    assert!(stdout.contains("script runtime panicked"), "{stdout}");
+    assert!(
+        stdout.contains("script runtime panicked: host boom"),
+        "{stdout}"
+    );
     assert!(stdout.contains("not run"), "{stdout}");
     assert!(!marker.exists());
 
     // The worker that caught the panic keeps serving: `good` still runs.
-    let (code, stdout, stderr) = run_in_within(
+    let (code, stdout, stderr) = run_in_within_env(
         dir.path(),
         &["apply", ".", "p", "--jobs", "1", "--continue-on-error"],
+        &hooks,
         limit,
     );
     assert_eq!(code, 1, "stdout:\n{stdout}\nstderr:\n{stderr}");

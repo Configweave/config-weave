@@ -48,6 +48,35 @@ pub(crate) fn timeout_secs(v: &wscript_std::DynValue) -> Option<std::time::Durat
 /// Identical on every platform (PRD §7): foreign-platform functions
 /// return runtime errors instead of being absent.
 pub fn context() -> Context {
+    test_hooks(base_context())
+}
+
+/// Name of the environment variable that adds [`test_hooks`].
+pub const TEST_HOOKS_ENV: &str = "CONFIG_WEAVE_TEST_HOOKS";
+
+/// The `testhook` module, for the CLI tests only: `testhook::panic(msg)`
+/// panics inside a host function, so a test can prove that the engine turns
+/// a host panic into a step error. It exists only in debug builds, and only
+/// when [`TEST_HOOKS_ENV`] is set, so release builds, the docs and the
+/// `.wscripti` output never see it.
+#[cfg(debug_assertions)]
+fn test_hooks(ctx: Context) -> Context {
+    if std::env::var_os(TEST_HOOKS_ENV).is_none() {
+        return ctx;
+    }
+    let mut m = wscript::Module::new("testhook");
+    m.doc("Test hooks (debug builds with CONFIG_WEAVE_TEST_HOOKS set only)");
+    m.doc_next("Panic with `msg` inside a host function");
+    m.fn_("panic", |msg: &str| -> bool { panic!("{msg}") });
+    ctx.module(m)
+}
+
+#[cfg(not(debug_assertions))]
+fn test_hooks(ctx: Context) -> Context {
+    ctx
+}
+
+fn base_context() -> Context {
     Context::new()
         .module(wscript_std::value())
         // Re-exported wscript-std data formats (PRD `data` overlap note).

@@ -1134,3 +1134,27 @@ fn index_blocks<'a>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::guard;
+
+    #[test]
+    fn guard_turns_a_panic_into_an_err() {
+        let r: Result<(), String> = guard(|| panic!("boom {}", 7));
+        assert_eq!(r, Err("script runtime panicked: boom 7".to_string()));
+        let r: Result<(), String> = guard(|| panic!("static boom"));
+        assert_eq!(r, Err("script runtime panicked: static boom".to_string()));
+        let r: Result<(), String> = guard(|| std::panic::panic_any(42));
+        assert_eq!(
+            r,
+            Err("script runtime panicked: non-string panic payload".to_string())
+        );
+    }
+
+    #[test]
+    fn guard_passes_results_through() {
+        assert_eq!(guard(|| Ok::<_, String>(3)), Ok(3));
+        assert_eq!(guard(|| Err::<i32, _>("no".to_string())), Err("no".to_string()));
+    }
+}
