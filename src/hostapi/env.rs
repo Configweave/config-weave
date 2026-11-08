@@ -15,6 +15,83 @@ fn is_elevated_impl() -> bool {
     }
 }
 
+/// Split a PATH-style list on the platform separator.
+fn path_split(value: &str) -> Vec<String> {
+    std::env::split_paths(value)
+        .map(|p| p.display().to_string())
+        .collect()
+}
+
+/// Join paths into a PATH-style list with the platform separator.
+fn path_join(parts: Vec<String>) -> Result<String, String> {
+    std::env::join_paths(parts.iter())
+        .map(|s| s.to_string_lossy().into_owned())
+        .map_err(|e| e.to_string())
+}
+
+/// An environment variable, or None when it is unset or empty.
+fn env_value(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+/// The name and home directory of the effective user, from the passwd
+/// database. Unix only.
+#[cfg(unix)]
+fn passwd_entry() -> Option<(String, String)> {
+    use std::ffi::CStr;
+
+    // Safety: getpwuid_r writes only into `pwd` and `buf`, which live for the
+    // whole call. The strings read from `pwd` are copied before return.
+    unsafe {
+        let uid = libc::geteuid();
+        let mut buf = vec![0u8; 1024];
+        loop {
+            let mut pwd: libc::passwd = std::mem::zeroed();
+            let mut result: *mut libc::passwd = std::ptr::null_mut();
+            let rc = libc::getpwuid_r(
+                uid,
+                &mut pwd,
+                buf.as_mut_ptr() as *mut libc::c_char,
+                buf.len(),
+                &mut result,
+            );
+            if rc == libc::ERANGE && buf.len() < (1 << 20) {
+                buf.resize(buf.len() * 2, 0);
+                continue;
+            }
+            if rc != 0 || result.is_null() {
+                return None;
+            }
+            let name = CStr::from_ptr(pwd.pw_name).to_string_lossy().into_owned();
+            let dir = CStr::from_ptr(pwd.pw_dir).to_string_lossy().into_owned();
+            return Some((name, dir));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn passwd_entry() -> Option<(String, String)> {
+    None
+}
+
+/// Name of the current user: `$USER`, then `$USERNAME`, then the passwd
+/// entry of the effective uid. Empty when none of them has a value.
+fn current_user() -> String {
+    env_value("USER")
+        .or_else(|| env_value("USERNAME"))
+        .or_else(|| passwd_entry().map(|(name, _)| name))
+        .unwrap_or_default()
+}
+
+/// Home directory: `$HOME`, then `$USERPROFILE`, then the passwd entry of the
+/// effective uid. Empty when none of them has a value.
+fn home_dir() -> String {
+    env_value("HOME")
+        .or_else(|| env_value("USERPROFILE"))
+        .or_else(|| passwd_entry().map(|(_, dir)| dir))
+        .unwrap_or_default()
+}
+
 pub fn module() -> Module {
     let mut m = Module::new("env");
     m.doc("Process environment and host identity");
@@ -38,36 +115,17 @@ pub fn module() -> Module {
         unsafe { std::env::remove_var(name) };
     });
     m.doc_next("Split a PATH-style list on the platform separator");
-    m.fn_("path_split", |value: &str| -> Vec<String> {
-        std::env::split_paths(value)
-            .map(|p| p.display().to_string())
-            .collect()
-    });
+    m.fn_("path_split", path_split);
     m.doc_next("Join paths into a PATH-style list with the platform separator");
-    m.fn_(
-        "path_join",
-        |parts: Vec<String>| -> Result<String, String> {
-            std::env::join_paths(parts.iter())
-                .map(|s| s.to_string_lossy().into_owned())
-                .map_err(|e| e.to_string())
-        },
-    );
+    m.fn_("path_join", path_join);
     m.doc_next("Hostname of this machine");
     m.fn_("hostname", || -> String {
         sysinfo::System::host_name().unwrap_or_default()
     });
     m.doc_next("Name of the current user");
-    m.fn_("current_user", || -> String {
-        std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_default()
-    });
+    m.fn_("current_user", current_user);
     m.doc_next("Home directory of the current user");
-    m.fn_("home_dir", || -> String {
-        std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_default()
-    });
+    m.fn_("home_dir", home_dir);
     m.doc_next("Whether the process runs elevated (root / Administrator)");
     m.fn_("is_elevated", is_elevated_impl);
     m
@@ -153,6 +211,17 @@ mod tests {
         );
         assert_eq!(user, want_user, "current_user with USER=\"\"");
         assert_eq!(home, want_home, "home_dir with HOME=\"\"");
+    }
+
+    #[test]
+    fn path_list_round_trip() {
+        let parts = vec![
+            "/usr/local/bin".to_string(),
+            "/opt/with space".to_string(),
+            "relative/dir".to_string(),
+        ];
+        let joined = super::path_join(parts.clone()).expect("join");
+        assert_eq!(super::path_split(&joined), parts);
     }
 
     #[test]

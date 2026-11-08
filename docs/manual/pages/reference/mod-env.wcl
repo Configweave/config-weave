@@ -70,7 +70,7 @@ env::home_dir() -> string
 SRC
   }
 
-  p "The name of the user running the process, and that user's home directory."
+  p "The name of the user running the process, and that user's home directory. Each value comes from `USER` or `USERNAME`, and `HOME` or `USERPROFILE`, when set and not empty. On Unix, when none is set, the passwd entry of the effective user gives it. On Windows, no passwd fallback exists: the value is empty."
 
   h2 "is_elevated"
 
