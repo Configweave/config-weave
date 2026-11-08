@@ -57,8 +57,6 @@ pub fn module() -> Module {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Published vectors: "abc" for SHA-256 and SHA-512 is the NIST FIPS 180-2
     // example (Appendix B.1 and C.1); "abc" and "" for MD5 are the RFC 1321
     // test suite (appendix A.5).
