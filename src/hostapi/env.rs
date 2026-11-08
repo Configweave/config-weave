@@ -30,15 +30,65 @@ fn path_join(parts: Vec<String>) -> Result<String, String> {
 }
 
 /// An environment variable, or None when it is unset or empty.
+fn env_value(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+/// The name and home directory of the effective user, from the passwd
+/// database. Unix only.
+#[cfg(unix)]
+fn passwd_entry() -> Option<(String, String)> {
+    use std::ffi::CStr;
+
+    // Safety: getpwuid_r writes only into `pwd` and `buf`, which live for the
+    // whole call. The strings read from `pwd` are copied before return.
+    unsafe {
+        let uid = libc::geteuid();
+        let mut buf = vec![0u8; 1024];
+        loop {
+            let mut pwd: libc::passwd = std::mem::zeroed();
+            let mut result: *mut libc::passwd = std::ptr::null_mut();
+            let rc = libc::getpwuid_r(
+                uid,
+                &mut pwd,
+                buf.as_mut_ptr() as *mut libc::c_char,
+                buf.len(),
+                &mut result,
+            );
+            if rc == libc::ERANGE && buf.len() < (1 << 20) {
+                buf.resize(buf.len() * 2, 0);
+                continue;
+            }
+            if rc != 0 || result.is_null() {
+                return None;
+            }
+            let name = CStr::from_ptr(pwd.pw_name).to_string_lossy().into_owned();
+            let dir = CStr::from_ptr(pwd.pw_dir).to_string_lossy().into_owned();
+            return Some((name, dir));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn passwd_entry() -> Option<(String, String)> {
+    None
+}
+
+/// Name of the current user: `$USER`, then `$USERNAME`, then the passwd
+/// entry of the effective uid. Empty when none of them has a value.
 fn current_user() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
+    env_value("USER")
+        .or_else(|| env_value("USERNAME"))
+        .or_else(|| passwd_entry().map(|(name, _)| name))
         .unwrap_or_default()
 }
 
+/// Home directory: `$HOME`, then `$USERPROFILE`, then the passwd entry of the
+/// effective uid. Empty when none of them has a value.
 fn home_dir() -> String {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
+    env_value("HOME")
+        .or_else(|| env_value("USERPROFILE"))
+        .or_else(|| passwd_entry().map(|(_, dir)| dir))
         .unwrap_or_default()
 }
 
