@@ -29,19 +29,27 @@ fn terminal_shows(level: scriptlog::Level) -> bool {
 
 /// Install the global NDJSON subscriber when a log file is requested.
 pub fn init(log_file: Option<&Path>, log_level: &str) -> Result<LogGuard, Diag> {
-    let Some(path) = log_file else {
-        return Ok(LogGuard { _appender: None });
-    };
+    // Checked on every run, also without --log-file.
     let level: Level = log_level
         .parse()
         .map_err(|_| Diag::bare(format!("invalid --log-level '{log_level}'")))?;
+    let Some(path) = log_file else {
+        return Ok(LogGuard { _appender: None });
+    };
 
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
+        .and_then(|n| n.to_str())
         .ok_or_else(|| Diag::bare(format!("--log-file '{}' has no file name", path.display())))?;
-    let appender =
-        tracing_appender::rolling::never(dir.unwrap_or_else(|| Path::new(".")), file_name);
+    let appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::NEVER)
+        .filename_prefix(file_name)
+        .build(dir)
+        .map_err(|e| Diag::bare(format!("cannot open --log-file '{}': {e}", path.display())))?;
     let (writer, guard) = tracing_appender::non_blocking(appender);
 
     tracing_subscriber::fmt()
@@ -100,6 +108,19 @@ pub fn install_gatherer_sink(gatherer: &str) {
             clear_live_line();
             eprintln!("    [gather {gatherer}] {}: {msg}", level.as_str());
         }
-        tracing::info!(target: "script", gatherer = %gatherer, "{msg}");
+        match level {
+            scriptlog::Level::Debug => {
+                tracing::debug!(target: "script", gatherer = %gatherer, "{msg}");
+            }
+            scriptlog::Level::Info => {
+                tracing::info!(target: "script", gatherer = %gatherer, "{msg}");
+            }
+            scriptlog::Level::Warn => {
+                tracing::warn!(target: "script", gatherer = %gatherer, "{msg}");
+            }
+            scriptlog::Level::Error => {
+                tracing::error!(target: "script", gatherer = %gatherer, "{msg}");
+            }
+        }
     }));
 }
