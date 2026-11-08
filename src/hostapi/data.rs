@@ -11,10 +11,13 @@ use std::collections::HashMap;
 use wscript::Module;
 use wscript_std::DynValue;
 
+/// Parse INI text. A header that repeats adds its keys to the section
+/// already read, and a repeated key takes the later value. Comment lines
+/// (starting with `;` or `#`) are skipped.
 fn ini_parse(text: &str) -> Result<DynValue, String> {
-    let mut sections: HashMap<String, DynValue> = HashMap::new();
+    let mut sections: HashMap<String, HashMap<String, DynValue>> = HashMap::new();
     let mut current = String::new();
-    let mut current_map: HashMap<String, DynValue> = HashMap::new();
+    sections.entry(String::new()).or_default();
 
     for (lineno, raw) in text.lines().enumerate() {
         let line = raw.trim();
@@ -25,13 +28,10 @@ fn ini_parse(text: &str) -> Result<DynValue, String> {
             let Some(name) = name.strip_suffix(']') else {
                 return Err(format!("line {}: unterminated section header", lineno + 1));
             };
-            sections.insert(
-                std::mem::take(&mut current),
-                DynValue::Map(std::mem::take(&mut current_map)),
-            );
             current = name.trim().to_string();
+            sections.entry(current.clone()).or_default();
         } else if let Some((key, value)) = line.split_once('=') {
-            current_map.insert(
+            sections.entry(current.clone()).or_default().insert(
                 key.trim().to_string(),
                 DynValue::String(value.trim().to_string()),
             );
@@ -42,14 +42,16 @@ fn ini_parse(text: &str) -> Result<DynValue, String> {
             ));
         }
     }
-    sections.insert(current, DynValue::Map(current_map));
     // Drop an empty global section for cleanliness.
-    if let Some(DynValue::Map(m)) = sections.get("")
-        && m.is_empty()
-    {
+    if sections.get("").is_some_and(|m| m.is_empty()) {
         sections.remove("");
     }
-    Ok(DynValue::Map(sections))
+    Ok(DynValue::Map(
+        sections
+            .into_iter()
+            .map(|(name, entries)| (name, DynValue::Map(entries)))
+            .collect(),
+    ))
 }
 
 fn ini_serialize(value: &DynValue) -> Result<String, String> {
