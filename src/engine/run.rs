@@ -1155,6 +1155,9 @@ mod tests {
     #[test]
     fn guard_passes_results_through() {
         assert_eq!(guard(|| Ok::<_, String>(3)), Ok(3));
-        assert_eq!(guard(|| Err::<i32, _>("no".to_string())), Err("no".to_string()));
+        assert_eq!(
+            guard(|| Err::<i32, _>("no".to_string())),
+            Err("no".to_string())
+        );
     }
 }

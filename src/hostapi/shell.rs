@@ -506,10 +506,14 @@ mod tests {
     #[test]
     fn run_times_out_and_kills_the_child() {
         let started = Instant::now();
-        let err = run_captured("sleep", &["30".into()], &timeout_opts(DynValue::Int(1)))
-            .unwrap_err();
+        let err =
+            run_captured("sleep", &["30".into()], &timeout_opts(DynValue::Int(1))).unwrap_err();
         assert_eq!(err, "command timed out");
-        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     /// The child writes, then sleeps past the timeout. The lines it wrote
