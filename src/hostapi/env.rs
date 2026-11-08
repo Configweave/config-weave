@@ -173,7 +173,11 @@ mod tests {
             let at = stdout
                 .find(key)
                 .unwrap_or_else(|| panic!("no {key} in child output: {stdout}"));
-            stdout[at + key.len()..].lines().next().unwrap_or("").to_string()
+            stdout[at + key.len()..]
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string()
         };
         (field("CW_PROBE_USER="), field("CW_PROBE_HOME="))
     }
