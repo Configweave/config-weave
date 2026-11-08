@@ -11,10 +11,13 @@ use std::collections::HashMap;
 use wscript::Module;
 use wscript_std::DynValue;
 
+/// Parse INI text. A header that repeats adds its keys to the section
+/// already read, and a repeated key takes the later value. Comment lines
+/// (starting with `;` or `#`) are skipped.
 fn ini_parse(text: &str) -> Result<DynValue, String> {
-    let mut sections: HashMap<String, DynValue> = HashMap::new();
+    let mut sections: HashMap<String, HashMap<String, DynValue>> = HashMap::new();
     let mut current = String::new();
-    let mut current_map: HashMap<String, DynValue> = HashMap::new();
+    sections.entry(String::new()).or_default();
 
     for (lineno, raw) in text.lines().enumerate() {
         let line = raw.trim();
@@ -25,13 +28,10 @@ fn ini_parse(text: &str) -> Result<DynValue, String> {
             let Some(name) = name.strip_suffix(']') else {
                 return Err(format!("line {}: unterminated section header", lineno + 1));
             };
-            sections.insert(
-                std::mem::take(&mut current),
-                DynValue::Map(std::mem::take(&mut current_map)),
-            );
             current = name.trim().to_string();
+            sections.entry(current.clone()).or_default();
         } else if let Some((key, value)) = line.split_once('=') {
-            current_map.insert(
+            sections.entry(current.clone()).or_default().insert(
                 key.trim().to_string(),
                 DynValue::String(value.trim().to_string()),
             );
@@ -42,14 +42,16 @@ fn ini_parse(text: &str) -> Result<DynValue, String> {
             ));
         }
     }
-    sections.insert(current, DynValue::Map(current_map));
     // Drop an empty global section for cleanliness.
-    if let Some(DynValue::Map(m)) = sections.get("")
-        && m.is_empty()
-    {
+    if sections.get("").is_some_and(|m| m.is_empty()) {
         sections.remove("");
     }
-    Ok(DynValue::Map(sections))
+    Ok(DynValue::Map(
+        sections
+            .into_iter()
+            .map(|(name, entries)| (name, DynValue::Map(entries)))
+            .collect(),
+    ))
 }
 
 fn ini_serialize(value: &DynValue) -> Result<String, String> {
@@ -103,4 +105,118 @@ pub fn module() -> Module {
         |value: DynValue| -> Result<String, String> { ini_serialize(&value) },
     );
     m
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The string value of `key` in section `section`, or None.
+    fn get(v: &DynValue, section: &str, key: &str) -> Option<String> {
+        let DynValue::Map(sections) = v else {
+            return None;
+        };
+        let DynValue::Map(entries) = sections.get(section)? else {
+            return None;
+        };
+        match entries.get(key)? {
+            DynValue::String(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
+
+    fn section_names(v: &DynValue) -> Vec<String> {
+        let DynValue::Map(sections) = v else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = sections.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn repeated_section_merges_keys() {
+        let v = ini_parse("[a]\nx=1\n[b]\ny=2\n[a]\nz=3\n").unwrap();
+        assert_eq!(get(&v, "a", "x").as_deref(), Some("1"));
+        assert_eq!(get(&v, "a", "z").as_deref(), Some("3"));
+        assert_eq!(get(&v, "b", "y").as_deref(), Some("2"));
+        assert_eq!(section_names(&v), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn repeated_section_later_key_wins() {
+        let v = ini_parse("[a]\nx=1\n[a]\nx=2\n").unwrap();
+        assert_eq!(get(&v, "a", "x").as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn global_keys_go_under_empty_name() {
+        let v = ini_parse("g=1\n[a]\nx=2\n").unwrap();
+        assert_eq!(get(&v, "", "g").as_deref(), Some("1"));
+        assert_eq!(get(&v, "a", "x").as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn empty_global_section_is_dropped() {
+        let v = ini_parse("[a]\nx=2\n").unwrap();
+        assert_eq!(section_names(&v), vec!["a"]);
+    }
+
+    #[test]
+    fn comment_lines_are_skipped() {
+        let v = ini_parse("; top\n# also\n[a]\n; inside\nx=1\n  # indented\n").unwrap();
+        assert_eq!(section_names(&v), vec!["a"]);
+        assert_eq!(get(&v, "a", "x").as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn unterminated_header_names_its_line() {
+        let err = ini_parse("[a]\nx=1\n[b\ny=2\n").unwrap_err();
+        assert_eq!(err, "line 3: unterminated section header");
+    }
+
+    #[test]
+    fn line_without_equals_is_rejected_with_line() {
+        let err = ini_parse("[a]\njunk\n").unwrap_err();
+        assert_eq!(err, "line 2: expected key=value or [section]");
+    }
+
+    #[test]
+    fn serialize_non_string_scalars() {
+        let mut entries = HashMap::new();
+        entries.insert("n".to_string(), DynValue::Int(42));
+        entries.insert("f".to_string(), DynValue::Float(1.5));
+        entries.insert("b".to_string(), DynValue::Bool(true));
+        let mut sections = HashMap::new();
+        sections.insert("s".to_string(), DynValue::Map(entries));
+        let text = ini_serialize(&DynValue::Map(sections)).unwrap();
+        assert_eq!(text, "[s]\nb=true\nf=1.5\nn=42\n");
+    }
+
+    #[test]
+    fn serialize_rejects_nested_value() {
+        let mut inner = HashMap::new();
+        inner.insert("k".to_string(), DynValue::Map(HashMap::new()));
+        let mut sections = HashMap::new();
+        sections.insert("s".to_string(), DynValue::Map(inner));
+        assert!(ini_serialize(&DynValue::Map(sections)).is_err());
+    }
+
+    #[test]
+    fn serialize_writes_global_first_sorted_without_comments() {
+        let v = ini_parse("; c\nz=9\n[b]\ny=2\nx=1\n[a]\nq=0\n").unwrap();
+        assert_eq!(
+            ini_serialize(&v).unwrap(),
+            "z=9\n\n[a]\nq=0\n\n[b]\nx=1\ny=2\n"
+        );
+    }
+
+    #[test]
+    fn parse_serialize_parse_round_trip() {
+        let src = "g=1\n[a]\nx=2\n[b]\ny=hello world\n[a]\nz=3\n";
+        let first = ini_serialize(&ini_parse(src).unwrap()).unwrap();
+        let second = ini_serialize(&ini_parse(&first).unwrap()).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first, "g=1\n\n[a]\nx=2\nz=3\n\n[b]\ny=hello world\n");
+    }
 }

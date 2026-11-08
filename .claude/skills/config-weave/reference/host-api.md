@@ -413,12 +413,12 @@ never fails. This is the whole surface.
 
 `use data`. INI over `Value`. Cross-platform. The parser accepts `key=value`
 lines and `[section]` headers and rejects any other non-blank line with an
-error naming the line number. This is the whole surface.
+error naming the line number. Lines starting with `;` or `#` are comments and are skipped. A repeated `[section]` header adds to the section already read, and a repeated key takes the later value. This is the whole surface.
 
 | Function | Signature | Notes |
 |---|---|---|
-| `ini_parse` | `data::ini_parse(text: string) -> Result[Value, string]` | map of sections, each a map of keys; keys before the first header go under `""`, dropped when empty |
-| `ini_serialize` | `data::ini_serialize(sections: Value) -> Result[string, string]` | the value must be a map whose entries are maps |
+| `ini_parse` | `data::ini_parse(text: string) -> Result[Value, string]` | map of sections, each a map of keys; keys before the first header go under `""`, dropped when empty; a repeated header merges into the first |
+| `ini_serialize` | `data::ini_serialize(sections: Value) -> Result[string, string]` | the value must be a map whose entries are maps; writes `""` first, then sections and keys sorted, no comments |
 
 ## template
 
