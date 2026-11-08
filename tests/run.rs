@@ -905,7 +905,11 @@ fn two_identical_gather_invocations_run_the_gatherer_once() {
 
     let (code, stdout, stderr) = run_in(dir.path(), &["check", ".", "p"]);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    assert_eq!(log_count(&log, "gather"), 2, "a and b share one run, c is its own");
+    assert_eq!(
+        log_count(&log, "gather"),
+        2,
+        "a and b share one run, c is its own"
+    );
     assert_eq!(log_count(&log, "check"), 1, "the step checks once");
 }
 
@@ -937,12 +941,7 @@ fn a_failing_gatherer_fails_the_gather_phase_before_any_check() {
 fn a_step_concurrency_looser_than_its_resource_fails_validation() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("gather.log");
-    write_gather_log_playbook(
-        dir.path(),
-        &log,
-        "",
-        "concurrency = \"parallel\"",
-    );
+    write_gather_log_playbook(dir.path(), &log, "", "concurrency = \"parallel\"");
 
     let (code, stdout, stderr) = run_in(dir.path(), &["validate", "."]);
     assert_eq!(code, 2, "{stdout}{stderr}");
