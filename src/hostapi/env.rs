@@ -30,15 +30,65 @@ fn path_join(parts: Vec<String>) -> Result<String, String> {
 }
 
 /// An environment variable, or None when it is unset or empty.
+fn env_value(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
+/// The name and home directory of the effective user, from the passwd
+/// database. Unix only.
+#[cfg(unix)]
+fn passwd_entry() -> Option<(String, String)> {
+    use std::ffi::CStr;
+
+    // Safety: getpwuid_r writes only into `pwd` and `buf`, which live for the
+    // whole call. The strings read from `pwd` are copied before return.
+    unsafe {
+        let uid = libc::geteuid();
+        let mut buf = vec![0u8; 1024];
+        loop {
+            let mut pwd: libc::passwd = std::mem::zeroed();
+            let mut result: *mut libc::passwd = std::ptr::null_mut();
+            let rc = libc::getpwuid_r(
+                uid,
+                &mut pwd,
+                buf.as_mut_ptr() as *mut libc::c_char,
+                buf.len(),
+                &mut result,
+            );
+            if rc == libc::ERANGE && buf.len() < (1 << 20) {
+                buf.resize(buf.len() * 2, 0);
+                continue;
+            }
+            if rc != 0 || result.is_null() {
+                return None;
+            }
+            let name = CStr::from_ptr(pwd.pw_name).to_string_lossy().into_owned();
+            let dir = CStr::from_ptr(pwd.pw_dir).to_string_lossy().into_owned();
+            return Some((name, dir));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn passwd_entry() -> Option<(String, String)> {
+    None
+}
+
+/// Name of the current user: `$USER`, then `$USERNAME`, then the passwd
+/// entry of the effective uid. Empty when none of them has a value.
 fn current_user() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
+    env_value("USER")
+        .or_else(|| env_value("USERNAME"))
+        .or_else(|| passwd_entry().map(|(name, _)| name))
         .unwrap_or_default()
 }
 
+/// Home directory: `$HOME`, then `$USERPROFILE`, then the passwd entry of the
+/// effective uid. Empty when none of them has a value.
 fn home_dir() -> String {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
+    env_value("HOME")
+        .or_else(|| env_value("USERPROFILE"))
+        .or_else(|| passwd_entry().map(|(_, dir)| dir))
         .unwrap_or_default()
 }
 
@@ -113,13 +163,12 @@ mod tests {
         let out = cmd.output().expect("run child test binary");
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success(), "child failed: {stdout}");
-        // libtest prints "test <name> ... " before the child's own output,
-        // so the key is searched anywhere on the line.
         let field = |key: &str| -> String {
-            let at = stdout
-                .find(key)
-                .unwrap_or_else(|| panic!("no {key} in child output: {stdout}"));
-            stdout[at + key.len()..].lines().next().unwrap_or("").to_string()
+            stdout
+                .lines()
+                .find_map(|l| l.strip_prefix(key))
+                .unwrap_or_else(|| panic!("no {key} line in child output: {stdout}"))
+                .to_string()
         };
         (field("CW_PROBE_USER="), field("CW_PROBE_HOME="))
     }
