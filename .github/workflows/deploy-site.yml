@@ -27,10 +27,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install wcl CLI
-        # WCL is pre-release-only for now, so --pre. install.sh drops the
-        # binary in ~/.local/bin, which isn't on PATH by default — export it.
+        # Pinned to an exact pre-release (CFW-37). Unpinned `--pre` installs the
+        # newest wcl, and wcl 0.39+ rejects docs/pages/config-weave/landing-parts.wcl
+        # (null `eyebrow`); 0.42.1 needs glibc 2.43.
+        # Bump the pin only after `wcl wdoc build docs/main.wcl` passes with it.
+        # install.sh drops the binary in ~/.local/bin, which isn't on PATH by default — export it.
         run: |
-          curl -fsSL https://wcl.dev/install.sh | sh -s -- --pre
+          curl -fsSL https://wcl.dev/install.sh | sh -s -- --version 0.38.1-alpha
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build docs site
