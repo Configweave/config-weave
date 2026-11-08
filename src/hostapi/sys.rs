@@ -90,7 +90,10 @@ fn run(x: int) -> Result[string, string] {
     fn memory_is_positive_and_ordered() {
         let (total, available, _) = facts();
         assert!(available > 0, "available_memory was {available}");
-        assert!(total >= available, "total {total} is below available {available}");
+        assert!(
+            total >= available,
+            "total {total} is below available {available}"
+        );
     }
 
     #[test]

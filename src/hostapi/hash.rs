@@ -90,7 +90,10 @@ fn run(x: int) -> Result[string, string] {
 }
 "#,
         );
-        assert_eq!(out, format!("{SHA256_ABC} {SHA512_ABC} {MD5_ABC} {MD5_EMPTY}"));
+        assert_eq!(
+            out,
+            format!("{SHA256_ABC} {SHA512_ABC} {MD5_ABC} {MD5_EMPTY}")
+        );
     }
 
     #[test]
