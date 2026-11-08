@@ -62,11 +62,15 @@ fn normalize(path: &Path) -> PathBuf {
     for comp in path.components() {
         match comp {
             Component::CurDir => {}
-            Component::ParentDir => {
-                if !out.pop() {
-                    out.push("..");
+            Component::ParentDir => match out.components().next_back() {
+                // Pop only a normal component: `..` after `..` must stay.
+                Some(Component::Normal(_)) => {
+                    out.pop();
                 }
-            }
+                // At the root, `..` is dropped (`/..` is `/`).
+                Some(Component::RootDir) | Some(Component::Prefix(_)) => {}
+                _ => out.push(".."),
+            },
             other => out.push(other.as_os_str()),
         }
     }
