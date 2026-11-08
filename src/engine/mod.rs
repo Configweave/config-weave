@@ -16,6 +16,21 @@ use crate::model::Playbook;
 use status::{Mode, RunReport};
 use vars::VarStore;
 
+/// Why `execute` failed. A gather failure is named apart, so the CLI can
+/// say which phase stopped the run.
+pub enum ExecError {
+    /// A gatherer failed. No step ran.
+    Gather(Vec<Diag>),
+    /// Anything else: a missing play, a compile error, or a validation error.
+    Diags(Vec<Diag>),
+}
+
+impl From<Vec<Diag>> for ExecError {
+    fn from(diags: Vec<Diag>) -> Self {
+        ExecError::Diags(diags)
+    }
+}
+
 /// Validate, gather, run: the full §9 sequence for one play.
 pub fn execute(
     pb: &Playbook,
@@ -25,13 +40,14 @@ pub fn execute(
     jobs: Option<usize>,
     mut store: VarStore,
     events: events::EventSink,
-) -> Result<RunReport, Vec<Diag>> {
+) -> Result<RunReport, ExecError> {
     let Some(play) = pb.play(play_name) else {
         let names: Vec<&str> = pb.plays.iter().map(|p| p.name.as_str()).collect();
         return Err(vec![Diag::bare(format!(
             "no play named '{play_name}' (available: {})",
             names.join(", ")
-        ))]);
+        ))]
+        .into());
     };
 
     let ctx = crate::hostapi::context();
@@ -54,9 +70,9 @@ pub fn execute(
             .collect(),
     });
 
-    gather::run(pb, &scripts, &ctx, &mut store, &events)?;
+    gather::run(pb, &scripts, &ctx, &mut store, &events).map_err(ExecError::Gather)?;
 
-    run::run_play(
+    Ok(run::run_play(
         pb,
         play,
         &scripts,
@@ -68,7 +84,7 @@ pub fn execute(
             jobs: jobs.unwrap_or_else(run::default_jobs),
             events,
         },
-    )
+    )?)
 }
 
 /// The full validation pipeline (PRD §8) beyond what `model::load`

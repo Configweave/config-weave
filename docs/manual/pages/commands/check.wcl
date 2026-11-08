@@ -65,6 +65,10 @@ SRC
   h2 "Exit status"
 
   p <<'PROSE'
-0 when every step reported without error, whether or not any is NotConfigured. A NotConfigured step is a finding, not a failure, and that includes a wait step whose probe is not ready. 1 when any step's check returned Error, or a wait step with `fail_on_error = true` hit a probe error. 2 when validation failed or the play does not exist. `check` never returns 3: a RebootRequired result is reported as the step's status, but only `apply` turns it into an exit code.
+0 when every step reported without error, whether or not any is NotConfigured. A NotConfigured step is a finding, not a failure, and that includes a wait step whose probe is not ready. 1 when any step's check returned Error, or a wait step with `fail_on_error = true` hit a probe error. 2 when validation failed, the play does not exist, or a gatherer failed. A gatherer failure prints `gather phase failed with N error(s)` on stderr and runs no step check. `check` never returns 3: a RebootRequired result is reported as the step's status, but only `apply` turns it into an exit code.
+PROSE
+
+  p <<'PROSE'
+With `--json`, a run that exits 2 before the step phase prints nothing on stdout. That covers validation failures and gather failures. Read the diagnostics on stderr. A run that reaches the step phase prints one JSON object on stdout.
 PROSE
 }
