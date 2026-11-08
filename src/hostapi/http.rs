@@ -115,7 +115,11 @@ fn parse_opts(opts: &DynValue, download: bool) -> Result<Opts, String> {
 fn agent(opts: &Opts, download: bool) -> ureq::Agent {
     let mut config =
         ureq::Agent::config_builder().max_redirects(if opts.follow_redirects { 10 } else { 0 });
-    if let Some(t) = opts.timeout {
+    // ureq adds the timeout to the clock, which panics when it is too large.
+    // A deadline that far away is never reached: leave the timeout off.
+    if let Some(t) = opts.timeout
+        && std::time::Instant::now().checked_add(t).is_some()
+    {
         config = config.timeout_global(Some(t));
     }
     if download {
@@ -587,6 +591,22 @@ mod tests {
             header_of(req, "accept-encoding").as_deref(),
             Some("identity")
         );
+    }
+
+    /// A timeout too large to add to the clock means no deadline, not a
+    /// panic inside ureq.
+    #[test]
+    fn download_with_a_huge_timeout_runs_with_no_deadline() {
+        let body = content();
+        let b = body.clone();
+        let server = serve(move |_, _| full("200 OK", &[], &b));
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.bin");
+        let opts = Opts {
+            timeout: Some(Duration::from_secs(i64::MAX as u64)),
+            ..opts()
+        };
+        assert_eq!(fetch(&server, &dest, &opts).unwrap(), body.len() as u64);
     }
 
     #[test]
