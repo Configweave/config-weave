@@ -152,7 +152,11 @@ mod tests {
     /// the parent's minus `remove`, plus `set`. The parent env stays intact.
     fn probe(remove: &[&str], set: &[(&str, &str)]) -> (String, String) {
         let mut cmd = Command::new(std::env::current_exe().expect("test binary path"));
-        cmd.args(["env::tests::probe_identity", "--nocapture", "--test-threads=1"]);
+        cmd.args([
+            "env::tests::probe_identity",
+            "--nocapture",
+            "--test-threads=1",
+        ]);
         cmd.env(PROBE, "1");
         for name in remove {
             cmd.env_remove(name);
@@ -177,7 +181,11 @@ mod tests {
     /// so the test does not reuse the code under test.
     fn passwd_facts() -> (String, String) {
         let name = String::from_utf8(
-            Command::new("id").arg("-un").output().expect("run id").stdout,
+            Command::new("id")
+                .arg("-un")
+                .output()
+                .expect("run id")
+                .stdout,
         )
         .expect("utf8")
         .trim()
@@ -205,10 +213,7 @@ mod tests {
     #[test]
     fn empty_env_values_count_as_unset() {
         let (want_user, want_home) = passwd_facts();
-        let (user, home) = probe(
-            &["USERNAME", "USERPROFILE"],
-            &[("USER", ""), ("HOME", "")],
-        );
+        let (user, home) = probe(&["USERNAME", "USERPROFILE"], &[("USER", ""), ("HOME", "")]);
         assert_eq!(user, want_user, "current_user with USER=\"\"");
         assert_eq!(home, want_home, "home_dir with HOME=\"\"");
     }
