@@ -21,19 +21,9 @@ pub fn module() -> Module {
             .unwrap_or_default()
     });
     m.doc_next("Final component of a path");
-    m.fn_("filename", |p: &str| -> String {
-        Path::new(p)
-            .file_name()
-            .map(|x| x.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    });
+    m.fn_("filename", |p: &str| -> String { filename_of(p) });
     m.doc_next("Extension of the final component, without the dot");
-    m.fn_("extension", |p: &str| -> String {
-        Path::new(p)
-            .extension()
-            .map(|x| x.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    });
+    m.fn_("extension", |p: &str| -> String { extension_of(p) });
     m.doc_next("Lexically normalize a path (resolve `.` and `..`, no IO)");
     m.fn_("normalize", |p: &str| -> String {
         normalize(Path::new(p)).display().to_string()
@@ -53,16 +43,34 @@ pub fn module() -> Module {
     m
 }
 
+fn filename_of(p: &str) -> String {
+    Path::new(p)
+        .file_name()
+        .map(|x| x.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn extension_of(p: &str) -> String {
+    Path::new(p)
+        .extension()
+        .map(|x| x.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
         match comp {
             Component::CurDir => {}
-            Component::ParentDir => {
-                if !out.pop() {
-                    out.push("..");
+            Component::ParentDir => match out.components().next_back() {
+                // Pop only a normal component: `..` after `..` must stay.
+                Some(Component::Normal(_)) => {
+                    out.pop();
                 }
-            }
+                // At the root, `..` is dropped (`/..` is `/`).
+                Some(Component::RootDir) | Some(Component::Prefix(_)) => {}
+                _ => out.push(".."),
+            },
             other => out.push(other.as_os_str()),
         }
     }
@@ -70,4 +78,68 @@ fn normalize(path: &Path) -> PathBuf {
         out.push(".");
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn norm(p: &str) -> String {
+        normalize(Path::new(p)).display().to_string()
+    }
+
+    #[test]
+    fn normalize_keeps_leading_parent_dirs() {
+        assert_eq!(norm("../../a"), "../../a");
+        assert_eq!(norm("../.."), "../..");
+        assert_eq!(norm("../a/../../b"), "../../b");
+    }
+
+    #[test]
+    fn normalize_pops_normal_components_before_parent_dirs() {
+        assert_eq!(norm("a/../.."), "..");
+        assert_eq!(norm("a/b/../../c"), "c");
+        assert_eq!(norm("a/.."), ".");
+    }
+
+    #[test]
+    fn normalize_drops_parent_dirs_at_root() {
+        assert_eq!(norm("/.."), "/");
+        assert_eq!(norm("/../../a"), "/a");
+        assert_eq!(norm("/a/../../b"), "/b");
+    }
+
+    #[test]
+    fn normalize_resolves_current_dirs() {
+        assert_eq!(norm("/a/./b/../c"), "/a/c");
+        assert_eq!(norm("./a/./b"), "a/b");
+        assert_eq!(norm("a/b/"), "a/b");
+    }
+
+    #[test]
+    fn normalize_empty_is_dot() {
+        assert_eq!(norm(""), ".");
+        assert_eq!(norm("."), ".");
+        assert_eq!(norm("./."), ".");
+    }
+
+    #[test]
+    fn filename_edge_cases() {
+        assert_eq!(filename_of("a/b.txt"), "b.txt");
+        assert_eq!(filename_of("a/b/"), "b");
+        assert_eq!(filename_of(".hidden"), ".hidden");
+        assert_eq!(filename_of("a/.."), "");
+        assert_eq!(filename_of("/"), "");
+        assert_eq!(filename_of(""), "");
+    }
+
+    #[test]
+    fn extension_edge_cases() {
+        assert_eq!(extension_of("a/b.txt"), "txt");
+        assert_eq!(extension_of("a.tar.gz"), "gz");
+        assert_eq!(extension_of(".bashrc"), "");
+        assert_eq!(extension_of("noext"), "");
+        assert_eq!(extension_of("dir.d/file"), "");
+        assert_eq!(extension_of(""), "");
+    }
 }

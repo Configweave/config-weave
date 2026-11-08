@@ -29,6 +29,8 @@ SRC
 
   p "Parses INI text into a map of sections. Each section is a map of its keys. Keys that appear before the first section header are placed under the empty-string section, which is dropped when it is empty."
 
+  p "A section header that repeats adds its keys to the section already read. When a key appears twice, the later value wins. Lines that start with `;` or `#` (after leading spaces) are comments and are skipped; they are not kept."
+
   h2 "ini_serialize"
 
   code rust {
@@ -37,7 +39,7 @@ data::ini_serialize(sections: Value) -> Result[string, string]
 SRC
   }
 
-  p "Serializes a map of sections to INI text. The value must be a map whose entries are maps; anything else is an error."
+  p "Serializes a map of sections to INI text. The value must be a map whose entries are maps; anything else is an error. The output has the empty-string section first, then the named sections in sorted order. Keys in each section are sorted too. Comments are not written, so a parse and serialize run loses them and keeps the values."
 
   code rust {
     source = <<'SRC'
