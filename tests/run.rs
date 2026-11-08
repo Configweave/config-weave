@@ -1,8 +1,10 @@
 //! M2 gate tests: the check/apply/re-check lifecycle, all statuses, halt
 //! semantics, --continue-on-error, variable precedence, exit codes.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 fn bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_config-weave"))
@@ -19,6 +21,43 @@ fn run_in(dir: &Path, args: &[&str]) -> (i32, String, String) {
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
+}
+
+/// Like `run_in`, but kill the child after `limit`, so a hang fails the test
+/// instead of blocking the suite. A killed child reports code -2.
+fn run_in_within(dir: &Path, args: &[&str], limit: Duration) -> (i32, String, String) {
+    let mut child = Command::new(bin())
+        .args(args)
+        .current_dir(dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = child.stdout.take().unwrap();
+    let mut err = child.stderr.take().unwrap();
+    let out_t = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = out.read_to_string(&mut s);
+        s
+    });
+    let err_t = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = err.read_to_string(&mut s);
+        s
+    });
+    let deadline = Instant::now() + limit;
+    let code = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status.code().unwrap_or(-1);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break -2;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    (code, out_t.join().unwrap(), err_t.join().unwrap())
 }
 
 /// Build a self-contained playbook whose `probe.marker` resource is fully
@@ -86,6 +125,7 @@ fn write_lifecycle_playbook(root: &Path, plays: &str) {
         r#"use value
 use fs
 use json
+use shell
 
 fn p(params: Value, key: string) -> string {
     if let Some(v) = params.get(key) {
@@ -101,6 +141,17 @@ fn check(params: Value) -> Result[CheckResult, string] {
     if mode == "span" {
         if let Some(v) = params.get("span") { return Err("span=" + json::to_string(v)) }
         return Err("span is absent")
+    }
+    // A negative timeout must come back as an Err, not a panic.
+    if mode == "neg_timeout" {
+        shell::run("true", Value::Map(#{"timeout": Value::Float(-1.0)}))?
+        return Ok(CheckResult::AlreadyConfigured)
+    }
+    // A timeout this large overflows the deadline instant in the shell
+    // module: a real panic inside a host function.
+    if mode == "huge_timeout" {
+        shell::run("true", Value::Map(#{"timeout": Value::Int(9223372036854775807)}))?
+        return Ok(CheckResult::AlreadyConfigured)
     }
     if mode == "reboot" { return Ok(CheckResult::RebootRequired) }
     if mode == "already" { return Ok(CheckResult::AlreadyConfigured) }
@@ -387,6 +438,72 @@ fn error_halts_and_continue_on_error_continues() {
     assert_eq!(code, 1);
     assert!(stdout.contains("[         configured]"), "{stdout}");
     assert!(m2.exists());
+}
+
+/// Two steps: `bad` whose check runs `mode`, then `good` that converges.
+fn bad_then_good(root: &Path, mode: &str) -> PathBuf {
+    let marker = root.join("good-marker");
+    let plays = format!(
+        "  play \"p\" {{\n    description = \"probe\"\n{}{}  }}\n",
+        step(
+            "bad",
+            &format!("        path = \"/nonexistent\"\n        check = \"{mode}\""),
+            ""
+        ),
+        step("good", &format!("        path = \"{}\"", marker.display()), "")
+    );
+    write_lifecycle_playbook(root, &plays);
+    marker
+}
+
+#[test]
+fn a_negative_shell_timeout_fails_the_step_and_ends_the_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = bad_then_good(dir.path(), "neg_timeout");
+    let limit = Duration::from_secs(60);
+
+    let (code, stdout, stderr) =
+        run_in_within(dir.path(), &["apply", ".", "p", "--jobs", "1"], limit);
+    assert_eq!(code, 1, "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(stdout.contains("[              error]"), "{stdout}");
+    assert!(stdout.contains("'timeout'"), "{stdout}");
+    assert!(!stdout.contains("panicked"), "{stdout}");
+    assert!(stdout.contains("not run"), "{stdout}");
+    assert!(!marker.exists());
+
+    let (code, stdout, stderr) = run_in_within(
+        dir.path(),
+        &["apply", ".", "p", "--jobs", "1", "--continue-on-error"],
+        limit,
+    );
+    assert_eq!(code, 1, "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(stdout.contains("[         configured]"), "{stdout}");
+    assert!(marker.exists());
+}
+
+#[test]
+fn a_panic_in_a_host_function_fails_the_step_and_ends_the_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = bad_then_good(dir.path(), "huge_timeout");
+    let limit = Duration::from_secs(60);
+
+    let (code, stdout, stderr) =
+        run_in_within(dir.path(), &["apply", ".", "p", "--jobs", "1"], limit);
+    assert_eq!(code, 1, "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(stdout.contains("[              error]"), "{stdout}");
+    assert!(stdout.contains("script runtime panicked"), "{stdout}");
+    assert!(stdout.contains("not run"), "{stdout}");
+    assert!(!marker.exists());
+
+    // The worker that caught the panic keeps serving: `good` still runs.
+    let (code, stdout, stderr) = run_in_within(
+        dir.path(),
+        &["apply", ".", "p", "--jobs", "1", "--continue-on-error"],
+        limit,
+    );
+    assert_eq!(code, 1, "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(stdout.contains("[         configured]"), "{stdout}");
+    assert!(marker.exists());
 }
 
 #[test]
