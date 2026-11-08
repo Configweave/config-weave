@@ -54,3 +54,85 @@ pub fn module() -> Module {
     });
     m
 }
+
+#[cfg(test)]
+mod tests {
+    // Published vectors: "abc" for SHA-256 and SHA-512 is the NIST FIPS 180-2
+    // example (Appendix B.1 and C.1); "abc" and "" for MD5 are the RFC 1321
+    // test suite (appendix A.5).
+    const SHA256_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const SHA512_ABC: &str = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a\
+                              2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
+    const MD5_ABC: &str = "900150983cd24fb0d6963f7d28e17f72";
+    const MD5_EMPTY: &str = "d41d8cd98f00b204e9800998ecf8427e";
+
+    /// Run a script through the real hash module and return its string.
+    fn run_script(src: &str) -> String {
+        let ctx = crate::hostapi::context();
+        let unit = ctx.compile(src).unwrap_or_else(|e| panic!("compile: {e}"));
+        let mut vm = crate::hostapi::vm(&ctx);
+        let out: Result<String, String> = vm.call_unit(&unit, "run", (0i64,)).unwrap();
+        out.unwrap_or_else(|e| panic!("script error: {e}"))
+    }
+
+    #[test]
+    fn string_digests_match_published_vectors() {
+        let out = run_script(
+            r#"
+use hash
+
+fn run(x: int) -> Result[string, string] {
+    let a = hash::sha256("abc")
+    let b = hash::sha512("abc")
+    let c = hash::md5("abc")
+    let d = hash::md5("")
+    Ok("{a} {b} {c} {d}")
+}
+"#,
+        );
+        assert_eq!(
+            out,
+            format!("{SHA256_ABC} {SHA512_ABC} {MD5_ABC} {MD5_EMPTY}")
+        );
+    }
+
+    #[test]
+    fn file_digests_match_published_vectors() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("abc.txt");
+        std::fs::write(&file, b"abc").unwrap();
+        let path = file.display().to_string().replace('\\', "/");
+        let src = r#"
+use hash
+
+fn run(x: int) -> Result[string, string] {
+    let a = hash::sha256_file("PATH")?
+    let b = hash::sha512_file("PATH")?
+    let c = hash::md5_file("PATH")?
+    Ok("{a} {b} {c}")
+}
+"#
+        .replace("PATH", &path);
+        let out = run_script(&src);
+        assert_eq!(out, format!("{SHA256_ABC} {SHA512_ABC} {MD5_ABC}"));
+    }
+
+    #[test]
+    fn file_digests_fail_on_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("missing.bin");
+        let missing = file.display().to_string().replace('\\', "/");
+        let src = r#"
+use hash
+
+fn run(x: int) -> Result[string, string] {
+    let a = match hash::sha256_file("PATH") { Ok(_) => "ok", Err(_) => "err" }
+    let b = match hash::sha512_file("PATH") { Ok(_) => "ok", Err(_) => "err" }
+    let c = match hash::md5_file("PATH") { Ok(_) => "ok", Err(_) => "err" }
+    Ok("{a} {b} {c}")
+}
+"#
+        .replace("PATH", &missing);
+        assert_eq!(run_script(&src), "err err err");
+    }
+}
