@@ -1019,34 +1019,54 @@ fn run_lifecycle(
     }
 }
 
+/// Run one script entry point and turn a panic in the VM or a host function
+/// into an `Err` (PRD §6: a panicking script is an Error). Without this a
+/// panic kills the worker before it sends `Done`, and the scheduler blocks in
+/// `recv` forever. Each call builds a fresh VM inside `f`, so no VM state
+/// outlives the panic.
+fn guard<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|payload| {
+        let msg = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_string());
+        Err(format!("script runtime panicked: {msg}"))
+    })
+}
+
 fn call_check(
     res: &CompiledResource,
     ctx: &Context,
     params: DynValue,
 ) -> Result<CheckResult, String> {
-    let mut vm = crate::hostapi::vm(ctx);
-    match res.check {
-        EntryKind::Plain => vm
-            .call_unit(&res.unit, "check", (params,))
-            .map_err(|e| e.to_string()),
-        EntryKind::Fallible => vm
-            .call_unit::<_, Result<CheckResult, String>>(&res.unit, "check", (params,))
-            .map_err(|e| e.to_string())
-            .and_then(|r| r),
-    }
+    guard(|| {
+        let mut vm = crate::hostapi::vm(ctx);
+        match res.check {
+            EntryKind::Plain => vm
+                .call_unit(&res.unit, "check", (params,))
+                .map_err(|e| e.to_string()),
+            EntryKind::Fallible => vm
+                .call_unit::<_, Result<CheckResult, String>>(&res.unit, "check", (params,))
+                .map_err(|e| e.to_string())
+                .and_then(|r| r),
+        }
+    })
 }
 
 fn call_ready(probe: &CompiledProbe, ctx: &Context, params: DynValue) -> Result<bool, String> {
-    let mut vm = crate::hostapi::vm(ctx);
-    match probe.ready {
-        EntryKind::Plain => vm
-            .call_unit(&probe.unit, "ready", (params,))
-            .map_err(|e| e.to_string()),
-        EntryKind::Fallible => vm
-            .call_unit::<_, Result<bool, String>>(&probe.unit, "ready", (params,))
-            .map_err(|e| e.to_string())
-            .and_then(|r| r),
-    }
+    guard(|| {
+        let mut vm = crate::hostapi::vm(ctx);
+        match probe.ready {
+            EntryKind::Plain => vm
+                .call_unit(&probe.unit, "ready", (params,))
+                .map_err(|e| e.to_string()),
+            EntryKind::Fallible => vm
+                .call_unit::<_, Result<bool, String>>(&probe.unit, "ready", (params,))
+                .map_err(|e| e.to_string())
+                .and_then(|r| r),
+        }
+    })
 }
 
 fn call_apply(
@@ -1054,16 +1074,18 @@ fn call_apply(
     ctx: &Context,
     params: DynValue,
 ) -> Result<ApplyResult, String> {
-    let mut vm = crate::hostapi::vm(ctx);
-    match res.apply {
-        EntryKind::Plain => vm
-            .call_unit(&res.unit, "apply", (params,))
-            .map_err(|e| e.to_string()),
-        EntryKind::Fallible => vm
-            .call_unit::<_, Result<ApplyResult, String>>(&res.unit, "apply", (params,))
-            .map_err(|e| e.to_string())
-            .and_then(|r| r),
-    }
+    guard(|| {
+        let mut vm = crate::hostapi::vm(ctx);
+        match res.apply {
+            EntryKind::Plain => vm
+                .call_unit(&res.unit, "apply", (params,))
+                .map_err(|e| e.to_string()),
+            EntryKind::Fallible => vm
+                .call_unit::<_, Result<ApplyResult, String>>(&res.unit, "apply", (params,))
+                .map_err(|e| e.to_string())
+                .and_then(|r| r),
+        }
+    })
 }
 
 /// Evaluate a block's `condition` field; absent means true.

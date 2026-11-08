@@ -42,11 +42,13 @@ fn parse_opts(opts: &DynValue) -> Result<Opts, String> {
                 match (k.as_str(), v) {
                     ("cwd", DynValue::String(s)) => out.cwd = Some(s.clone()),
                     ("stdin", DynValue::String(s)) => out.stdin = Some(s.clone()),
-                    ("timeout", DynValue::Int(secs)) => {
-                        out.timeout = Some(Duration::from_secs(*secs as u64));
-                    }
-                    ("timeout", DynValue::Float(secs)) => {
-                        out.timeout = Some(Duration::from_secs_f64(*secs));
+                    ("timeout", v) => {
+                        out.timeout = Some(super::timeout_secs(v).ok_or_else(|| {
+                            format!(
+                                "shell option 'timeout' must be a non-negative number of \
+                                 seconds, got {v:?}"
+                            )
+                        })?);
                     }
                     ("env", DynValue::Map(vars)) => {
                         for (name, value) in vars {
